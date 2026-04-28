@@ -42,10 +42,18 @@ declare module 'hono' {
 
 export function createAuthChainMiddleware(deps: AuthMiddlewareDeps): MiddlewareHandler {
   const { env, localHookSecret } = deps;
-  const isSoloBypass = env.CLERK_SECRET_KEY === SOLO_BYPASS_CLERK_SENTINEL;
+  // Solo-bypass triggers when EITHER signal says solo:
+  //   - CLERK_SECRET_KEY is the literal sentinel, OR
+  //   - CONTEXTOS_MODE is 'solo' (the canonical mode signal)
+  // The MCP server's HTTP transport uses the same disjunction. Asymmetry
+  // here previously broke the out-of-the-box flow: `contextos init` writes
+  // .env with CONTEXTOS_MODE=solo + the sentinel, but `contextos start`
+  // doesn't dotenv-load the file, so neither var reached the daemon and
+  // every hook event 401'd.
+  const isSoloBypass = env.CLERK_SECRET_KEY === SOLO_BYPASS_CLERK_SENTINEL || env.CONTEXTOS_MODE === 'solo';
 
   return async function authChain(c: Context, next) {
-    // (1) solo-bypass — sentinel set; no header parsing required.
+    // (1) solo-bypass — sentinel set or mode=solo; no header parsing required.
     if (isSoloBypass) {
       c.set('identity', SOLO_IDENTITY);
       return next();

@@ -330,6 +330,48 @@ The full sequence for shipping a module is documented in
   `packages/db/package.json` and must be invoked via
   `pnpm --filter @contextos/db ...`.
 
+## Known platform-specific behaviour
+
+Behaviour that's correct by design but surprises operators on first
+contact. Don't chase these as bugs.
+
+### macOS launchd: `~/.contextos/pids/` stays empty
+
+`contextos start` selects `selectDaemonManager()` per platform. On macOS
+that's the **launchd** manager (`packages/cli/src/lib/daemon/launchd.ts`),
+which sources the PID from `launchctl print` rather than writing
+`<name>.pid` files into `~/.contextos/pids/`. So:
+
+- A healthy macOS install has the daemons running but `~/.contextos/pids/`
+  is **empty**. That's not a missed write — that's launchd's design.
+- `contextos doctor` check 11 (Hooks Bridge healthz) is **PID-aware via
+  the active manager**: on macOS it asks `launchctl` for liveness; on
+  Linux/Docker the **fallback manager** writes `<name>.pid` and check 11
+  reads it directly. Same green/yellow/red surface, different sources.
+- The fallback PID-file path (`~/.contextos/pids/<name>.pid`) is the
+  contract for the fallback manager only — don't `cat` it on macOS.
+
+If you genuinely want to crash a daemon on macOS to verify recovery,
+remember launchd's `KeepAlive` will respawn it within ~1s. Use
+`contextos stop` (which deregisters the unit) to observe doctor moving
+from green to yellow on checks 10/11 with `ECONNREFUSED — service not
+running`.
+
+### Pure-MCP runs don't generate `run_events`
+
+Running an agent that calls **only** the MCP server (no Claude Code or
+Cursor hooks firing at the bridge) populates `runs`, `policy_decisions`,
+`decisions`, and `context_packs` — but **not** `run_events`. The
+`run_events` table is written by `apps/hooks-bridge/src/handlers/post-tool-use.ts`
+on `PostToolUse` hook ingress; the MCP server itself never inserts there.
+
+Practical consequence: doctor check 7 (the F8 invariant — `run_events.run_id
+NOT NULL when session has runs row`) is **vacuously green** when no hooks
+have fired. To exercise it non-vacuously, drive the audit chain through
+the bridge — either run an interactive Claude Code session or POST hook
+payloads to `http://127.0.0.1:<HOOKS_BRIDGE_PORT>/v1/hooks/claude-code`
+and watch `run_events` populate.
+
 ## Pointers
 
 - Canonical architecture — `system-architecture.md`

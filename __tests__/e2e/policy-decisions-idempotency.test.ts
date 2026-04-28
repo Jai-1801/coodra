@@ -61,7 +61,32 @@ afterAll(async () => {
   await h.pg.close();
 }, 60_000);
 
-describe('e2e — policy_decisions idempotency under concurrent retries', () => {
+// TODO(post-M04): rewrite this scenario without booting the binary, OR
+// re-introduce a binary-level cloud handle once team-mode is reachable
+// end-to-end (post-Module 04 per `08-implementation-order.md`).
+//
+// The scenario originally booted the mcp-server binary against a real
+// Postgres container to exercise cross-connection ON CONFLICT DO NOTHING
+// semantics. M03 S4 removed `CONTEXTOS_DB_OVERRIDE_MODE` and made the
+// binary SQLite-only — `apps/mcp-server/src/lib/db.ts::createDbClient`
+// unconditionally calls `createDb({ kind: 'local' })`. The
+// `openPostgresHandle()` helper still tries `createDbClient({ mode: 'team',
+// postgres: ... })`, then throws "expected postgres handle" at
+// beforeAll because `kind` is always 'sqlite'.
+//
+// `essentialsforclaude/04-when-in-doubt.md` §4.5 codifies this: the
+// cloud-write path lives only in `@contextos/db::createDb({ kind:
+// 'cloud' })` and is exercised through the package's own integration
+// tests. The rule was added precisely to stop authors writing tests
+// that boot the binary against Postgres.
+//
+// Flagged broken in M03.1 S2 (`replace 7 setImmediate audit dispatches
+// with scheduleDurableWrite`). Confirmed broken pre-M03.1 — not a
+// regression. Skipped here so main stays green; lift the skip and
+// retarget either at the @contextos/db package level (closer to the
+// actual ON CONFLICT semantics) or once Module 04 brings team-mode
+// boot back online.
+describe.skip('e2e — policy_decisions idempotency under concurrent retries (skipped: SQLite-only binary post-M03 S4)', () => {
   it('10 concurrent check_policy calls with same (sessionId, toolName, eventType) → exactly 1 row + identical responses', async () => {
     const sessionId = 'sess_e2e_idem';
     const toolName = 'Write';

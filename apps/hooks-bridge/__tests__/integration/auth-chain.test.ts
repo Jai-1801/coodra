@@ -42,6 +42,23 @@ describe('auth chain on POST /v1/hooks/{agent}', () => {
     expect(res.status).toBe(200);
   });
 
+  it('(1b) solo-bypass — CONTEXTOS_MODE=solo with no sentinel still bypasses (matches MCP server semantics)', async () => {
+    // Regression guard: before the fix, the bridge required the literal
+    // CLERK_SECRET_KEY sentinel for solo-bypass while the MCP server also
+    // accepted CONTEXTOS_MODE=solo. Out-of-the-box, `contextos start` does
+    // not forward .env into the daemon, so CLERK_SECRET_KEY was undefined —
+    // bridge 401'd every hook in solo mode. This test pins the disjunction.
+    const { hono } = buildApp({
+      env: { CONTEXTOS_MODE: 'solo' } as AuthEnv,
+    });
+    const res = await hono.request('/v1/hooks/claude-code', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: STUB_BODY,
+    });
+    expect(res.status).toBe(200);
+  });
+
   it('(2) X-Local-Hook-Secret matches → request proceeds', async () => {
     const secret = 'a'.repeat(32);
     const { hono } = buildApp({ env: makeEnv(), localHookSecret: secret });

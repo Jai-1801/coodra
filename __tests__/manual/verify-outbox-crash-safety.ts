@@ -117,21 +117,16 @@ async function firePreToolUse(sessionId: string, toolUseId: string): Promise<voi
 function countPolicyDecisions(home: string, sessionId: string): number {
   const out = execFileSync(
     'sqlite3',
-    [
-      `${home}/data.db`,
-      `SELECT COUNT(*) FROM policy_decisions WHERE session_id='${sessionId}';`,
-    ],
+    [`${home}/data.db`, `SELECT COUNT(*) FROM policy_decisions WHERE session_id='${sessionId}';`],
     { encoding: 'utf8' },
   ).trim();
   return Number(out);
 }
 
 function pendingJobsCount(home: string): number {
-  const out = execFileSync(
-    'sqlite3',
-    [`${home}/data.db`, `SELECT COUNT(*) FROM pending_jobs;`],
-    { encoding: 'utf8' },
-  ).trim();
+  const out = execFileSync('sqlite3', [`${home}/data.db`, `SELECT COUNT(*) FROM pending_jobs;`], {
+    encoding: 'utf8',
+  }).trim();
   return Number(out);
 }
 

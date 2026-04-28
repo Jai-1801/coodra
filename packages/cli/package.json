@@ -58,6 +58,7 @@
     "@contextos/policy": "workspace:*",
     "@contextos/shared": "workspace:*",
     "commander": "^13.1.0",
+    "dotenv": "^17.4.2",
     "env-paths": "^3.0.0",
     "execa": "^9.6.0",
     "glob": "^11.0.4",

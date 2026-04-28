@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveServices, SERVICES } from '../../src/lib/services.js';
 
 describe('SERVICES descriptor', () => {
@@ -33,5 +36,153 @@ describe('resolveServices — log routing', () => {
     expect(mcp?.unit.stderrPath).toBe('/var/test/.contextos/logs/mcp-server.log');
     expect(bridge?.unit.stdoutPath).toBe('/var/test/.contextos/logs/hooks-bridge.log');
     expect(bridge?.unit.stderrPath).toBe('/var/test/.contextos/logs/hooks-bridge.log');
+  });
+});
+
+/**
+ * Regression: the daemon-spawn env was built from a hardcoded keylist that
+ * (a) ignored the `<CONTEXTOS_HOME>/.env` file `init` writes and
+ * (b) drifted from baseEnvSchema additions. Result: out-of-the-box solo
+ * worked only because `CONTEXTOS_MODE` defaults to 'solo' in the schema;
+ * team-mode setups silently fell back to solo. These tests pin the new
+ * pattern: home .env is read, every CONTEXTOS_xxx and CLERK_xxx plus
+ * LOCAL_HOOK_SECRET are forwarded, RESERVED daemon-internal keys can't be
+ * overridden.
+ */
+describe('resolveServices — env layering', () => {
+  let tmpHome: string;
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), 'contextos-services-test-'));
+    mkdirSync(join(tmpHome, 'logs'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('dotenv-loads <CONTEXTOS_HOME>/.env and forwards keys to the daemon unit env', async () => {
+    writeFileSync(
+      join(tmpHome, '.env'),
+      [
+        'CONTEXTOS_MODE=solo',
+        'CLERK_SECRET_KEY=sk_test_replace_me',
+        'CLERK_PUBLISHABLE_KEY=pk_test_replace_me',
+        'LOCAL_HOOK_SECRET=' + 'a'.repeat(40),
+        'CONTEXTOS_GRAPHIFY_ROOT=/var/graphify-override',
+      ].join('\n'),
+      'utf8',
+    );
+    const resolved = await resolveServices({ contextosHome: tmpHome, env: {} });
+    const mcp = resolved.find((s) => s.descriptor.name === 'mcp-server');
+    const bridge = resolved.find((s) => s.descriptor.name === 'hooks-bridge');
+
+    for (const unit of [mcp?.unit, bridge?.unit] as const) {
+      expect(unit?.env.CONTEXTOS_MODE).toBe('solo');
+      expect(unit?.env.CLERK_SECRET_KEY).toBe('sk_test_replace_me');
+      expect(unit?.env.CLERK_PUBLISHABLE_KEY).toBe('pk_test_replace_me');
+      expect(unit?.env.LOCAL_HOOK_SECRET).toBe('a'.repeat(40));
+      // Pattern-match: arbitrary CONTEXTOS_* additions flow through.
+      expect(unit?.env.CONTEXTOS_GRAPHIFY_ROOT).toBe('/var/graphify-override');
+    }
+  });
+
+  it('process.env wins over .env for matching keys (`MCP_SERVER_PORT=3200 contextos start` overrides file)', async () => {
+    writeFileSync(join(tmpHome, '.env'), 'CONTEXTOS_MODE=solo\nCLERK_SECRET_KEY=sk_test_from_file\n', 'utf8');
+    const resolved = await resolveServices({
+      contextosHome: tmpHome,
+      env: { CLERK_SECRET_KEY: 'sk_test_from_shell' },
+    });
+    expect(resolved[0]?.unit.env.CLERK_SECRET_KEY).toBe('sk_test_from_shell');
+    expect(resolved[0]?.unit.env.CONTEXTOS_MODE).toBe('solo');
+  });
+
+  it('RESERVED daemon-internal keys (CONTEXTOS_HOME, port, transport, host) cannot be overridden by .env', async () => {
+    writeFileSync(
+      join(tmpHome, '.env'),
+      [
+        'CONTEXTOS_HOME=/wrong/place',
+        'CONTEXTOS_LOG_DESTINATION=stdout',
+        'MCP_SERVER_TRANSPORT=stdio',
+        'MCP_SERVER_HOST=0.0.0.0',
+        'HOOKS_BRIDGE_HOST=0.0.0.0',
+      ].join('\n'),
+      'utf8',
+    );
+    const resolved = await resolveServices({ contextosHome: tmpHome, env: {} });
+    const mcp = resolved.find((s) => s.descriptor.name === 'mcp-server');
+    const bridge = resolved.find((s) => s.descriptor.name === 'hooks-bridge');
+    expect(mcp?.unit.env.CONTEXTOS_HOME).toBe(tmpHome);
+    expect(mcp?.unit.env.CONTEXTOS_LOG_DESTINATION).toBe('stderr');
+    expect(mcp?.unit.env.MCP_SERVER_TRANSPORT).toBe('http');
+    expect(mcp?.unit.env.MCP_SERVER_HOST).toBe('127.0.0.1');
+    expect(bridge?.unit.env.HOOKS_BRIDGE_HOST).toBe('127.0.0.1');
+  });
+
+  it('absent .env file is non-fatal — daemon still spawns with computed env', async () => {
+    // No .env written under tmpHome.
+    const resolved = await resolveServices({ contextosHome: tmpHome, env: {} });
+    const mcp = resolved.find((s) => s.descriptor.name === 'mcp-server');
+    expect(mcp?.unit.env.CONTEXTOS_HOME).toBe(tmpHome);
+    expect(mcp?.unit.env.CLERK_SECRET_KEY).toBeUndefined();
+  });
+
+  it('unrelated process.env keys are NOT forwarded (no shell-leak)', async () => {
+    const resolved = await resolveServices({
+      contextosHome: tmpHome,
+      env: { PATH: '/usr/bin', HOME: '/Users/x', AWS_SECRET_ACCESS_KEY: 'should-not-leak' },
+    });
+    const mcp = resolved.find((s) => s.descriptor.name === 'mcp-server');
+    expect(mcp?.unit.env.PATH).toBeUndefined();
+    expect(mcp?.unit.env.HOME).toBeUndefined();
+    expect(mcp?.unit.env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+  });
+});
+
+/**
+ * Regression: pre-fix, `resolveServices` walked up from `process.cwd()`
+ * only, looking for `pnpm-workspace.yaml`. So when an operator ran
+ * `contextos start` from a freshly-init'd project (which is what `init`
+ * literally tells them to do), the cwd-based walk hit `~` then `/` and
+ * failed with "Cannot locate the ContextOS repo root from the current
+ * directory" — directly contradicting init's "→ Run `contextos start`"
+ * next-step message. The fix tries `fileURLToPath(import.meta.url)` (the
+ * CLI's own install location, always inside the monorepo) BEFORE cwd.
+ */
+describe('resolveServices — repo-root lookup is cwd-independent', () => {
+  let tmpHome: string;
+  let tmpCwd: string;
+  let cwdSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), 'contextos-cwd-test-home-'));
+    mkdirSync(join(tmpHome, 'logs'), { recursive: true });
+    tmpCwd = mkdtempSync(join(tmpdir(), 'contextos-cwd-test-cwd-'));
+  });
+
+  afterEach(() => {
+    cwdSpy?.mockRestore();
+    cwdSpy = null;
+    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(tmpCwd, { recursive: true, force: true });
+  });
+
+  it('resolves repo root from the CLI install path when process.cwd() is outside any monorepo', async () => {
+    // Force cwd to a freshly-created tmp dir that has no pnpm-workspace.yaml
+    // anywhere up the tree — this is what a freshly-init'd project dir looks
+    // like to the daemon-spawn lookup.
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpCwd);
+
+    const resolved = await resolveServices({ contextosHome: tmpHome, env: {} });
+    const mcp = resolved.find((s) => s.descriptor.name === 'mcp-server');
+    const bridge = resolved.find((s) => s.descriptor.name === 'hooks-bridge');
+
+    // Both daemons must point at the apps/*/dist/index.js inside the real
+    // monorepo (the one the CLI was built from), not at tmpCwd.
+    expect(mcp?.entryPath).toMatch(/\/apps\/mcp-server\/dist\/index\.js$/);
+    expect(bridge?.entryPath).toMatch(/\/apps\/hooks-bridge\/dist\/index\.js$/);
+    expect(mcp?.entryPath.startsWith(tmpCwd)).toBe(false);
+    // workingDir is the resolved repo root — must not be tmpCwd.
+    expect(mcp?.unit.workingDir).not.toBe(tmpCwd);
   });
 });
