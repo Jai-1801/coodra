@@ -13,5 +13,9 @@ export type {
   OutboxDispatchOutcome,
   OutboxJob,
   OutboxQueueKind,
+  SyncLookup,
+  SyncTableName,
+  SyncToCloudPayloadV1,
 } from './types.js';
+export { AUDIT_QUEUE_KINDS } from './types.js';
 export { OutboxWorker, type OutboxWorkerDeps } from './worker.js';

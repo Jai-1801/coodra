@@ -4,6 +4,7 @@ import pc from 'picocolors';
 import { EXIT_OK, EXIT_USER_ACTION_REQUIRED, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosHome } from '../lib/contextos-home.js';
 import { openLocalDb } from '../lib/open-local-db.js';
+import { readPidStatus } from '../lib/pid-status.js';
 import { SERVICES } from '../lib/services.js';
 
 export interface StatusOptions {
@@ -44,8 +45,11 @@ export interface ProjectState {
 export interface ServiceState {
   readonly name: string;
   readonly displayName: string;
+  readonly kind: 'http' | 'worker';
   readonly state: 'running' | 'stopped' | 'unknown';
-  readonly port: number;
+  /** Null for worker services (sync-daemon). */
+  readonly port: number | null;
+  /** Empty string for worker services. */
   readonly url: string;
 }
 
@@ -72,7 +76,7 @@ export async function runStatusCommand(options: StatusOptions = {}, io: StatusIO
   const fetchImpl = options.fetchImpl ?? fetch;
 
   const project = await collectProjectState(cwd, contextosHome, env);
-  const services = await collectServiceStates(env, fetchImpl);
+  const services = await collectServiceStates(env, fetchImpl, contextosHome);
   const recent = await collectRecentState(contextosHome, project.projectId);
 
   const report: StatusReport = { project, services, recent, contextosHome };
@@ -102,25 +106,56 @@ async function collectProjectState(cwd: string, _contextosHome: string, env: Nod
   return { slug, registered: false, projectId: null, cwd, mode, notes };
 }
 
-async function collectServiceStates(env: NodeJS.ProcessEnv, fetchImpl: typeof fetch): Promise<ServiceState[]> {
+async function collectServiceStates(
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+  contextosHome: string,
+): Promise<ServiceState[]> {
   const mcpPort = parsePort(env.MCP_SERVER_PORT, 3100);
   const bridgePort = parsePort(env.HOOKS_BRIDGE_PORT, 3101);
+  const isTeamMode = env.CONTEXTOS_MODE === 'team';
 
   const states: ServiceState[] = [];
   for (const descriptor of SERVICES) {
-    const port = descriptor.name === 'mcp-server' ? mcpPort : bridgePort;
-    const url = descriptor.healthUrl(port);
-    let state: ServiceState['state'] = 'stopped';
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 1500);
-      const response = await fetchImpl(url, { signal: controller.signal });
-      clearTimeout(timeout);
-      state = response.ok ? 'running' : 'unknown';
-    } catch {
-      state = 'stopped';
+    if (descriptor.kind === 'worker' && descriptor.requiresTeamMode && !isTeamMode) {
+      // Don't surface workers that aren't applicable in solo mode.
+      continue;
     }
-    states.push({ name: descriptor.name, displayName: descriptor.displayName, state, port, url });
+    if (descriptor.kind === 'http') {
+      const port = descriptor.name === 'mcp-server' ? mcpPort : bridgePort;
+      const url = descriptor.healthUrl(port);
+      let state: ServiceState['state'] = 'stopped';
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 1500);
+        const response = await fetchImpl(url, { signal: controller.signal });
+        clearTimeout(timeout);
+        state = response.ok ? 'running' : 'unknown';
+      } catch {
+        state = 'stopped';
+      }
+      states.push({
+        name: descriptor.name,
+        displayName: descriptor.displayName,
+        kind: 'http',
+        state,
+        port,
+        url,
+      });
+    } else {
+      // Worker: PID-based aliveness check.
+      const pid = await readPidStatus(contextosHome, descriptor.name);
+      const state: ServiceState['state'] =
+        pid.state === 'alive' ? 'running' : pid.state === 'dead' ? 'unknown' : 'stopped';
+      states.push({
+        name: descriptor.name,
+        displayName: descriptor.displayName,
+        kind: 'worker',
+        state,
+        port: null,
+        url: '',
+      });
+    }
   }
   return states;
 }
@@ -213,8 +248,9 @@ function formatHumanReport(report: StatusReport): string {
   for (const service of report.services) {
     const glyph =
       service.state === 'running' ? pc.green('✓') : service.state === 'stopped' ? pc.red('✗') : pc.yellow('⚠');
+    const portCol = service.port !== null ? `:${service.port}` : '(worker)';
     lines.push(
-      `  ${glyph} ${service.displayName.padEnd(28)} ${service.state}  :${service.port}  ${pc.gray(service.url)}`,
+      `  ${glyph} ${service.displayName.padEnd(28)} ${service.state}  ${portCol.padEnd(8)}  ${pc.gray(service.url)}`,
     );
   }
   lines.push('');

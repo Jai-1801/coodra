@@ -10,7 +10,7 @@ import './bootstrap/ensure-stderr-logging.js';
 
 import { randomUUID } from 'node:crypto';
 
-import { OutboxWorker } from '@contextos/cli/lib/outbox';
+import { AUDIT_QUEUE_KINDS, OutboxWorker } from '@contextos/cli/lib/outbox';
 import { ensureGlobalProject, migrateSqlite } from '@contextos/db';
 import { createLogger } from '@contextos/shared';
 
@@ -132,6 +132,8 @@ async function main(): Promise<void> {
   const outboxWorker = new OutboxWorker({
     db: dbHandle,
     dispatchHandler: createMcpDispatchHandler({ db: dbHandle }),
+    // Module 04a OQ7: mcp-server worker only claims audit queues.
+    queueFilter: AUDIT_QUEUE_KINDS,
   });
   const runRecorder = createRunRecorder({ db: dbHandle, kick: () => outboxWorker.kick() });
   outboxWorker.start();

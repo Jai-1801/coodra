@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { type CloudMigrateIO, type CloudMigrateOptions, runCloudMigrateCommand } from './commands/cloud-migrate.js';
 import { type DoctorIO, type DoctorOptions, runDoctorCommand } from './commands/doctor.js';
 import { type InitIO, type InitOptions, runInitCommand } from './commands/init.js';
 import { runStartCommand, type StartIO, type StartOptions } from './commands/start.js';
@@ -32,6 +33,8 @@ interface BuildProgramOptions {
   readonly teamIO?: TeamCommandIO;
   readonly runTeamLogin?: (options: TeamLoginOptions, io?: TeamCommandIO) => Promise<unknown>;
   readonly runTeamLogout?: (io?: TeamCommandIO) => Promise<unknown>;
+  readonly cloudMigrateIO?: CloudMigrateIO;
+  readonly runCloudMigrate?: (options: CloudMigrateOptions, io?: CloudMigrateIO) => Promise<unknown>;
 }
 
 /**
@@ -73,9 +76,10 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
   const startRunner = options.runStart ?? runStartCommand;
   program
     .command('start')
-    .description('Start MCP Server + Hooks Bridge as background daemons.')
+    .description('Start MCP Server + Hooks Bridge (+ Sync Daemon in team mode) as background daemons.')
     .option('--no-mcp', 'Do not start the MCP server.')
     .option('--no-hooks', 'Do not start the Hooks Bridge.')
+    .option('--no-sync', 'Do not start the Sync Daemon (team-mode only; ignored in solo mode).')
     .option('--foreground', 'Run attached for debugging (does not register the daemon manager unit).')
     .action(async (opts: StartOptions) => {
       await startRunner(opts, options.startIO);
@@ -108,6 +112,20 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     .option('--timeout-ms <ms>', 'Per-check timeout in milliseconds (default 2000).')
     .action(async (opts: DoctorOptions) => {
       await doctorRunner(opts, options.doctorIO);
+    });
+
+  const cloudMigrateRunner = options.runCloudMigrate ?? runCloudMigrateCommand;
+  program
+    .command('cloud-migrate')
+    .description(
+      'Apply Drizzle Postgres migrations to the cloud DATABASE_URL (team-mode self-host). Idempotent. Refuses ' +
+        'to run if unknown tables contain data — see Module 04a OQ4.',
+    )
+    .option('--database-url <url>', 'Override the DATABASE_URL env var.')
+    .option('--dry-run', 'Run pre-flight checks only; do not apply migrations.')
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (opts: CloudMigrateOptions) => {
+      await cloudMigrateRunner(opts, options.cloudMigrateIO);
     });
 
   const team = program

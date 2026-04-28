@@ -17,20 +17,26 @@ describe('contextos --help (snapshot-locked surface)', () => {
       ContextOS CLI — install, configure, run, and diagnose ContextOS on your machine.
 
       Options:
-        -v, --version     Print the @contextos/cli version and exit.
-        -h, --help        Show help for a command.
+        -v, --version            Print the @contextos/cli version and exit.
+        -h, --help               Show help for a command.
 
       Commands:
-        init [options]    Initialise ContextOS in the current project (writes
-                          ~/.contextos/, .mcp.json, .contextos.json, .env).
-        start [options]   Start MCP Server + Hooks Bridge as background daemons.
-        stop [options]    Stop ContextOS daemons. Idempotent.
-        status [options]  Print unified project + service state for the current cwd.
-        doctor [options]  Run health checks (read-only). See spec §4.5 for the
-                          20-check registry.
-        team              Team-mode commands. Bodies land when team mode is reachable
-                          end-to-end (post-Module 04).
-        help [command]    display help for command
+        init [options]           Initialise ContextOS in the current project (writes
+                                 ~/.contextos/, .mcp.json, .contextos.json, .env).
+        start [options]          Start MCP Server + Hooks Bridge (+ Sync Daemon in
+                                 team mode) as background daemons.
+        stop [options]           Stop ContextOS daemons. Idempotent.
+        status [options]         Print unified project + service state for the current
+                                 cwd.
+        doctor [options]         Run health checks (read-only). See spec §4.5 for the
+                                 20-check registry.
+        cloud-migrate [options]  Apply Drizzle Postgres migrations to the cloud
+                                 DATABASE_URL (team-mode self-host). Idempotent.
+                                 Refuses to run if unknown tables contain data — see
+                                 Module 04a OQ4.
+        team                     Team-mode commands. Bodies land when team mode is
+                                 reachable end-to-end (post-Module 04).
+        help [command]           display help for command
       "
     `);
   });

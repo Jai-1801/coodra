@@ -163,6 +163,7 @@ describe('createSqliteDb + migrateSqlite on a file-backed DB', () => {
              WHERE type IN ('table')
                AND name NOT LIKE '__drizzle%'
                AND name NOT LIKE 'sqlite_%'
+               AND name NOT LIKE '\\_%' ESCAPE '\\'
                AND substr(name, 1, 18) <> 'context_packs_vec_'
              ORDER BY name`,
         )
@@ -197,6 +198,7 @@ describe('createSqliteDb + migrateSqlite on a file-backed DB', () => {
              WHERE type IN ('table')
                AND name NOT LIKE '__drizzle%'
                AND name NOT LIKE 'sqlite_%'
+               AND name NOT LIKE '\\_%' ESCAPE '\\'
                AND substr(name, 1, 18) <> 'context_packs_vec_'`,
         )
         .get() as { n: number };

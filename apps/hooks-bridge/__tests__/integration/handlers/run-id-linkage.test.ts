@@ -177,6 +177,9 @@ describe('F8 closure — run_events.run_id and policy_decisions.run_id are popul
     expect(runs[0]?.status).toBe('completed'); // Stop closed it.
     const runId = runs[0]?.id;
     expect(runId).toBeDefined();
+    // Module 04a finding #9: bridge auto-create-run path now emits the
+    // canonical 4-segment runId shape (matches MCP get_run_id output).
+    expect(runId).toMatch(/^run:[^:]+:[^:]+:[0-9a-f-]{36}$/);
 
     // (2) Every run_events row for this session has run_id === runId.
     const runEvents = await h.handle.db

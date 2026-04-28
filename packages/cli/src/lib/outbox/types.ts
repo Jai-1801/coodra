@@ -66,8 +66,50 @@ export type OutboxDispatchOutcome =
 export type OutboxDispatchHandler = (job: OutboxJob) => Promise<OutboxDispatchOutcome>;
 
 /**
- * `pending_jobs.queue` values minted by Module 03.1. Listed here so
- * a typo at any callsite is a compile-time error. New queues land
- * with the slice that introduces them — keep this list in sync.
+ * `pending_jobs.queue` values minted by Module 03.1 + Module 04a. Listed
+ * here so a typo at any callsite is a compile-time error. New queues
+ * land with the slice that introduces them — keep this list in sync.
+ *
+ * Module 04a S2 added `'sync_to_cloud'`. Bridge + mcp-server workers
+ * filter to the four audit queues; the sync-daemon worker (S3) filters
+ * to `'sync_to_cloud'`. Cross-pollination is prevented by `queueFilter`
+ * on each worker plus a runtime assertion in `OutboxWorker.#runOne`.
  */
-export type OutboxQueueKind = 'run_event' | 'session_open' | 'session_close' | 'policy_decision';
+export type OutboxQueueKind = 'run_event' | 'session_open' | 'session_close' | 'policy_decision' | 'sync_to_cloud';
+
+/**
+ * The four audit-write queue kinds. Bridge + mcp-server `OutboxWorker`
+ * instances pass this constant as their `queueFilter` so a stray
+ * `sync_to_cloud` row is never claimed by them.
+ */
+export const AUDIT_QUEUE_KINDS = [
+  'run_event',
+  'session_open',
+  'session_close',
+  'policy_decision',
+] as const satisfies ReadonlyArray<OutboxQueueKind>;
+
+/**
+ * Module 04a — paired sync-to-cloud job. Enqueued alongside each audit
+ * write at the M03.1 callsites when `CONTEXTOS_MODE=team`. The
+ * sync-daemon's dispatcher (Module 04a S3) reads the row from local
+ * SQLite by the lookup key and pushes it to cloud Postgres.
+ *
+ * Why the sync payload carries only the lookup key and not the full
+ * row contents: a row mutation between enqueue and dispatch is
+ * harmless when the daemon re-reads the canonical state. (In practice
+ * audit rows are append-only, so no mutation occurs — the lookup is
+ * just the natural identifier.)
+ */
+export type SyncLookup =
+  | { readonly kind: 'id'; readonly value: string }
+  | { readonly kind: 'idempotency_key'; readonly value: string }
+  | { readonly kind: 'project_session'; readonly projectId: string; readonly sessionId: string };
+
+export type SyncTableName = 'runs' | 'run_events' | 'policy_decisions' | 'decisions' | 'context_packs';
+
+export interface SyncToCloudPayloadV1 {
+  readonly v: 1;
+  readonly table: SyncTableName;
+  readonly lookup: SyncLookup;
+}

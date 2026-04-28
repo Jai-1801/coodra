@@ -5,23 +5,37 @@ import type { DaemonUnit } from './daemon/index.js';
 import { findRepoRoot } from './find-repo-root.js';
 import { loadHomeEnv } from './load-home-env.js';
 
-export type ServiceName = 'mcp-server' | 'hooks-bridge';
+export type ServiceName = 'mcp-server' | 'hooks-bridge' | 'sync-daemon';
 
-export interface ServiceDescriptor {
+/**
+ * Service descriptors are a discriminated union: HTTP services bind to
+ * a port and expose `/healthz`; worker services (sync-daemon, M04a)
+ * expose no port and are tracked via the daemon-manager's PID file.
+ */
+export interface HttpServiceDescriptor {
+  readonly kind: 'http';
   readonly name: ServiceName;
   readonly displayName: string;
-  /** Port the service binds to. */
   readonly port: number;
-  /** Path under each service binary's repo root, relative to repoRoot. */
-  readonly relativeEntry: string;
-  /** Health-check URL (uses port). */
-  readonly healthUrl: (port: number) => string;
-  /** Default port. */
   readonly defaultPort: number;
+  readonly relativeEntry: string;
+  readonly healthUrl: (port: number) => string;
 }
+
+export interface WorkerServiceDescriptor {
+  readonly kind: 'worker';
+  readonly name: ServiceName;
+  readonly displayName: string;
+  readonly relativeEntry: string;
+  /** Worker only launches when CONTEXTOS_MODE=team (DATABASE_URL set). */
+  readonly requiresTeamMode: true;
+}
+
+export type ServiceDescriptor = HttpServiceDescriptor | WorkerServiceDescriptor;
 
 export const SERVICES: readonly ServiceDescriptor[] = [
   {
+    kind: 'http',
     name: 'mcp-server',
     displayName: 'ContextOS MCP Server',
     port: 3100,
@@ -30,12 +44,20 @@ export const SERVICES: readonly ServiceDescriptor[] = [
     healthUrl: (port) => `http://127.0.0.1:${port}/healthz`,
   },
   {
+    kind: 'http',
     name: 'hooks-bridge',
     displayName: 'ContextOS Hooks Bridge',
     port: 3101,
     defaultPort: 3101,
     relativeEntry: 'apps/hooks-bridge/dist/index.js',
     healthUrl: (port) => `http://127.0.0.1:${port}/healthz`,
+  },
+  {
+    kind: 'worker',
+    name: 'sync-daemon',
+    displayName: 'ContextOS Sync Daemon',
+    relativeEntry: 'apps/sync-daemon/dist/index.js',
+    requiresTeamMode: true,
   },
 ];
 
@@ -47,7 +69,8 @@ export interface BuildServiceUnitOptions {
 export interface ResolvedService {
   readonly descriptor: ServiceDescriptor;
   readonly entryPath: string;
-  readonly port: number;
+  /** Present only for HTTP services. Workers report `null`. */
+  readonly port: number | null;
   readonly unit: DaemonUnit;
 }
 
@@ -91,8 +114,14 @@ export async function resolveServices(options: BuildServiceUnitOptions): Promise
   const bridgePort = parsePort(env.HOOKS_BRIDGE_PORT, 3101);
 
   const logsDir = resolveContextosLogsDir(options.contextosHome);
-  return SERVICES.map((descriptor) => {
-    const port = descriptor.name === 'mcp-server' ? mcpPort : bridgePort;
+  const isTeamMode = env.CONTEXTOS_MODE === 'team';
+  const resolved: ResolvedService[] = [];
+  for (const descriptor of SERVICES) {
+    // Module 04a: skip workers that require team mode when in solo. The
+    // sync-daemon has no purpose without DATABASE_URL.
+    if (descriptor.kind === 'worker' && descriptor.requiresTeamMode && !isTeamMode) continue;
+
+    const port = descriptor.kind === 'http' ? (descriptor.name === 'mcp-server' ? mcpPort : bridgePort) : null;
     const entryPath = resolve(repoRoot, descriptor.relativeEntry);
     const unitEnv = buildServiceEnv({ env, contextosHome: options.contextosHome, port, name: descriptor.name });
     // pino → stderr per CONTEXTOS_LOG_DESTINATION; both streams routed into
@@ -109,29 +138,22 @@ export async function resolveServices(options: BuildServiceUnitOptions): Promise
       stdoutPath,
       stderrPath,
     };
-    return { descriptor, entryPath, port, unit };
-  });
+    resolved.push({ descriptor, entryPath, port, unit });
+  }
+  return resolved;
 }
 
 function buildServiceEnv(args: {
   readonly env: NodeJS.ProcessEnv;
   readonly contextosHome: string;
-  readonly port: number;
+  readonly port: number | null;
   readonly name: ServiceName;
 }): Record<string, string> {
   const env: Record<string, string> = {
     CONTEXTOS_LOG_DESTINATION: 'stderr',
     CONTEXTOS_HOME: args.contextosHome,
   };
-  // Pattern-forward any operator-supplied secrets / config: every
-  // CONTEXTOS_*, every CLERK_*, plus LOCAL_HOOK_SECRET and DATABASE_URL.
-  // The pattern replaces an earlier hardcoded list that drifted from
-  // baseEnvSchema additions (e.g., CONTEXTOS_GRAPHIFY_ROOT, CONTEXTOS_CONTEXT_PACKS_ROOT)
-  // and silently dropped them on the way to the daemon.
-  // Never log values — they may be production secrets.
   const FORWARD_LITERAL = new Set(['LOCAL_HOOK_SECRET', 'DATABASE_URL']);
-  // Vars this function sets explicitly below — operators cannot override
-  // these via .env (they're computed per-service from the resolved port).
   const RESERVED = new Set([
     'CONTEXTOS_LOG_DESTINATION',
     'CONTEXTOS_HOME',
@@ -148,14 +170,17 @@ function buildServiceEnv(args: {
       env[key] = value;
     }
   }
-  if (args.name === 'mcp-server') {
+  if (args.name === 'mcp-server' && args.port !== null) {
     env.MCP_SERVER_PORT = String(args.port);
     env.MCP_SERVER_TRANSPORT = 'http';
     env.MCP_SERVER_HOST = '127.0.0.1';
-  } else {
+  } else if (args.name === 'hooks-bridge' && args.port !== null) {
     env.HOOKS_BRIDGE_PORT = String(args.port);
     env.HOOKS_BRIDGE_HOST = '127.0.0.1';
   }
+  // sync-daemon: no port-bound env. DATABASE_URL is forwarded via the
+  // FORWARD_LITERAL pattern above; the daemon's env validation (Zod)
+  // refuses to boot without it.
   return env;
 }
 

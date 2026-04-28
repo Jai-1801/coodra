@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type {
   PolicyDecisionPayloadV1,
   RunEventPayloadV1,
@@ -6,8 +6,9 @@ import type {
   SessionClosePayloadV1,
   SessionOpenPayloadV1,
 } from '@contextos/cli/lib/outbox';
-import { type DbHandle, GLOBAL_PROJECT_ID, scheduleDurableWrite } from '@contextos/db';
-import { createLogger } from '@contextos/shared';
+import { type DbHandle, GLOBAL_PROJECT_ID, scheduleAuditWriteWithSync } from '@contextos/db';
+import { buildPolicyDecisionIdempotencyKey } from '@contextos/policy';
+import { createLogger, generateRunKey } from '@contextos/shared';
 import type { HookEvent } from '@contextos/shared/hooks';
 
 /**
@@ -89,8 +90,6 @@ export interface CreateRunRecorderDeps {
    * on the next tick (or on a manual `worker.tick()`).
    */
   readonly kick?: () => void;
-  /** Test override for UUID minter — defaults to crypto.randomUUID. */
-  readonly mintId?: () => string;
 }
 
 export interface RunRecorder {
@@ -137,7 +136,6 @@ export interface RunRecorder {
 }
 
 export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
-  const mintId = deps.mintId ?? (() => randomUUID());
   const kick = deps.kick;
 
   /**
@@ -181,7 +179,10 @@ export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
       toolInput: clampToolInput(args.event.toolInput),
       outcome: null,
     };
-    void scheduleDurableWrite(deps.db, { queue: 'run_event', payload })
+    void scheduleAuditWriteWithSync(deps.db, {
+      audit: { queue: 'run_event', payload },
+      sync: { table: 'run_events', lookup: { kind: 'id', value: rowId } },
+    })
       .then(() => {
         kick?.();
       })
@@ -220,7 +221,12 @@ export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
       // row still lands. This preserves the audit trail for agents
       // operating in unregistered cwds.
       const effectiveProjectId = projectId ?? GLOBAL_PROJECT_ID;
-      const rowId = mintId();
+      // Module 04a finding #9 (2026-04-28): use the canonical
+      // `run:{projectId}:{sessionId}:{uuid}` shape so bridge-auto-created
+      // runs match the format MCP `get_run_id` produces. Pre-fix the
+      // bridge minted bare UUIDs that didn't carry their session
+      // affiliation in the id, breaking grep-based audit cross-refs.
+      const rowId = generateRunKey({ projectId: effectiveProjectId, sessionId: event.sessionId });
       const payload: SessionOpenPayloadV1 = {
         v: 1,
         rowId,
@@ -229,7 +235,10 @@ export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
         agentType: event.agentType,
         mode,
       };
-      void scheduleDurableWrite(deps.db, { queue: 'session_open', payload })
+      void scheduleAuditWriteWithSync(deps.db, {
+        audit: { queue: 'session_open', payload },
+        sync: { table: 'runs', lookup: { kind: 'id', value: rowId } },
+      })
         .then(() => {
           kick?.();
         })
@@ -254,7 +263,19 @@ export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
         projectId: effectiveProjectId,
         sessionId: event.sessionId,
       };
-      void scheduleDurableWrite(deps.db, { queue: 'session_close', payload })
+      // session_close updates the EXISTING runs row (status='completed',
+      // ended_at=now). The paired sync uses a project_session lookup so
+      // the daemon SELECTs the (now-updated) local runs row at dispatch
+      // time and pushes the fresh state to cloud. The cloud INSERT uses
+      // ON CONFLICT (project_id, session_id) DO UPDATE so a second push
+      // for the same run UPDATES status + ended_at without duplicating.
+      void scheduleAuditWriteWithSync(deps.db, {
+        audit: { queue: 'session_close', payload },
+        sync: {
+          table: 'runs',
+          lookup: { kind: 'project_session', projectId: effectiveProjectId, sessionId: event.sessionId },
+        },
+      })
         .then(() => {
           kick?.();
         })
@@ -295,7 +316,16 @@ export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
         matchedRuleId,
         reason,
       };
-      void scheduleDurableWrite(deps.db, { queue: 'policy_decision', payload })
+      const idempotencyKey = buildPolicyDecisionIdempotencyKey({
+        sessionId: event.sessionId,
+        ...(event.turnId !== undefined ? { toolUseId: event.turnId } : {}),
+        toolName: event.toolName,
+        eventType: 'PreToolUse',
+      });
+      void scheduleAuditWriteWithSync(deps.db, {
+        audit: { queue: 'policy_decision', payload },
+        sync: { table: 'policy_decisions', lookup: { kind: 'idempotency_key', value: idempotencyKey } },
+      })
         .then(() => {
           kick?.();
         })

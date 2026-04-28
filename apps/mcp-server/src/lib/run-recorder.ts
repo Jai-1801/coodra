@@ -1,5 +1,5 @@
 import type { RunEventPayloadV1, RunIdResolution } from '@contextos/cli/lib/outbox';
-import { type DbHandle, scheduleDurableWrite } from '@contextos/db';
+import { type DbHandle, scheduleAuditWriteWithSync } from '@contextos/db';
 import { type Logger, ValidationError } from '@contextos/shared';
 
 import type { RunRecorder } from '../framework/tool-context.js';
@@ -96,7 +96,10 @@ export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
         outcome: args.decision ?? null,
       };
       try {
-        await scheduleDurableWrite(deps.db, { queue: 'run_event', payload: queuePayload });
+        await scheduleAuditWriteWithSync(deps.db, {
+          audit: { queue: 'run_event', payload: queuePayload },
+          sync: { table: 'run_events', lookup: { kind: 'id', value: eventId } },
+        });
         kick?.();
       } catch (err) {
         log.warn(

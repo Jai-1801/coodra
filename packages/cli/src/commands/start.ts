@@ -8,6 +8,7 @@ import { waitForHealth } from '../lib/wait-for-health.js';
 export interface StartOptions {
   readonly mcp?: boolean;
   readonly hooks?: boolean;
+  readonly sync?: boolean;
   readonly foreground?: boolean;
   readonly env?: NodeJS.ProcessEnv;
   readonly home?: string;
@@ -57,7 +58,9 @@ export async function runStartCommand(options: StartOptions = {}, io: StartIO = 
   }
 
   const skip = (name: string): boolean =>
-    (name === 'mcp-server' && options.mcp === false) || (name === 'hooks-bridge' && options.hooks === false);
+    (name === 'mcp-server' && options.mcp === false) ||
+    (name === 'hooks-bridge' && options.hooks === false) ||
+    (name === 'sync-daemon' && options.sync === false);
 
   const manager = await selectDaemonManager({ contextosHome });
   io.writeStdout(`${pc.gray(`Using ${manager.kind} daemon manager.`)}\n`);
@@ -77,17 +80,25 @@ export async function runStartCommand(options: StartOptions = {}, io: StartIO = 
       anyFailure = true;
       continue;
     }
-    const healthy = await waitForHealth({
-      url: service.descriptor.healthUrl(service.port),
-      timeoutMs: options.waitTimeoutMs ?? 10_000,
-    });
-    if (healthy) {
-      io.writeStdout(`${pc.green('✓')} ${service.descriptor.displayName} listening on :${service.port}\n`);
+    if (service.descriptor.kind === 'http' && service.port !== null) {
+      const healthy = await waitForHealth({
+        url: service.descriptor.healthUrl(service.port),
+        timeoutMs: options.waitTimeoutMs ?? 10_000,
+      });
+      if (healthy) {
+        io.writeStdout(`${pc.green('✓')} ${service.descriptor.displayName} listening on :${service.port}\n`);
+      } else {
+        io.writeStderr(
+          `${pc.red('✗')} ${service.descriptor.displayName} did not become healthy on :${service.port} within ${options.waitTimeoutMs ?? 10_000}ms\n`,
+        );
+        anyFailure = true;
+      }
     } else {
-      io.writeStderr(
-        `${pc.red('✗')} ${service.descriptor.displayName} did not become healthy on :${service.port} within ${options.waitTimeoutMs ?? 10_000}ms\n`,
-      );
-      anyFailure = true;
+      // Worker (sync-daemon): no /healthz to poll. The daemon manager's
+      // start() already wrote the PID file; trust that for now. The
+      // doctor's queue-depth checks (M03.1 21–23 + M04a 24–27 in S5)
+      // surface anything weirder.
+      io.writeStdout(`${pc.green('✓')} ${service.descriptor.displayName} started\n`);
     }
   }
 

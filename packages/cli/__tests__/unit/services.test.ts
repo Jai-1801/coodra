@@ -5,15 +5,48 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveServices, SERVICES } from '../../src/lib/services.js';
 
 describe('SERVICES descriptor', () => {
-  it('declares mcp-server + hooks-bridge with their default ports + healthz urls', () => {
+  it('declares mcp-server + hooks-bridge + sync-daemon (M04a S4)', () => {
     const names = SERVICES.map((s) => s.name);
-    expect(names).toEqual(['mcp-server', 'hooks-bridge']);
+    expect(names).toEqual(['mcp-server', 'hooks-bridge', 'sync-daemon']);
+
     const mcp = SERVICES.find((s) => s.name === 'mcp-server');
-    expect(mcp?.defaultPort).toBe(3100);
-    expect(mcp?.healthUrl(3100)).toBe('http://127.0.0.1:3100/healthz');
+    if (mcp?.kind !== 'http') throw new Error('mcp-server should be http kind');
+    expect(mcp.defaultPort).toBe(3100);
+    expect(mcp.healthUrl(3100)).toBe('http://127.0.0.1:3100/healthz');
+
     const bridge = SERVICES.find((s) => s.name === 'hooks-bridge');
-    expect(bridge?.defaultPort).toBe(3101);
-    expect(bridge?.healthUrl(3101)).toBe('http://127.0.0.1:3101/healthz');
+    if (bridge?.kind !== 'http') throw new Error('hooks-bridge should be http kind');
+    expect(bridge.defaultPort).toBe(3101);
+    expect(bridge.healthUrl(3101)).toBe('http://127.0.0.1:3101/healthz');
+
+    const sync = SERVICES.find((s) => s.name === 'sync-daemon');
+    if (sync?.kind !== 'worker') throw new Error('sync-daemon should be worker kind');
+    expect(sync.requiresTeamMode).toBe(true);
+    expect(sync.relativeEntry).toBe('apps/sync-daemon/dist/index.js');
+  });
+});
+
+describe('resolveServices — team-mode gating (M04a S4)', () => {
+  it('omits sync-daemon when CONTEXTOS_MODE is solo', async () => {
+    const resolved = await resolveServices({
+      contextosHome: '/var/test/.contextos',
+      env: { CONTEXTOS_MODE: 'solo' } as NodeJS.ProcessEnv,
+    });
+    const names = resolved.map((r) => r.descriptor.name);
+    expect(names).not.toContain('sync-daemon');
+    expect(names).toEqual(expect.arrayContaining(['mcp-server', 'hooks-bridge']));
+  });
+
+  it('includes sync-daemon when CONTEXTOS_MODE is team', async () => {
+    const resolved = await resolveServices({
+      contextosHome: '/var/test/.contextos',
+      env: { CONTEXTOS_MODE: 'team', DATABASE_URL: 'postgres://x:y@h/d' } as NodeJS.ProcessEnv,
+    });
+    const names = resolved.map((r) => r.descriptor.name);
+    expect(names).toContain('sync-daemon');
+    const sync = resolved.find((r) => r.descriptor.name === 'sync-daemon');
+    expect(sync?.port).toBeNull();
+    expect(sync?.unit.env.DATABASE_URL).toBe('postgres://x:y@h/d');
   });
 });
 

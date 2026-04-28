@@ -77,6 +77,18 @@ export interface OutboxWorkerDeps {
   readonly leaseMs?: number;
   /** Max attempts before a row is marked dead. Default: 6. */
   readonly maxAttempts?: number;
+  /**
+   * Restrict which `pending_jobs.queue` values this worker may claim.
+   * Module 04a OQ7 constraint: bridge + mcp-server workers pass
+   * `AUDIT_QUEUE_KINDS` so they never claim a `sync_to_cloud` row meant
+   * for the sync-daemon, and vice versa. Cross-pollination is also
+   * caught by a defense-in-depth runtime assertion in `#runOne` that
+   * marks any wrongly-leased row dead with a loud error log.
+   *
+   * When `undefined` the worker claims any row (legacy M03.1 behavior;
+   * no longer used in production but kept for tests).
+   */
+  readonly queueFilter?: ReadonlyArray<string>;
 }
 
 const TICK_MS_DEFAULT = 1_000;
@@ -97,6 +109,8 @@ export class OutboxWorker {
   readonly #tickMs: number;
   readonly #leaseMs: number;
   readonly #maxAttempts: number;
+  readonly #queueFilter: ReadonlyArray<string> | null;
+  readonly #queueFilterSet: ReadonlySet<string> | null;
   #timer: NodeJS.Timeout | null = null;
   #inFlight: Promise<void> | null = null;
   #stopped = false;
@@ -109,6 +123,16 @@ export class OutboxWorker {
     this.#tickMs = deps.tickMs ?? TICK_MS_DEFAULT;
     this.#leaseMs = deps.leaseMs ?? LEASE_MS_DEFAULT;
     this.#maxAttempts = deps.maxAttempts ?? MAX_ATTEMPTS_DEFAULT;
+    if (deps.queueFilter !== undefined) {
+      if (deps.queueFilter.length === 0) {
+        throw new Error('OutboxWorker: queueFilter must contain at least one queue kind when provided');
+      }
+      this.#queueFilter = [...deps.queueFilter];
+      this.#queueFilterSet = new Set(deps.queueFilter);
+    } else {
+      this.#queueFilter = null;
+      this.#queueFilterSet = null;
+    }
   }
 
   /** Begin the tick chain. Idempotent: a second `start()` is a no-op. */
@@ -197,6 +221,30 @@ export class OutboxWorker {
     }
     if (claimed === null) return;
 
+    // Defense-in-depth (Module 04a OQ7): the SQL claim already filters
+    // by queue when #queueFilterSet is non-null; a row that slips
+    // through is a programming bug or schema drift. Mark dead loudly
+    // so the row doesn't loop forever and the operator sees the
+    // mismatch in the doctor dead-letter check (M03.1 check 23).
+    if (this.#queueFilterSet !== null && !this.#queueFilterSet.has(claimed.queue)) {
+      const expected = this.#queueFilter?.join(',') ?? '<none>';
+      const errMsg = `wrong_queue_for_worker_filter: claimed queue='${claimed.queue}' not in filter [${expected}]`;
+      this.#log.error(
+        { event: 'outbox_wrong_queue_assertion', jobId: claimed.id, queue: claimed.queue, expected },
+        errMsg,
+      );
+      try {
+        await this.#markDead(claimed.id, errMsg);
+      } catch (deadErr) {
+        const deadMsg = deadErr instanceof Error ? deadErr.message : String(deadErr);
+        this.#log.error(
+          { event: 'outbox_mark_dead_failed', jobId: claimed.id, err: deadMsg },
+          'mark-dead threw after wrong-queue assertion',
+        );
+      }
+      return;
+    }
+
     let payload: unknown;
     try {
       payload = JSON.parse(claimed.payload);
@@ -275,30 +323,50 @@ export class OutboxWorker {
 
   async #claim(): Promise<ClaimedRow | null> {
     const now = this.#clock();
+    const queueFilter = this.#queueFilter;
     if (this.#db.kind === 'sqlite') {
       const nowSec = Math.floor(now / 1000);
       const leaseExpirySec = Math.floor((now - this.#leaseMs) / 1000);
       // SQLite serializes writes at the journal level; the atomic
       // UPDATE-with-LIMIT-1 statement guarantees only one of N
       // concurrent workers wins a given row.
+      const queueClause = queueFilter !== null ? `AND queue IN (${queueFilter.map(() => '?').join(',')})` : '';
       const stmt = this.#db.raw.prepare(
         `UPDATE pending_jobs
            SET status='picked', picked_at=?, attempts = attempts + 1
          WHERE id = (
            SELECT id FROM pending_jobs
-           WHERE (status='pending' AND run_after <= ?)
-              OR (status='picked' AND picked_at IS NOT NULL AND picked_at < ?)
+           WHERE ((status='pending' AND run_after <= ?)
+              OR (status='picked' AND picked_at IS NOT NULL AND picked_at < ?))
+              ${queueClause}
            ORDER BY run_after ASC
            LIMIT 1
          )
          RETURNING id, queue, payload, attempts`,
       );
-      const rows = stmt.all(nowSec, nowSec, leaseExpirySec) as ClaimedRow[];
+      const rows = stmt.all(nowSec, nowSec, leaseExpirySec, ...(queueFilter ?? [])) as ClaimedRow[];
       return rows[0] ?? null;
     }
     // postgres
     const nowDate = new Date(now);
     const leaseDeadline = new Date(now - this.#leaseMs);
+    if (queueFilter !== null) {
+      const rows = await this.#db.raw<ClaimedRow[]>`
+        UPDATE pending_jobs
+           SET status='picked', picked_at=${nowDate}, attempts = attempts + 1
+         WHERE id = (
+           SELECT id FROM pending_jobs
+           WHERE ((status='pending' AND run_after <= ${nowDate})
+              OR (status='picked' AND picked_at IS NOT NULL AND picked_at < ${leaseDeadline}))
+              AND queue = ANY(${queueFilter as unknown as string[]})
+           ORDER BY run_after ASC
+           LIMIT 1
+           FOR UPDATE SKIP LOCKED
+         )
+         RETURNING id, queue, payload, attempts
+      `;
+      return rows[0] ?? null;
+    }
     const rows = await this.#db.raw<ClaimedRow[]>`
       UPDATE pending_jobs
          SET status='picked', picked_at=${nowDate}, attempts = attempts + 1

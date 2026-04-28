@@ -36,6 +36,14 @@ export {
   resolveMigrationsFolder,
 } from './migrate.js';
 export {
+  type ScheduleAuditWriteWithSyncArgs,
+  type ScheduleAuditWriteWithSyncResult,
+  type SyncLookup,
+  type SyncSpec,
+  type SyncTableName,
+  scheduleAuditWriteWithSync,
+} from './schedule-audit-write-with-sync.js';
+export {
   type ScheduleDurableWriteArgs,
   type ScheduleDurableWriteResult,
   scheduleDurableWrite,

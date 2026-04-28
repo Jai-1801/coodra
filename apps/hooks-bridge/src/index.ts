@@ -3,7 +3,7 @@
 // import in the file.
 import './bootstrap/ensure-stderr-logging.js';
 
-import { OutboxWorker } from '@contextos/cli/lib/outbox';
+import { AUDIT_QUEUE_KINDS, OutboxWorker } from '@contextos/cli/lib/outbox';
 import { ensureGlobalProject, migrateSqlite } from '@contextos/db';
 import { createPolicyClient } from '@contextos/policy';
 import { createLogger } from '@contextos/shared';
@@ -74,6 +74,9 @@ async function main(): Promise<void> {
   const outboxWorker = new OutboxWorker({
     db: dbClient.handle,
     dispatchHandler: createBridgeDispatchHandler({ db: dbClient.handle }),
+    // Module 04a OQ7: bridge worker only claims audit queues. Stray
+    // `sync_to_cloud` rows are owned by the sync-daemon (M04a S3).
+    queueFilter: AUDIT_QUEUE_KINDS,
   });
   const runRecorder = createRunRecorder({
     db: dbClient.handle,

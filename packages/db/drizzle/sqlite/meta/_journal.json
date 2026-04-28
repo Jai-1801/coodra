@@ -36,6 +36,13 @@
       "when": 1777317745648,
       "tag": "0004_early_guardian",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1777405200000,
+      "tag": "0005_lonely_thanos",
+      "breakpoints": true
     }
   ]
 }

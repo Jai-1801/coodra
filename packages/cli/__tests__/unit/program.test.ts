@@ -14,15 +14,37 @@ describe('buildProgram — full surface (post-S8)', () => {
     exitSpy.mockRestore();
   });
 
-  it('registers all 7 subcommands (init, start, stop, status, doctor, team login, team logout)', () => {
+  it('registers all 8 subcommands (init, start, stop, status, doctor, cloud-migrate, team login, team logout)', () => {
     const program = buildProgram();
     const top = program.commands.map((c) => c.name()).sort();
-    expect(top).toEqual(['doctor', 'init', 'start', 'status', 'stop', 'team']);
+    expect(top).toEqual(['cloud-migrate', 'doctor', 'init', 'start', 'status', 'stop', 'team']);
 
     const team = program.commands.find((c) => c.name() === 'team');
     expect(team).toBeDefined();
     const sub = team?.commands.map((c) => c.name()).sort() ?? [];
     expect(sub).toEqual(['login', 'logout']);
+  });
+
+  it('wires `cloud-migrate` to the real runCloudMigrate handler (M04a S1) — passes flags through', async () => {
+    const calls: Array<unknown> = [];
+    const fakeRunCloudMigrate = async (opts: unknown) => {
+      calls.push(opts);
+      throw new Error('__exit__:0');
+    };
+    const program = buildProgram({ runCloudMigrate: fakeRunCloudMigrate });
+    await expect(
+      program.parseAsync([
+        'node',
+        'contextos',
+        'cloud-migrate',
+        '--database-url',
+        'postgres://u:p@h/db',
+        '--dry-run',
+        '--json',
+      ]),
+    ).rejects.toThrow('__exit__:0');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ databaseUrl: 'postgres://u:p@h/db', dryRun: true, json: true });
   });
 
   it('wires `doctor` to the real runDoctor handler (S3 wiring)', async () => {

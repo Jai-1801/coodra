@@ -1,48 +1,80 @@
-# Current Session — 2026-04-28 (Module 03.1 Durable Audit Outbox)
+# Current Session — 2026-04-28 (Module 04a Sync Daemon + Self-Host Packaging)
 
 ## Goal
 
-Build Module 03.1 (Durable Audit Outbox) end-to-end on `feat/03.1-durable-outbox`. Six slices S0 → S6 per `docs/feature-packs/03.1-durable-outbox/implementation.md`, one commit each, M03/M08a cadence (test/fix/document inline, no separate verification report). Land a context pack at S6 and re-call `contextos__save_context_pack`.
+Build Module 04a (Sync Daemon + Self-Host Packaging) end-to-end on `feat/04a-sync-daemon`. Eight slices S0 → S8 per `docs/feature-packs/04a-sync-daemon/implementation.md`, one commit each, M03.1 cadence (test/fix/document inline, no separate verification report). Land a context pack at S8 and re-call `contextos__save_context_pack`.
 
-The single load-bearing AC: SIGTERM (or kill -9) mid-PreToolUse with a queued audit write must result in the policy_decisions row landing AFTER restart, not being lost.
+The single load-bearing AC: a write to local SQLite must appear in cloud Postgres within the sync window (5–30s, OQ2-locked at 30s catchup poll), with idempotency holding under cloud unreachability + recovery.
 
 ## Context loaded
 
-- `docs/feature-packs/03.1-durable-outbox/{spec.md,implementation.md,techstack.md}` — kickoff triplet at HEAD `3a86ccb` post-OQ-sign-off.
-- `system-architecture.md` §3.4 (Outbox), §16 pattern 3 (Outbox), §4.3 (idempotency), §7 (fail-open).
-- `essentialsforclaude/11-adrs.md` — ADR-006 (BullMQ for cloud queues; explicitly NOT used for the audit outbox per OQ1).
-- Prior archived session: `context_memory/sessions/2026-04-27-m01-m02-m03-verification-and-closeout.md` and the previous current-session (M08a build-out and post-08a integration walk).
+- `docs/feature-packs/04a-sync-daemon/{spec.md,implementation.md,techstack.md}` — kickoff triplet at HEAD `734b6c2` post-OQ-sign-off (7 OQs answered with constraints).
+- `system-architecture.md` §1 (two-mode), §3.6 (cloud sync), §4.1/§4.2 (schema parity), §5 (eventual consistency), §13 (infra), §16 pattern 3 (Outbox).
+- `essentialsforclaude/11-adrs.md` — ADR-008 (cloud Postgres as the team-sync layer; this module brings it online).
+- Prior archived session: `context_memory/sessions/2026-04-27-m01-m02-m03-verification-and-closeout.md` and the previous current-session (M03.1 durable outbox).
 
 ## Last completed
 
-**Module 03.1 complete.** All 6 slices S0 → S6 landed on `feat/03.1-durable-outbox`. The 7 audit-write `setImmediate` callsites enumerated in OQ5 (5 in bridge run-recorder, 2 in mcp-server) are replaced with `scheduleDurableWrite`; both apps run an `OutboxWorker` that drains `pending_jobs` to its destination tables; lease serialization (30s default) covers the SIGTERM-mid-dispatch reclaim case; doctor checks 21/22/23 surface queue depth, oldest-pending age, and dead-letter count with the OQ3-spec thresholds; check 13 transitions from permanent-yellow placeholder to GREEN. The crash-safety harness `verify-outbox-crash-safety.ts` ran 3× consecutively with both SIGTERM and SIGKILL paths PASS.
+**Module 04a complete.** All 8 slices S0 → S8 landed on `feat/04a-sync-daemon`:
 
-5 OQ decisions locked at sign-off 2026-04-27:
-- OQ1 — same `pending_jobs` table on Postgres for cloud mode (NOT BullMQ-on-Redis)
-- OQ2 — each service owns its own drain worker, lease-serialized; explicit lease-edge regression test added in S1
-- OQ3 — retry curve 1s/5s/30s/5min/30min, 6 max attempts, single-table dead-letter; doctor escalation 0=green, 1–10=yellow, >10 OR any >1h=red (S4 implementation matches verbatim)
-- OQ4 — 30 second lease timeout
-- OQ5 — only audit-write callsites get the durable enqueue (inventory matched: 5 bridge + 2 mcp + 1 shim deletion = 7 + 1)
+- S0 `734b6c2` — feature-pack triplet
+- S1 `871cec0` — `contextos cloud-migrate` (idempotent + OQ4 pre-flight refusal)
+- S2 `5379f7b` — `scheduleAuditWriteWithSync` paired-enqueue + worker `queueFilter` (OQ7)
+- S3 `4ba37a0` — `apps/sync-daemon` package: dual-handle boot, dispatch handler, integration tests
+- S4 `c94883f` — `contextos start/stop/status` supervises sync-daemon as third managed process in team mode
+- S5 `4c7a62a` — doctor checks 24–27 (cloud reachability with time escalation, sync queue depth/lag/dead-letter); finding #4 (port-availability false-warn) closed
+- S6 `713cc06` — bridge auto-create-run uses `generateRunKey` for canonical 4-segment ids; migration 0005 backfills bare UUIDs (reversible via `_runid_backfill_0005` audit table); finding #9 closed
+- S7 `9d97da8` — Dockerfiles (4) + Compose stack + `.env.example` + `docs/deploy/self-host.md`; `cloud-migrate` image built and ran successfully against compose Postgres
+- S8 (this closeout) — `verify-sync-roundtrip.ts` harness: ALL PASS (1 runs canonical-id + 5 policy_decisions + 1 run_events landed in cloud within ~6s; disconnect-and-recover variant drained 5 backlog rows on daemon restart). Closeout pack at `docs/context-packs/2026-04-28-module-04a-sync-daemon.md`.
+
+7 OQ decisions locked at sign-off 2026-04-28:
+- OQ1 — one-way push for v1 (local→cloud)
+- OQ2 — 30-second catchup poll
+- OQ3 — GREEN reachable / YELLOW after 5min / RED after 1h cloud unreachability
+- OQ4 — separate `contextos cloud-migrate` CLI command WITH constraint: refuses if unknown tables contain rows
+- OQ5 — Docker Compose canonical, Railway/Fly.io brief mentions
+- OQ6 — doctor only for v1 (no /metrics)
+- OQ7 — reuse `pending_jobs` with `queue='sync_to_cloud'`, paired-job pattern WITH constraint: each worker filters by queue type AND fails loudly on cross-pollination
+
+Side-task constraints honoured:
+- Finding #4 close: port-availability checks suppress yellow when /healthz answers OK
+- Finding #9 close: bridge canonical 4-segment runIds + reversible migration 0005 with `_runid_backfill_0005` audit table
+
+## Verification at session end
+
+```bash
+pnpm exec turbo run typecheck lint test:unit                                        # all green
+DATABASE_URL='postgres://contextos:contextos_dev_password@localhost:5432/contextos' \
+  pnpm --filter @contextos/cli test:integration                                     # 6/6 (cloud-migrate)
+pnpm --filter @contextos/db test:integration                                        # 45/45
+pnpm --filter @contextos/hooks-bridge test:integration                              # 38/38
+pnpm --filter @contextos/mcp-server test:integration                                # 179/179
+DATABASE_URL='postgres://...' pnpm --filter @contextos/sync-daemon test:integration # 5/5
+pnpm test:e2e                                                                       # 32 passed (1 pre-existing skip)
+CONTEXTOS_MODE=solo pnpm exec tsx __tests__/manual/verify-outbox-crash-safety.ts   # ALL PASS (M03.1 untouched)
+pnpm exec tsx __tests__/manual/verify-f5-live.ts                                    # PASS
+DATABASE_URL='postgres://...' pnpm exec tsx __tests__/manual/verify-sync-roundtrip.ts  # ALL PASS (new M04a primary AC)
+```
 
 ## Next action
 
-**Squash-merge `feat/03.1-durable-outbox` to `main` after PR review** (M02/M03/M08a pattern). The closeout context pack is in `docs/context-packs/2026-04-28-module-03.1-durable-outbox.md` and has been re-saved via `contextos__save_context_pack`.
+**Squash-merge `feat/04a-sync-daemon` to `main` after PR review** (M02/M03/M03.1 pattern). After merge: re-run `verify-sync-roundtrip.ts` against the production cloud Postgres URL (Supabase or whichever you provision) to confirm the post-merge state across services. The harness is parameterized on `DATABASE_URL` so the same script works against compose pg today and Supabase tomorrow.
 
-Then start **Module 04 (Web App)** per `docs/feature-packs/04-web-app/spec.md`. Module 04's audit-trail surface reads from `runs`, `run_events`, `policy_decisions` populated by the durable outbox, and (if surfaced) from `pending_jobs WHERE status='dead'` for the dead-letter view.
-
-Module 04 entry point: `docs/feature-packs/04-web-app/spec.md`, then `docs/feature-packs/04-web-app/implementation.md`, then `apps/web/`.
-
-## Pre-existing finding (NOT in M03.1 scope)
-
-`__tests__/e2e/policy-decisions-idempotency.test.ts` is broken on `main` because it uses `createDbClient({ mode: 'team', postgres })` which has been SQLite-only since M03 S4 (`createDbClient` always passes `kind: 'local'`). Confirmed pre-existing during S2 by checking out main's source with my changes reverted — same failure. Flagged in the S2 commit message. Owner: a follow-up slice to either delete the test or rewrite it against testcontainers postgres directly.
+Then start **Module 04b (Web App)** per `docs/feature-packs/04b-web-app/spec.md` (to be authored). The Supabase memory at `~/.claude/projects/-Users-abishaikc-Coodra/memory/supabase-project.md` carries the project URL + publishable key + canonical `@supabase/ssr` boilerplate for that work.
 
 ## Log (append-only per PostToolUse)
 
-- [01:14] On `feat/03.1-durable-outbox` HEAD `3a86ccb` (M03.1 triplet committed). 5 OQ recommendations sign-off received from user. Beginning S0.
-- [01:25] S0 commit `f150082` — `feat(db): pending_jobs.{picked_at,failed_at,last_error} + scheduleDurableWrite helper`. Migration 0004 (sqlite + postgres). 6 sqlite integration tests + 1 postgres-migrate assertion (verified live against compose pgvector pg16). 39 db integration tests green. monorepo gates green.
-- [01:35] S1 commit `fea2d82` — `feat(cli): OutboxWorker — pickup/lease/dispatch/retry/give-up loop`. types.ts + backoff.ts + worker.ts + dispatcher landed in S2 only. 3 backoff + 11 worker unit tests including the 3 OQ2 lease-race tests (two-worker normal race, two-worker lease-edge race, 10-worker idempotency-storm). monorepo gates green (89 cli unit tests).
-- [01:50] S2 commit `108bb82` — `feat(bridge,mcp-server,db): replace 7 setImmediate audit dispatches with scheduleDurableWrite`. Created `packages/db/src/destinations.ts` (insertRunEvent/insertRun/closeRun) and `packages/cli/src/lib/outbox/dispatcher.ts` (canonical routing). Per-app dispatch factories in `apps/{hooks-bridge,mcp-server}/src/lib/outbox-dispatch.ts`. Replaced 4 schedule(...) calls (5 method paths) in bridge run-recorder; replaced setImmediate in mcp-server run-recorder + check-policy/handler.ts; deleted M02 drain shim from mcp-server/index.ts. 6 bridge integration tests + 2 mcp-server integration tests + 1 e2e test switched to `drainOutbox(handle)` worker-based drain. New `outbox-end-to-end.test.ts` (2 cases). Workspace plumbing: `@contextos/cli` adds `@contextos/policy` dep + exposes `./lib/outbox` exports map; both apps and repo-root package.json add `@contextos/cli` workspace dep. Pre-existing finding flagged: `policy-decisions-idempotency.test.ts` was already broken on main since M03 S4 (verified). Gates: 22 turbo tasks green; 37 bridge + 179 mcp-server integration tests green; 5/6 e2e files green.
-- [01:55] S3 commit `019dfdd` — `feat(bridge,mcp-server): wire OutboxWorker into service lifecycle`. Both `apps/{hooks-bridge,mcp-server}/src/index.ts` instantiate OutboxWorker after recorder, pass `kick: () => worker.kick()` through createRunRecorder, call worker.start() before serve, and await worker.stop() in the SIGTERM handler before DB close. Production drain path is end-to-end. Gates: 22 turbo tasks + 37 bridge integration + 179 mcp-server integration + 32 e2e (1 skipped pre-existing) all green.
-- [02:00] S4 commit `0c3a907` — `feat(cli): doctor checks 21–23 surface pending_jobs queue health; close M03.1 placeholder check 13`. Check 21 (depth: 0–10=green, 11–100=yellow, >100=red), check 22 (oldest age: ≤30s=green, ≤5min=yellow, >5min=red), check 23 (dead-letter per OQ3: 0=green, 1–10=yellow, >10 OR any >1h=red). Check 13 flips to GREEN with closure language. 3 new fixture tests for the threshold transitions. Gates: 22 turbo tasks green; 89 cli unit tests.
-- [02:10] S5 commit `d1fff2d` — `test(integration): verify-outbox-crash-safety.ts — SIGTERM + kill -9 mid-Pre, prove the audit row lands after restart`. Spawns bridge subprocess against tmp HOME, fires PreToolUse, then Path A (graceful SIGTERM → restart → poll for row) and Path B (SIGKILL → restart → poll for row). 3× consecutive PASS. verify-sigterm-drain.ts and verify-f5-live.ts re-run → PASS (no regression).
-- [02:15] S6 — closeout context pack `docs/context-packs/2026-04-28-module-03.1-durable-outbox.md` authored. current-session.md updated with M03.1 final state + Next action: Module 04 kickoff. Pack saved via `contextos__save_context_pack`.
+- [09:18] saved closeout pack `docs/context-packs/2026-04-28-module-04a-sync-daemon.md`
+- [09:18] re-ran M03.1 crash-safety + F5 harnesses — both PASS, no regression
+- [09:13] verify-sync-roundtrip.ts ALL PASS against compose pg (1 runs canonical-id + 5 policy_decisions + 1 run_events; disconnect/recover drained 5 backlog rows)
+- [09:11] S8 — verify-sync-roundtrip.ts authored
+- [09:08] S7 cloud-migrate image built + ran successfully against compose pg
+- [09:00] S7 — Dockerfiles + compose.yaml + self-host.md + .env.example
+- [08:55] S6 — bridge canonical 4-segment runIds via `generateRunKey`; migration 0005 (sqlite + postgres)
+- [08:50] S5 — doctor checks 24–27 + finding #4 (port-availability false-warn suppression on /healthz OK)
+- [08:45] S4 — sync-daemon as third managed process (services discriminated union; team-mode gating)
+- [08:35] S3 — sync-daemon scaffold (dispatch + boot + 5 integration tests against compose pg)
+- [08:25] S2 — paired sync_to_cloud enqueue + worker queueFilter + 9 new tests
+- [08:00] S1 — `contextos cloud-migrate` + 6 integration tests + program test wiring
+- [07:48] S0 — feature-pack triplet committed (`734b6c2`); 7 OQs answered with constraints
+- [07:30] git state intact (branch `main` @ `d7a3238`, identity Abishai <abishai95141@gmail.com>); branched `feat/04a-sync-daemon`

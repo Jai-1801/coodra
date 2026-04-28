@@ -372,3 +372,70 @@ describe('OutboxWorker — concurrent workers (OQ2 lease-race regression)', () =
     for (const h of handles) h.close();
   });
 });
+
+describe('OutboxWorker — queue filter (Module 04a OQ7)', () => {
+  it('only claims rows whose queue is in the filter', async () => {
+    const handle = await openMigrated();
+    const { handler, calls } = makeRecorder();
+    const worker = new OutboxWorker({
+      db: handle,
+      dispatchHandler: handler,
+      queueFilter: ['run_event', 'policy_decision'],
+      tickMs: 60_000,
+    });
+
+    await scheduleDurableWrite(handle, { queue: 'run_event', payload: { v: 1 } });
+    await scheduleDurableWrite(handle, { queue: 'sync_to_cloud', payload: { v: 1 } });
+
+    await worker.tick();
+    await worker.tick();
+    await worker.tick();
+
+    // Only the run_event row dispatches; the sync_to_cloud row remains pending.
+    expect(calls.map((c) => c.queue)).toEqual(['run_event']);
+
+    const remaining = await handle.db.select().from(sqliteSchema.pendingJobs);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.queue).toBe('sync_to_cloud');
+    expect(remaining[0]?.status).toBe('pending');
+
+    await worker.stop();
+    handle.close();
+  });
+
+  it('leaves wrong-queue rows untouched when filter excludes them', async () => {
+    const handle = await openMigrated();
+    const { handler, calls } = makeRecorder();
+
+    await scheduleDurableWrite(handle, { queue: 'sync_to_cloud', payload: { v: 1 } });
+    const worker = new OutboxWorker({
+      db: handle,
+      dispatchHandler: handler,
+      queueFilter: ['run_event'],
+      tickMs: 60_000,
+    });
+
+    await worker.tick();
+    await worker.tick();
+
+    // The dispatch handler is never called: SQL filter excluded the row
+    // and the row stays pending for whichever worker DOES claim it (the
+    // sync-daemon's worker, in production).
+    expect(calls).toHaveLength(0);
+    const rows = await handle.db.select().from(sqliteSchema.pendingJobs);
+    expect(rows[0]?.queue).toBe('sync_to_cloud');
+    expect(rows[0]?.status).toBe('pending');
+
+    await worker.stop();
+    handle.close();
+  });
+
+  it('throws on construction when queueFilter is empty array', async () => {
+    const handle = await openMigrated();
+    const { handler } = makeRecorder();
+    expect(() => new OutboxWorker({ db: handle, dispatchHandler: handler, queueFilter: [] })).toThrow(
+      /queueFilter must contain at least one queue kind/,
+    );
+    handle.close();
+  });
+});

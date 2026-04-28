@@ -1,5 +1,6 @@
 import type { PolicyDecisionPayloadV1, RunIdResolution } from '@contextos/cli/lib/outbox';
-import { type DbHandle, postgresSchema, scheduleDurableWrite, sqliteSchema } from '@contextos/db';
+import { type DbHandle, postgresSchema, scheduleAuditWriteWithSync, sqliteSchema } from '@contextos/db';
+import { buildPolicyDecisionIdempotencyKey } from '@contextos/policy';
 import { createLogger } from '@contextos/shared';
 import { eq } from 'drizzle-orm';
 import type { ToolContext } from '../../framework/tool-context.js';
@@ -182,7 +183,16 @@ export function createCheckPolicyHandler(deps: CheckPolicyHandlerDeps) {
       matchedRuleId: evalResult.matchedRuleId,
       reason: auditReason,
     };
-    void scheduleDurableWrite(deps.db, { queue: 'policy_decision', payload: auditPayload }).catch((err) =>
+    const policyIdempotencyKey = buildPolicyDecisionIdempotencyKey({
+      sessionId: input.sessionId,
+      ...(input.toolUseId !== undefined ? { toolUseId: input.toolUseId } : {}),
+      toolName: input.toolName,
+      eventType: input.eventType,
+    });
+    void scheduleAuditWriteWithSync(deps.db, {
+      audit: { queue: 'policy_decision', payload: auditPayload },
+      sync: { table: 'policy_decisions', lookup: { kind: 'idempotency_key', value: policyIdempotencyKey } },
+    }).catch((err) =>
       handlerLogger.warn(
         {
           event: 'policy_audit_enqueue_failed',
