@@ -1,0 +1,131 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { loadHomeEnv } from '../../src/lib/load-home-env.js';
+
+/**
+ * Closes Finding A from the 2026-04-28 functionality test:
+ *   `contextos init` writes `.env` to `<cwd>/.env`, but commit 34faa0e's
+ *   loader read `<CONTEXTOS_HOME>/.env` only. Different files. Init's
+ *   .env was therefore decorative end-to-end, team-mode setups silently
+ *   fell back to solo, and doctor check 20 (`LOCAL_HOOK_SECRET` present)
+ *   was YELLOW for this exact reason.
+ *
+ * The fix: `loadHomeEnv` now reads BOTH paths and returns a merged dict.
+ * On conflict, `<cwd>/.env` wins because it's the more specific scope.
+ * Either file may be missing — that's a no-op. These tests pin all five
+ * shapes the call site can encounter.
+ */
+
+describe('loadHomeEnv — layered <CONTEXTOS_HOME>/.env + <cwd>/.env', () => {
+  let homeDir: string;
+  let cwdDir: string;
+
+  beforeEach(() => {
+    homeDir = mkdtempSync(join(tmpdir(), 'load-home-env-home-'));
+    cwdDir = mkdtempSync(join(tmpdir(), 'load-home-env-cwd-'));
+  });
+
+  afterEach(() => {
+    rmSync(homeDir, { recursive: true, force: true });
+    rmSync(cwdDir, { recursive: true, force: true });
+  });
+
+  it('case 1 — both files exist, no overlap → all vars from both present', () => {
+    writeFileSync(
+      join(homeDir, '.env'),
+      ['CONTEXTOS_GRAPHIFY_ROOT=/var/graphify', 'CLERK_PUBLISHABLE_KEY=pk_test_replace_me'].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(cwdDir, '.env'),
+      [`LOCAL_HOOK_SECRET=${'a'.repeat(40)}`, 'CONTEXTOS_MODE=solo'].join('\n'),
+      'utf8',
+    );
+
+    const merged = loadHomeEnv(homeDir, cwdDir);
+
+    expect(merged.CONTEXTOS_GRAPHIFY_ROOT).toBe('/var/graphify');
+    expect(merged.CLERK_PUBLISHABLE_KEY).toBe('pk_test_replace_me');
+    expect(merged.LOCAL_HOOK_SECRET).toBe('a'.repeat(40));
+    expect(merged.CONTEXTOS_MODE).toBe('solo');
+  });
+
+  it('case 2 — both files exist with overlap → cwd value wins', () => {
+    // Per-project override is the more specific scope. A developer who
+    // sets CONTEXTOS_MODE=team in their project must override whatever
+    // the user-global .env says.
+    writeFileSync(
+      join(homeDir, '.env'),
+      ['CONTEXTOS_MODE=solo', 'CLERK_SECRET_KEY=sk_test_from_home'].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(cwdDir, '.env'),
+      ['CONTEXTOS_MODE=team', 'CLERK_SECRET_KEY=sk_test_from_project'].join('\n'),
+      'utf8',
+    );
+
+    const merged = loadHomeEnv(homeDir, cwdDir);
+
+    expect(merged.CONTEXTOS_MODE).toBe('team');
+    expect(merged.CLERK_SECRET_KEY).toBe('sk_test_from_project');
+  });
+
+  it('case 3 — only <CONTEXTOS_HOME>/.env exists → its vars loaded', () => {
+    writeFileSync(
+      join(homeDir, '.env'),
+      ['CONTEXTOS_MODE=solo', 'CLERK_SECRET_KEY=sk_test_replace_me'].join('\n'),
+      'utf8',
+    );
+    // No file at cwdDir/.env.
+
+    const merged = loadHomeEnv(homeDir, cwdDir);
+
+    expect(merged.CONTEXTOS_MODE).toBe('solo');
+    expect(merged.CLERK_SECRET_KEY).toBe('sk_test_replace_me');
+  });
+
+  it('case 4 — only <cwd>/.env exists → its vars loaded (this is the post-init shape)', () => {
+    // This is exactly the state `contextos init` leaves behind: it wrote
+    // .env to <cwd>, no <CONTEXTOS_HOME>/.env exists yet. Pre-fix, the
+    // loader returned {} here and `start` saw nothing.
+    writeFileSync(
+      join(cwdDir, '.env'),
+      [
+        'CONTEXTOS_MODE=solo',
+        'CLERK_SECRET_KEY=sk_test_replace_me',
+        'CLERK_PUBLISHABLE_KEY=pk_test_replace_me',
+        `LOCAL_HOOK_SECRET=${'b'.repeat(40)}`,
+      ].join('\n'),
+      'utf8',
+    );
+
+    const merged = loadHomeEnv(homeDir, cwdDir);
+
+    expect(merged.CONTEXTOS_MODE).toBe('solo');
+    expect(merged.CLERK_SECRET_KEY).toBe('sk_test_replace_me');
+    expect(merged.CLERK_PUBLISHABLE_KEY).toBe('pk_test_replace_me');
+    expect(merged.LOCAL_HOOK_SECRET).toBe('b'.repeat(40));
+  });
+
+  it('case 5 — neither file exists → no error, empty dict', () => {
+    // Both tmp dirs created in beforeEach but neither has a .env.
+    const merged = loadHomeEnv(homeDir, cwdDir);
+    expect(merged).toEqual({});
+  });
+
+  it('back-compat — projectCwd omitted, behaves as the original home-only loader', () => {
+    writeFileSync(join(homeDir, '.env'), 'CONTEXTOS_MODE=solo\n', 'utf8');
+    writeFileSync(join(cwdDir, '.env'), 'CONTEXTOS_MODE=team\n', 'utf8');
+
+    // Don't pass the second arg — old call sites that only know about the
+    // home layer must keep working unchanged.
+    const merged = loadHomeEnv(homeDir);
+
+    expect(merged.CONTEXTOS_MODE).toBe('solo');
+  });
+});

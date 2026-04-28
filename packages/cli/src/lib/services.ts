@@ -76,14 +76,17 @@ export async function resolveServices(options: BuildServiceUnitOptions): Promise
         '`npm i -g @contextos/cli` deployment is tracked as a follow-up.',
     );
   }
-  // Layer the env: `<CONTEXTOS_HOME>/.env` provides defaults (this is the
-  // file `contextos init` writes), then process.env wins (so `MCP_SERVER_PORT=3200
-  // contextos start` always overrides the file). Pre-fix, the .env was never
-  // read, so daemons booted without the solo-mode sentinels even though
-  // `init` had written them — silently breaking team-mode setups and forcing
-  // operators to re-export everything in their shell.
-  const homeEnv = loadHomeEnv(options.contextosHome);
-  const env: NodeJS.ProcessEnv = { ...homeEnv, ...options.env };
+  // Layer the env, low → high precedence:
+  //   1. `<CONTEXTOS_HOME>/.env`  — user-global defaults
+  //   2. `<process.cwd()>/.env`   — per-project overrides (this is where
+  //                                 `contextos init` writes)
+  //   3. options.env (process.env) — explicit shell exports always win
+  // The two-file split matters because `init` writes (2) but commit
+  // 34faa0e's first cut only read (1); the .env init wrote was therefore
+  // decorative end-to-end and team-mode setups silently fell back to solo.
+  // See `loadHomeEnv` for the layering rationale.
+  const layered = loadHomeEnv(options.contextosHome, process.cwd());
+  const env: NodeJS.ProcessEnv = { ...layered, ...options.env };
   const mcpPort = parsePort(env.MCP_SERVER_PORT, 3100);
   const bridgePort = parsePort(env.HOOKS_BRIDGE_PORT, 3101);
 

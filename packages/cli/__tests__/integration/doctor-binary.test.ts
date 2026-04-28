@@ -63,7 +63,10 @@ describe('doctor binary — integration spawn', () => {
     };
     expect(parsed.version).toMatch(/^\d+\.\d+\.\d+/);
     expect(parsed.contextosHome).toBe(home);
-    expect(parsed.checks).toHaveLength(20);
+    // M03.1 added checks 21/22/23 (pending_jobs depth, oldest, dead-letter);
+    // assertion stayed at 20 from M02 spec §4.5 and went red on origin/main
+    // post-M03.1 squash-merge. Bumped to 23 here.
+    expect(parsed.checks).toHaveLength(23);
     // The empty-home fixture should land at least check 3 (data.db missing) red.
     const c3 = parsed.checks.find((c) => c.id === 3);
     expect(c3?.status).toBe('red');
