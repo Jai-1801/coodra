@@ -1,49 +1,45 @@
-import { randomUUID } from 'node:crypto';
-
-import { type DbHandle, postgresSchema, sqliteSchema } from '@contextos/db';
+import type { RunEventPayloadV1, RunIdResolution } from '@contextos/cli/lib/outbox';
+import { type DbHandle, scheduleDurableWrite } from '@contextos/db';
 import { type Logger, ValidationError } from '@contextos/shared';
 
 import type { RunRecorder } from '../framework/tool-context.js';
 import { createMcpLogger } from './logger.js';
 
 /**
- * `apps/mcp-server/src/lib/run-recorder.ts` — writes `run_events`
- * rows. Scoped to `run_events` only in Module 02 per the frozen
- * `RunRecorder.record()` signature (user directive Q6 + S7c
- * spec/plan reconciliation). `runs` row creation is owned by the
- * `get_run_id` tool (§S8) which threads the full project /
- * agentType / mode context.
+ * `apps/mcp-server/src/lib/run-recorder` — durable + idempotent
+ * audit writer for `run_events` rows.
  *
- * Async + idempotent:
+ * Module 03.1: every audit write goes through `pending_jobs` via
+ * `scheduleDurableWrite` (the durable outbox). The OutboxWorker
+ * (`@contextos/cli/lib/outbox`) drains the queue and applies each
+ * row to the destination via the canonical dispatcher. The
+ * recorder's only job is to build the queue payload and enqueue
+ * durably.
  *
- *   `record()` builds a row, issues `INSERT ... ON CONFLICT (id)
- *   DO NOTHING` via `setImmediate(...)`. Spec docs §68 +
- *   techstack.md §85 lock this — the durable outbox via
- *   `pending_jobs` is explicitly deferred past Module 03.
- *   Decisions-log 2026-04-24 records the doc reconciliation.
+ * Pre-resolved runId. Unlike the bridge's run-recorder which
+ * defers `lookupRunId` to dispatch (because the agent's
+ * SessionStart may not have hit the destination table yet), the
+ * mcp-server's caller already knows `runId` (it was returned by
+ * `get_run_id` earlier in the session). The payload uses the
+ * `pre_resolved` resolution kind so the dispatcher uses the
+ * caller-supplied value directly without a lookup round-trip.
  *
- * Nullable `runId`:
+ * Idempotency. The `run_events.id` is `re_<idempotency-key>_<phase>`,
+ * matching the historical shape and using `ON CONFLICT (id) DO
+ * NOTHING` at the destination. Per the M02 freeze, the structured
+ * idempotency key surfaces from `RunRecorder.record()` directly.
  *
- *   `runs.id` → `run_events.run_id` is nullable + `ON DELETE SET
- *   NULL` after Module-02 migration 0002 (packages/db/drizzle/
- *   {sqlite,postgres}/0002_*.sql). A `record({ runId: null, ... })`
- *   call lands a row with `run_id = NULL`, matching §4.3's
- *   "PreToolUse can fire before a run exists" rationale.
- *
- * Idempotency key:
- *
- *   The frozen interface already carries a structured
- *   `idempotencyKey: IdempotencyKey`. The recorder maps that to the
- *   row's primary key so a retry with the same key is ON CONFLICT
- *   DO NOTHING. This deviates from §4.3's per-row id scheme
- *   (`{sessionId}-{toolUseId}-{phase}`) only in that the row id IS
- *   the idempotency key — tests lock it.
+ * Crash safety. Once `scheduleDurableWrite` resolves, the audit row
+ * is durable in `pending_jobs`. If the mcp-server dies before the
+ * worker drains, the worker on next boot picks up the row.
  */
 
 const recorderLogger = createMcpLogger('lib-run-recorder');
 
 export interface CreateRunRecorderDeps {
   readonly db: DbHandle;
+  /** Optional `worker.kick()` for low-latency drain after enqueue. */
+  readonly kick?: () => void;
   readonly logger?: Logger;
 }
 
@@ -70,73 +66,52 @@ export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
     throw new TypeError('createRunRecorder: deps.db must be a DbHandle from @contextos/db');
   }
   const log = deps.logger ?? recorderLogger;
+  const kick = deps.kick;
 
   log.info(
     { event: 'run_recorder_wired', mode: deps.db.kind === 'sqlite' ? 'solo' : 'team' },
-    'createRunRecorder: run_events recorder wired (setImmediate + ON CONFLICT DO NOTHING; no durable outbox until Module 03).',
+    'createRunRecorder: run_events recorder wired (durable outbox via scheduleDurableWrite).',
   );
-
-  async function insertRunEvent(args: Parameters<RunRecorder['record']>[0]): Promise<void> {
-    // `run_events.id` is a free-form TEXT primary key; we bind the
-    // structured idempotency key there. Retries from the same caller
-    // surface as `ON CONFLICT DO NOTHING`.
-    const eventId = `re_${args.idempotencyKey.key}_${args.phase}`;
-    const payload = {
-      input: args.input,
-      output: args.output ?? null,
-      decision: args.decision ?? null,
-      reason: args.reason ?? null,
-      idempotencyKind: args.idempotencyKey.kind,
-    };
-    const row = {
-      id: eventId,
-      runId: args.runId,
-      phase: args.phase,
-      toolName: args.toolName,
-      toolUseId: args.idempotencyKey.key,
-      toolInput: JSON.stringify(payload),
-      outcome: args.decision ?? null,
-    };
-    if (deps.db.kind === 'sqlite') {
-      await deps.db.db
-        .insert(sqliteSchema.runEvents)
-        .values(row)
-        .onConflictDoNothing({ target: sqliteSchema.runEvents.id });
-      return;
-    }
-    await deps.db.db
-      .insert(postgresSchema.runEvents)
-      .values(row)
-      .onConflictDoNothing({ target: postgresSchema.runEvents.id });
-  }
 
   return {
     async record(args) {
       assertArgs(args);
-      // Fire-and-forget on setImmediate so tool call latency is
-      // unaffected by run_events I/O. The promise resolves before
-      // the insert completes; caller has no way to observe success.
-      // Every failure is logged at WARN with the full correlation
-      // keys so a noise-baseline lets ops spot drift.
-      setImmediate(() => {
-        void insertRunEvent(args).catch((err) => {
-          log.warn(
-            {
-              event: 'run_event_write_failed',
-              runId: args.runId,
-              sessionId: args.sessionId,
-              toolName: args.toolName,
-              phase: args.phase,
-              idempotencyKey: args.idempotencyKey.key,
-              err: err instanceof Error ? err.message : String(err),
-              // Attach a random id so a concurrent failure burst is
-              // distinguishable across tail-lined log lines.
-              errorInstance: randomUUID().slice(0, 8),
-            },
-            'run_events write failed — event lost (no durable outbox before Module 03)',
-          );
-        });
-      });
+      const eventId = `re_${args.idempotencyKey.key}_${args.phase}`;
+      const payloadObj = {
+        input: args.input,
+        output: args.output ?? null,
+        decision: args.decision ?? null,
+        reason: args.reason ?? null,
+        idempotencyKind: args.idempotencyKey.kind,
+      };
+      const resolution: RunIdResolution = { kind: 'pre_resolved', runId: args.runId };
+      const queuePayload: RunEventPayloadV1 = {
+        v: 1,
+        rowId: eventId,
+        resolution,
+        phase: args.phase,
+        toolName: args.toolName,
+        toolUseId: args.idempotencyKey.key,
+        toolInput: JSON.stringify(payloadObj),
+        outcome: args.decision ?? null,
+      };
+      try {
+        await scheduleDurableWrite(deps.db, { queue: 'run_event', payload: queuePayload });
+        kick?.();
+      } catch (err) {
+        log.warn(
+          {
+            event: 'run_event_enqueue_failed',
+            runId: args.runId,
+            sessionId: args.sessionId,
+            toolName: args.toolName,
+            phase: args.phase,
+            idempotencyKey: args.idempotencyKey.key,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'run_event durable enqueue failed — event lost',
+        );
+      }
     },
   };
 }

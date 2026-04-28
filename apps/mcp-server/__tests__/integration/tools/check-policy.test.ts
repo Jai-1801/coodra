@@ -11,6 +11,7 @@ import { createPolicyClient, createPolicyClientFromCheck } from '../../../src/li
 import { createCheckPolicyToolRegistration } from '../../../src/tools/check-policy/manifest.js';
 import type { CheckPolicyOutput } from '../../../src/tools/check-policy/schema.js';
 import { makeFakeDeps } from '../../helpers/fake-deps.js';
+import { drainOutbox } from '../_helpers/drain-outbox.js';
 
 /**
  * Integration test for `contextos__check_policy` (S14).
@@ -123,8 +124,10 @@ function seedDenyRule(
   return ruleId;
 }
 
-async function flushSetImmediate(): Promise<void> {
-  await new Promise<void>((resolve) => setImmediate(resolve));
+async function flushSetImmediate(handle: SqliteHandle): Promise<void> {
+  // Module 03.1: check_policy enqueues into pending_jobs; the
+  // policy_decisions row lands only after the OutboxWorker drains.
+  await drainOutbox(handle);
 }
 
 // ---------------------------------------------------------------------------
@@ -161,7 +164,7 @@ describe('check_policy — project_not_found soft-failure', () => {
     expect(out.error).toBe('project_not_found');
     expect(out.howToFix).toMatch(/contextos init|projects table/);
 
-    await flushSetImmediate();
+    await flushSetImmediate(h.handle);
     const rows = await h.handle.db.select().from(sqliteSchema.policyDecisions);
     expect(rows).toHaveLength(0);
   });
@@ -204,7 +207,7 @@ describe('check_policy — no_rule_matched path', () => {
     expect(out.matchedRuleId).toBeNull();
     expect(out.failOpen).toBe(false);
 
-    await flushSetImmediate();
+    await flushSetImmediate(h.handle);
     const rows = await h.handle.db.select().from(sqliteSchema.policyDecisions);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.permissionDecision).toBe('allow');
@@ -270,7 +273,7 @@ describe('check_policy — deny via path glob', () => {
     expect(out.matchedRuleId).toBe(ruleId);
     expect(out.failOpen).toBe(false);
 
-    await flushSetImmediate();
+    await flushSetImmediate(h.handle);
     const rows = await h.handle.db.select().from(sqliteSchema.policyDecisions);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.permissionDecision).toBe('deny');
@@ -342,7 +345,7 @@ describe('check_policy — audit write is fire-and-forget via setImmediate', () 
     const beforeFlush = await h.handle.db.select().from(sqliteSchema.policyDecisions);
     expect(beforeFlush).toHaveLength(0);
 
-    await flushSetImmediate();
+    await flushSetImmediate(h.handle);
 
     const afterFlush = await h.handle.db.select().from(sqliteSchema.policyDecisions);
     expect(afterFlush).toHaveLength(1);
@@ -384,10 +387,10 @@ describe('check_policy — idempotent audit dedupe', () => {
     expect(a.ok).toBe(true);
     expect(b.ok).toBe(true);
 
-    await flushSetImmediate();
+    await flushSetImmediate(h.handle);
     // Second setImmediate might have scheduled while first DO-NOTHING
     // insert was pending — run flush twice to be safe.
-    await flushSetImmediate();
+    await flushSetImmediate(h.handle);
 
     const rows = await h.handle.db.select().from(sqliteSchema.policyDecisions);
     expect(rows).toHaveLength(1);
@@ -412,8 +415,8 @@ describe('check_policy — idempotent audit dedupe', () => {
       );
     await call('sess_one');
     await call('sess_two');
-    await flushSetImmediate();
-    await flushSetImmediate();
+    await flushSetImmediate(h.handle);
+    await flushSetImmediate(h.handle);
 
     const rows = await h.handle.db.select().from(sqliteSchema.policyDecisions);
     expect(rows).toHaveLength(2);
@@ -513,7 +516,7 @@ describe('check_policy — fail-open mapping (evaluator emits policy_check_unava
 
     // Audit row also carries the enum code (not the evaluator sentinel)
     // so policy_decisions stays consistent with the response.
-    await flushSetImmediate();
+    await flushSetImmediate(h.handle);
     const rows = await h.handle.db.select().from(sqliteSchema.policyDecisions);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.reason).toBe('policy_engine_unavailable');
@@ -622,8 +625,8 @@ describe('check_policy — runId threads to policy_decisions.run_id', () => {
       },
       'sess_no_run',
     );
-    await flushSetImmediate();
-    await flushSetImmediate();
+    await flushSetImmediate(h.handle);
+    await flushSetImmediate(h.handle);
 
     const withRun = await h.handle.db
       .select()
@@ -666,7 +669,7 @@ describe('check_policy — toolInputSnapshot truncates at 8 KiB', () => {
       },
       'sess_big',
     );
-    await flushSetImmediate();
+    await flushSetImmediate(h.handle);
 
     const rows = await h.handle.db.select().from(sqliteSchema.policyDecisions);
     expect(rows).toHaveLength(1);
@@ -693,7 +696,7 @@ describe('check_policy — toolInputSnapshot truncates at 8 KiB', () => {
       },
       'sess_small',
     );
-    await flushSetImmediate();
+    await flushSetImmediate(h.handle);
     const rows = await h.handle.db
       .select()
       .from(sqliteSchema.policyDecisions)

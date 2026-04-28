@@ -11,6 +11,9 @@ importers:
       '@biomejs/biome':
         specifier: ^2.4.12
         version: 2.4.12
+      '@contextos/cli':
+        specifier: workspace:*
+        version: link:packages/cli
       '@contextos/db':
         specifier: workspace:*
         version: link:packages/db
@@ -62,6 +65,9 @@ importers:
 
   apps/hooks-bridge:
     dependencies:
+      '@contextos/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
       '@contextos/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -96,6 +102,9 @@ importers:
 
   apps/mcp-server:
     dependencies:
+      '@contextos/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
       '@contextos/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -139,6 +148,9 @@ importers:
       '@contextos/db':
         specifier: workspace:*
         version: link:../db
+      '@contextos/policy':
+        specifier: workspace:*
+        version: link:../policy
       '@contextos/shared':
         specifier: workspace:*
         version: link:../shared

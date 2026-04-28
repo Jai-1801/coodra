@@ -110,11 +110,26 @@ export const pendingJobs = sqliteTable(
     queue: text('queue').notNull(),
     payload: text('payload').notNull(),
     attempts: integer('attempts').notNull().default(0),
+    // 'pending' | 'picked' | 'dead'. Module 03.1 outbox lifecycle.
     status: text('status').notNull().default('pending'),
     runAfter: integer('run_after', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    // Lease bookkeeping (Module 03.1). Set when status flips to 'picked';
+    // an in-flight row whose pickedAt is older than leaseMs is treated as
+    // orphaned and reclaimable by another worker (lease serialization).
+    pickedAt: integer('picked_at', { mode: 'timestamp' }),
+    // Set when the worker exhausts maxAttempts (status='dead').
+    failedAt: integer('failed_at', { mode: 'timestamp' }),
+    // Last dispatch error string. Retained on dead rows for the doctor
+    // dead-letter check and any future audit-trail UI.
+    lastError: text('last_error'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
   },
-  (t) => [index('pending_jobs_poll_idx').on(t.queue, t.status, t.runAfter)],
+  (t) => [
+    index('pending_jobs_poll_idx').on(t.queue, t.status, t.runAfter),
+    // Fast orphan recovery: status='picked' rows ordered by pickedAt
+    // surface lease-expired rows for reclaim without a full scan.
+    index('pending_jobs_picked_idx').on(t.status, t.pickedAt),
+  ],
 );
 
 export const policies = sqliteTable('policies', {

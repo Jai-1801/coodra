@@ -1,8 +1,8 @@
-import { type DbHandle, postgresSchema, sqliteSchema } from '@contextos/db';
+import type { PolicyDecisionPayloadV1, RunIdResolution } from '@contextos/cli/lib/outbox';
+import { type DbHandle, postgresSchema, scheduleDurableWrite, sqliteSchema } from '@contextos/db';
 import { createLogger } from '@contextos/shared';
 import { eq } from 'drizzle-orm';
 import type { ToolContext } from '../../framework/tool-context.js';
-import { recordPolicyDecision } from '../../lib/policy.js';
 import type { CheckPolicyInput, CheckPolicyOutput } from './schema.js';
 
 /**
@@ -160,38 +160,40 @@ export function createCheckPolicyHandler(deps: CheckPolicyHandlerDeps) {
     const auditReason = ruleReason ?? reason;
     const toolInputSnapshot = truncateToolInputSnapshot(input.toolInput);
 
-    // Fire-and-forget audit write — handler returns BEFORE this resolves.
-    // ON CONFLICT DO NOTHING (per S7b) dedupes retries against the
-    // locked idempotency key `pd:{sessionId}:{toolName}:{eventType}`.
-    setImmediate(() => {
-      recordPolicyDecision(deps.db, {
-        projectId,
-        sessionId: input.sessionId,
-        agentType: input.agentType,
-        eventType: input.eventType,
-        toolName: input.toolName,
-        // F14 closure (2026-04-27): forward the agent's tool_use_id so
-        // the audit-row idempotency key distinguishes distinct
-        // invocations within one session.
-        ...(input.toolUseId !== undefined ? { toolUseId: input.toolUseId } : {}),
-        toolInputSnapshot,
-        permissionDecision: evalResult.decision,
-        matchedRuleId: evalResult.matchedRuleId,
-        reason: auditReason,
-        runId: input.runId ?? null,
-      }).catch((err) =>
-        handlerLogger.warn(
-          {
-            event: 'policy_audit_write_failed',
-            sessionId: input.sessionId,
-            toolName: input.toolName,
-            eventType: input.eventType,
-            err: err instanceof Error ? err.message : String(err),
-          },
-          'check_policy: async audit write failed — decision already returned to caller',
-        ),
-      );
-    });
+    // Module 03.1: durable enqueue. The handler returns BEFORE the
+    // destination INSERT fires; the OutboxWorker drains
+    // `pending_jobs` and applies the row via the canonical
+    // dispatcher (which calls `recordPolicyDecision` at dispatch
+    // time). Idempotency at the destination (the F14 4-segment
+    // `pd:{sessionId}:{toolUseId}:{toolName}:{eventType}` key)
+    // dedupes retries.
+    const resolution: RunIdResolution = { kind: 'pre_resolved', runId: input.runId ?? null };
+    const auditPayload: PolicyDecisionPayloadV1 = {
+      v: 1,
+      resolution,
+      projectId,
+      sessionId: input.sessionId,
+      agentType: input.agentType,
+      eventType: input.eventType,
+      toolName: input.toolName,
+      ...(input.toolUseId !== undefined ? { toolUseId: input.toolUseId } : {}),
+      toolInputSnapshot,
+      permissionDecision: evalResult.decision,
+      matchedRuleId: evalResult.matchedRuleId,
+      reason: auditReason,
+    };
+    void scheduleDurableWrite(deps.db, { queue: 'policy_decision', payload: auditPayload }).catch((err) =>
+      handlerLogger.warn(
+        {
+          event: 'policy_audit_enqueue_failed',
+          sessionId: input.sessionId,
+          toolName: input.toolName,
+          eventType: input.eventType,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'check_policy: durable enqueue failed — decision already returned to caller',
+      ),
+    );
 
     return {
       ok: true,

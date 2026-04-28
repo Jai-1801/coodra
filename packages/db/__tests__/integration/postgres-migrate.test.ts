@@ -129,6 +129,31 @@ const SCHEMA_TABLES = [
     expect(indexdef).toMatch(/ef_construction\s*=\s*'?64'?/);
   });
 
+  it('migration 0004: pending_jobs has picked_at, failed_at, last_error nullable columns + pending_jobs_picked_idx', async () => {
+    // Locks Module 03.1 S0: durable outbox columns must exist after migration
+    // 0004 applies. If a future regen drops the columns or the index, this
+    // assertion catches it before the worker code at runtime.
+    const cols = await handle.raw<{ column_name: string; is_nullable: string }[]>`
+      SELECT column_name, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'pending_jobs'
+        AND column_name IN ('picked_at', 'failed_at', 'last_error')
+      ORDER BY column_name
+    `;
+    expect(cols.map((c) => c.column_name)).toEqual(['failed_at', 'last_error', 'picked_at']);
+    for (const c of cols) {
+      expect(c.is_nullable).toBe('YES');
+    }
+    const idx = await handle.raw<{ indexname: string; indexdef: string }[]>`
+      SELECT indexname, indexdef
+      FROM pg_indexes
+      WHERE tablename = 'pending_jobs' AND indexname = 'pending_jobs_picked_idx'
+    `;
+    expect(idx.length).toBe(1);
+    expect(idx[0]?.indexdef).toMatch(/\(status,\s*picked_at\)/);
+  });
+
   it('re-applying migrations is a no-op (idempotent)', async () => {
     await migratePostgres(handle.db);
     const rows = await handle.raw<{ count: string }[]>`

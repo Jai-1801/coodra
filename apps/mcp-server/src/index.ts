@@ -10,6 +10,7 @@ import './bootstrap/ensure-stderr-logging.js';
 
 import { randomUUID } from 'node:crypto';
 
+import { OutboxWorker } from '@contextos/cli/lib/outbox';
 import { ensureGlobalProject, migrateSqlite } from '@contextos/db';
 import { createLogger } from '@contextos/shared';
 
@@ -22,6 +23,7 @@ import { createDbClient } from './lib/db.js';
 import { createFeaturePackStore } from './lib/feature-pack.js';
 import { createGraphifyClient } from './lib/graphify.js';
 import { createMcpLogger } from './lib/logger.js';
+import { createMcpDispatchHandler } from './lib/outbox-dispatch.js';
 import { createPolicyClient } from './lib/policy.js';
 import { createRunRecorder } from './lib/run-recorder.js';
 import { createSqliteVecClient } from './lib/sqlite-vec.js';
@@ -123,7 +125,17 @@ async function main(): Promise<void> {
     db: dbHandle,
     ...(env.CONTEXTOS_CONTEXT_PACKS_ROOT ? { contextPacksRoot: env.CONTEXTOS_CONTEXT_PACKS_ROOT } : {}),
   });
-  const runRecorder = createRunRecorder({ db: dbHandle });
+  // Module 03.1: durable-outbox worker. Both the bridge and mcp-server
+  // run their own worker (OQ2 — drain ownership). They compete via the
+  // atomic claim on `pending_jobs`, so each row is dispatched exactly
+  // once across the two services.
+  const outboxWorker = new OutboxWorker({
+    db: dbHandle,
+    dispatchHandler: createMcpDispatchHandler({ db: dbHandle }),
+  });
+  const runRecorder = createRunRecorder({ db: dbHandle, kick: () => outboxWorker.kick() });
+  outboxWorker.start();
+  bootLogger.info({ event: 'outbox_worker_started' }, 'OutboxWorker started; pending_jobs draining');
   const sqliteVec = createSqliteVecClient({ db: dbHandle });
   const graphify = createGraphifyClient({
     db: dbHandle,
@@ -181,10 +193,19 @@ async function main(): Promise<void> {
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
     bootLogger.info({ event: 'shutdown_signal', signal }, 'shutting down');
 
-    // Drain in-flight setImmediate audit writes (S14 check_policy
-    // dispatches policy_decisions inserts via setImmediate). One tick
-    // gives them time to land before we close the DB.
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Module 03.1: stop the OutboxWorker before closing the DB. The
+    // worker.stop() awaits any in-flight dispatch so the last audit
+    // row lands. Pending (not-yet-picked) rows stay durable in
+    // `pending_jobs` for the next process to drain.
+    try {
+      await outboxWorker.stop();
+      bootLogger.info({ event: 'outbox_worker_stopped' }, 'OutboxWorker stopped');
+    } catch (err) {
+      bootLogger.error(
+        { event: 'shutdown_error', subsystem: 'outbox', err: err instanceof Error ? err.message : String(err) },
+        'outbox worker stop threw',
+      );
+    }
 
     if (httpHandle) {
       try {

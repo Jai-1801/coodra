@@ -14,6 +14,7 @@ import { createSessionStartHandler } from '../../../src/handlers/session-start.j
 import { composeDispatch } from '../../../src/lib/dispatch.js';
 import { createProjectSlugResolver } from '../../../src/lib/resolve-project-slug.js';
 import { createRunRecorder } from '../../../src/lib/run-recorder.js';
+import { drainOutbox } from '../_helpers/drain-outbox.js';
 
 /**
  * F14 closure (verification 2026-04-27 — fix for audit-trail integrity).
@@ -87,21 +88,10 @@ beforeAll(async () => {
 
   writeFileSync(join(cwd, '.contextos.json'), JSON.stringify({ projectSlug: PROJECT_SLUG }));
 
-  const pending: Array<Promise<void>> = [];
   const policy = createPolicyClient({ db: handle, cacheTtlMs: 100 });
   const projectSlugResolver = createProjectSlugResolver({ cacheTtlMs: 100 });
-  const runRecorder = createRunRecorder({
-    db: handle,
-    schedule: (cb) => {
-      pending.push(cb());
-    },
-  });
-  const drain = async (): Promise<void> => {
-    while (pending.length > 0) {
-      const inflight = pending.splice(0, pending.length);
-      await Promise.all(inflight);
-    }
-  };
+  const runRecorder = createRunRecorder({ db: handle });
+  const drain = (): Promise<void> => drainOutbox(handle);
   const preToolUse = createPreToolUseHandler({ policy, projectSlugResolver, db: handle, runRecorder });
   const sessionStart = createSessionStartHandler({ runRecorder, projectSlugResolver, db: handle, mode: 'solo' });
   const stubAllow = async (): Promise<{ permissionDecision: 'allow' }> => ({ permissionDecision: 'allow' });

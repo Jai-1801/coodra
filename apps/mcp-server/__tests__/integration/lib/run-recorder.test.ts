@@ -1,11 +1,10 @@
-import { setTimeout as delay } from 'node:timers/promises';
-
 import { migrateSqlite, type SqliteHandle } from '@contextos/db';
 import { ValidationError } from '@contextos/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createDbClient } from '../../../src/lib/db.js';
 import { createRunRecorder } from '../../../src/lib/run-recorder.js';
+import { drainOutbox } from '../_helpers/drain-outbox.js';
 
 /**
  * Integration test for `src/lib/run-recorder.ts` (S7c).
@@ -58,11 +57,11 @@ async function openHarness(): Promise<Harness> {
   };
 }
 
-async function waitForInsert(): Promise<void> {
-  // setImmediate semantics: give the fire-and-forget insert a tick +
-  // a beat to hit SQLite. better-sqlite3 is synchronous so the insert
-  // itself is near-instant once the callback runs.
-  await delay(20);
+async function waitForInsert(handle: SqliteHandle): Promise<void> {
+  // Module 03.1: record() writes to pending_jobs; the destination
+  // run_events INSERT lands only after the OutboxWorker drains.
+  // The helper ticks an in-process worker until empty.
+  await drainOutbox(handle);
 }
 
 describe('lib/run-recorder — construction', () => {
@@ -133,7 +132,7 @@ describe('lib/run-recorder — insert happy paths', () => {
       idempotencyKey: { kind: 'readonly', key: 'idem_1' },
       input: { echo: 'x' },
     });
-    await waitForInsert();
+    await waitForInsert(h.handle);
     const row = h.handle.raw
       .prepare(`SELECT run_id, tool_name, phase FROM run_events WHERE tool_use_id = ?`)
       .get('idem_1') as { run_id: string; tool_name: string; phase: string } | undefined;
@@ -152,7 +151,7 @@ describe('lib/run-recorder — insert happy paths', () => {
       idempotencyKey: { kind: 'readonly', key: 'idem_null' },
       input: {},
     });
-    await waitForInsert();
+    await waitForInsert(h.handle);
     const row = h.handle.raw.prepare(`SELECT run_id FROM run_events WHERE tool_use_id = ?`).get('idem_null') as
       | { run_id: string | null }
       | undefined;
@@ -172,7 +171,7 @@ describe('lib/run-recorder — insert happy paths', () => {
     };
     await r.record(args);
     await r.record(args);
-    await waitForInsert();
+    await waitForInsert(h.handle);
     const rows = h.handle.raw.prepare(`SELECT COUNT(*) AS n FROM run_events WHERE tool_use_id = ?`).get('idem_dup') as {
       n: number;
     };
@@ -199,7 +198,7 @@ describe('schema — ON DELETE SET NULL cascade on run_events.run_id (migration 
       idempotencyKey: { kind: 'readonly', key: 'idem_cascade' },
       input: {},
     });
-    await waitForInsert();
+    await waitForInsert(h.handle);
     // Confirm row has a real runId first.
     const before = h.handle.raw.prepare(`SELECT run_id FROM run_events WHERE tool_use_id = ?`).get('idem_cascade') as {
       run_id: string | null;

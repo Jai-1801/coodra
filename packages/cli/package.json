@@ -6,6 +6,16 @@
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./lib/outbox": {
+      "types": "./dist/lib/outbox/index.d.ts",
+      "import": "./dist/lib/outbox/index.js"
+    }
+  },
   "bin": {
     "contextos": "./dist/index.js"
   },
@@ -45,6 +55,7 @@
   },
   "dependencies": {
     "@contextos/db": "workspace:*",
+    "@contextos/policy": "workspace:*",
     "@contextos/shared": "workspace:*",
     "commander": "^13.1.0",
     "env-paths": "^3.0.0",

@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
+    "@contextos/cli": "workspace:*",
     "@contextos/db": "workspace:*",
     "@contextos/hooks-bridge": "workspace:*",
     "@contextos/mcp-server": "workspace:*",

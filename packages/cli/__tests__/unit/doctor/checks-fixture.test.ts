@@ -45,10 +45,14 @@ describe('doctor — full registry against a controlled fixture', () => {
     expect(get(4)?.status).toBe('skipped');
     expect(get(5)?.status).toBe('skipped');
     expect(get(12)?.status).toBe('yellow'); // .contextos.json missing → yellow w/ remediation
-    expect(get(13)?.status).toBe('yellow'); // permanent-yellow placeholder
+    expect(get(13)?.status).toBe('green'); // M03.1 closed; placeholder converted to green
     // 17/18 may be green (port free) or yellow (in use); both are acceptable in CI runners.
     expect(['green', 'yellow']).toContain(get(17)?.status);
     expect(['green', 'yellow']).toContain(get(18)?.status);
+    // 21/22/23 — pending_jobs checks. data.db missing → all skipped.
+    expect(get(21)?.status).toBe('skipped');
+    expect(get(22)?.status).toBe('skipped');
+    expect(get(23)?.status).toBe('skipped');
   });
 
   it('initialised home with migrations applied + F7 sentinel — checks 3,4,5 green, 6/7 green', async () => {
@@ -80,6 +84,10 @@ describe('doctor — full registry against a controlled fixture', () => {
     // .contextos.json absent → yellow.
     expect(get(12)?.status).toBe('yellow');
     expect(get(20)?.status).toBe('green'); // LOCAL_HOOK_SECRET via env
+    // 21/22/23 — clean DB, no pending_jobs rows → all green.
+    expect(get(21)?.status).toBe('green');
+    expect(get(22)?.status).toBe('green');
+    expect(get(23)?.status).toBe('green');
   });
 
   it('with .contextos.json pointing at a registered project — check 12 green', async () => {
@@ -170,5 +178,167 @@ describe('doctor — full registry against a controlled fixture', () => {
     const get = (id: number) => report.checks.find((c) => c.id === id);
     expect(get(6)?.status).toBe('yellow');
     expect(get(6)?.detail).toMatch(/pre-F14/);
+  });
+
+  it('check 21: pending_jobs depth crosses thresholds (0 → green, 11 → yellow, 200 → red)', async () => {
+    const dataDb = join(home, 'data.db');
+    const handle = await openLocalDb(dataDb, { loadVecExtension: true });
+    migrateSqlite(handle.db);
+    await ensureGlobalProject(handle);
+
+    const insertPending = handle.raw.prepare(
+      `INSERT INTO pending_jobs (id, queue, payload, status, run_after, created_at)
+       VALUES (?, 'run_event', '{}', 'pending', unixepoch(), unixepoch())`,
+    );
+
+    // 11 rows → yellow (between 10 and 100).
+    for (let i = 0; i < 11; i += 1) insertPending.run(`pj-yellow-${i}`);
+    handle.close();
+
+    let ctx = buildCheckContext({
+      contextosHomeOverride: home,
+      cwd,
+      env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
+      timeoutMs: 800,
+    });
+    let report = await runChecks(ALL_CHECKS, ctx);
+    let get = (id: number) => report.checks.find((c) => c.id === id);
+    expect(get(21)?.status).toBe('yellow');
+
+    // Bump above 100 → red.
+    const handle2 = await openLocalDb(dataDb, { loadVecExtension: true });
+    const insertMore = handle2.raw.prepare(
+      `INSERT INTO pending_jobs (id, queue, payload, status, run_after, created_at)
+       VALUES (?, 'run_event', '{}', 'pending', unixepoch(), unixepoch())`,
+    );
+    for (let i = 0; i < 200; i += 1) insertMore.run(`pj-red-${i}`);
+    handle2.close();
+
+    ctx = buildCheckContext({
+      contextosHomeOverride: home,
+      cwd,
+      env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
+      timeoutMs: 800,
+    });
+    report = await runChecks(ALL_CHECKS, ctx);
+    get = (id: number) => report.checks.find((c) => c.id === id);
+    expect(get(21)?.status).toBe('red');
+  });
+
+  it('check 22: pending_jobs oldest row crosses age thresholds (fresh → green, 1m → yellow, 10m → red)', async () => {
+    const dataDb = join(home, 'data.db');
+    const handle = await openLocalDb(dataDb, { loadVecExtension: true });
+    migrateSqlite(handle.db);
+    await ensureGlobalProject(handle);
+
+    // Single row aged 90 seconds — yellow (30s–5min window).
+    const ninetySecAgo = Math.floor((Date.now() - 90 * 1000) / 1000);
+    handle.raw
+      .prepare(
+        `INSERT INTO pending_jobs (id, queue, payload, status, run_after, created_at)
+         VALUES (?, 'run_event', '{}', 'pending', ?, ?)`,
+      )
+      .run('pj-yellow-age', ninetySecAgo, ninetySecAgo);
+    handle.close();
+
+    let ctx = buildCheckContext({
+      contextosHomeOverride: home,
+      cwd,
+      env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
+      timeoutMs: 800,
+    });
+    let report = await runChecks(ALL_CHECKS, ctx);
+    let get = (id: number) => report.checks.find((c) => c.id === id);
+    expect(get(22)?.status).toBe('yellow');
+
+    // Insert a 10-minute-old row — red (>5min).
+    const tenMinAgo = Math.floor((Date.now() - 10 * 60 * 1000) / 1000);
+    const handle2 = await openLocalDb(dataDb, { loadVecExtension: true });
+    handle2.raw
+      .prepare(
+        `INSERT INTO pending_jobs (id, queue, payload, status, run_after, created_at)
+         VALUES (?, 'run_event', '{}', 'pending', ?, ?)`,
+      )
+      .run('pj-red-age', tenMinAgo, tenMinAgo);
+    handle2.close();
+
+    ctx = buildCheckContext({
+      contextosHomeOverride: home,
+      cwd,
+      env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
+      timeoutMs: 800,
+    });
+    report = await runChecks(ALL_CHECKS, ctx);
+    get = (id: number) => report.checks.find((c) => c.id === id);
+    expect(get(22)?.status).toBe('red');
+  });
+
+  it('check 23: dead-letter escalation per OQ3 (5 → yellow, 11 → red, 1 row >1h → red)', async () => {
+    const dataDb = join(home, 'data.db');
+    const handle = await openLocalDb(dataDb, { loadVecExtension: true });
+    migrateSqlite(handle.db);
+    await ensureGlobalProject(handle);
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const insertDead = handle.raw.prepare(
+      `INSERT INTO pending_jobs (id, queue, payload, status, run_after, picked_at, failed_at, last_error, created_at)
+       VALUES (?, 'run_event', '{}', 'dead', unixepoch(), ?, ?, 'simulated', ?)`,
+    );
+
+    // 5 dead rows, all recent → yellow.
+    for (let i = 0; i < 5; i += 1) insertDead.run(`pj-dead-${i}`, nowSec, nowSec, nowSec);
+    handle.close();
+
+    let ctx = buildCheckContext({
+      contextosHomeOverride: home,
+      cwd,
+      env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
+      timeoutMs: 800,
+    });
+    let report = await runChecks(ALL_CHECKS, ctx);
+    let get = (id: number) => report.checks.find((c) => c.id === id);
+    expect(get(23)?.status).toBe('yellow');
+
+    // Bump count past 10 → red (count threshold).
+    const handle2 = await openLocalDb(dataDb, { loadVecExtension: true });
+    const insertMore = handle2.raw.prepare(
+      `INSERT INTO pending_jobs (id, queue, payload, status, run_after, picked_at, failed_at, last_error, created_at)
+       VALUES (?, 'run_event', '{}', 'dead', unixepoch(), ?, ?, 'simulated', ?)`,
+    );
+    for (let i = 0; i < 7; i += 1) insertMore.run(`pj-dead-extra-${i}`, nowSec, nowSec, nowSec);
+    handle2.close();
+
+    ctx = buildCheckContext({
+      contextosHomeOverride: home,
+      cwd,
+      env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
+      timeoutMs: 800,
+    });
+    report = await runChecks(ALL_CHECKS, ctx);
+    get = (id: number) => report.checks.find((c) => c.id === id);
+    expect(get(23)?.status).toBe('red');
+
+    // Reset to a single row aged >1h — red via age escalation alone.
+    const handle3 = await openLocalDb(dataDb, { loadVecExtension: true });
+    handle3.raw.prepare(`DELETE FROM pending_jobs`).run();
+    const twoHoursAgo = nowSec - 2 * 60 * 60;
+    handle3.raw
+      .prepare(
+        `INSERT INTO pending_jobs (id, queue, payload, status, run_after, picked_at, failed_at, last_error, created_at)
+         VALUES (?, 'run_event', '{}', 'dead', unixepoch(), ?, ?, 'simulated', ?)`,
+      )
+      .run('pj-dead-old', twoHoursAgo, twoHoursAgo, twoHoursAgo);
+    handle3.close();
+
+    ctx = buildCheckContext({
+      contextosHomeOverride: home,
+      cwd,
+      env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
+      timeoutMs: 800,
+    });
+    report = await runChecks(ALL_CHECKS, ctx);
+    get = (id: number) => report.checks.find((c) => c.id === id);
+    expect(get(23)?.status).toBe('red');
+    expect(get(23)?.detail).toMatch(/older than 1h/);
   });
 });

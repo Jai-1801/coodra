@@ -17,6 +17,7 @@ import { createUserPromptSubmitHandler } from '../../../src/handlers/user-prompt
 import { composeDispatch } from '../../../src/lib/dispatch.js';
 import { createProjectSlugResolver } from '../../../src/lib/resolve-project-slug.js';
 import { createRunRecorder } from '../../../src/lib/run-recorder.js';
+import { drainOutbox } from '../_helpers/drain-outbox.js';
 
 /**
  * UserPromptSubmit (Claude Code only today). Verifies the prompt
@@ -48,21 +49,10 @@ beforeAll(async () => {
   if (handle.kind !== 'sqlite') throw new Error('expected sqlite');
   migrateSqlite(handle.db);
 
-  const pending: Array<Promise<void>> = [];
   const policy = createPolicyClient({ db: handle, cacheTtlMs: 100 });
   const projectSlugResolver = createProjectSlugResolver({ cacheTtlMs: 100 });
-  const runRecorder = createRunRecorder({
-    db: handle,
-    schedule: (cb) => {
-      pending.push(cb());
-    },
-  });
-  const drain = async (): Promise<void> => {
-    while (pending.length > 0) {
-      const inflight = pending.splice(0, pending.length);
-      await Promise.all(inflight);
-    }
-  };
+  const runRecorder = createRunRecorder({ db: handle });
+  const drain = (): Promise<void> => drainOutbox(handle);
 
   const preToolUse = createPreToolUseHandler({ policy, projectSlugResolver, db: handle, runRecorder });
   const postToolUse = createPostToolUseHandler({ runRecorder, projectSlugResolver, db: handle });

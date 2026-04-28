@@ -13,6 +13,7 @@ import { createPreToolUseHandler } from '../../../src/handlers/pre-tool-use.js';
 import { composeDispatch } from '../../../src/lib/dispatch.js';
 import { createProjectSlugResolver } from '../../../src/lib/resolve-project-slug.js';
 import { createRunRecorder } from '../../../src/lib/run-recorder.js';
+import { drainOutbox } from '../_helpers/drain-outbox.js';
 
 /**
  * Idempotency under retry storm — the §4.3 contract: ten POST
@@ -48,25 +49,13 @@ beforeAll(async () => {
   if (handle.kind !== 'sqlite') throw new Error('expected sqlite');
   migrateSqlite(handle.db);
 
-  // Schedule that tracks pending promises so the test can `drain()`
-  // before assertions. Production setImmediate is proven idempotent
-  // by the SQL layer (ON CONFLICT DO NOTHING on the primary key);
-  // sync drain just removes timing flakiness from this suite.
-  const pending: Array<Promise<void>> = [];
+  // The test calls `drain()` before assertions; the helper ticks the
+  // OutboxWorker until pending_jobs is empty so the destination rows
+  // are visible. Mirrors the production drain path exactly.
   const policy = createPolicyClient({ db: handle, cacheTtlMs: 100 });
   const projectSlugResolver = createProjectSlugResolver({ cacheTtlMs: 100 });
-  const runRecorder = createRunRecorder({
-    db: handle,
-    schedule: (cb) => {
-      pending.push(cb());
-    },
-  });
-  const drain = async (): Promise<void> => {
-    while (pending.length > 0) {
-      const inflight = pending.splice(0, pending.length);
-      await Promise.all(inflight);
-    }
-  };
+  const runRecorder = createRunRecorder({ db: handle });
+  const drain = (): Promise<void> => drainOutbox(handle);
   const preToolUse = createPreToolUseHandler({ policy, projectSlugResolver, db: handle, runRecorder });
   const postToolUse = createPostToolUseHandler({ runRecorder, projectSlugResolver, db: handle });
   // session_start / session_end stubs — not exercised in this suite.

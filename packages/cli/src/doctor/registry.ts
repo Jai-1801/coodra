@@ -18,6 +18,9 @@ import { port3100Check } from './checks/17-port-3100.js';
 import { port3101Check } from './checks/18-port-3101.js';
 import { pnpmPathCheck } from './checks/19-pnpm-path.js';
 import { localHookSecretCheck } from './checks/20-local-hook-secret.js';
+import { pendingJobsDepthCheck } from './checks/21-pending-jobs-depth.js';
+import { pendingJobsOldestCheck } from './checks/22-pending-jobs-oldest.js';
+import { pendingJobsDeadLetterCheck } from './checks/23-pending-jobs-dead-letter.js';
 import type { Check } from './types.js';
 
 export const ALL_CHECKS: readonly Check[] = [
@@ -41,4 +44,7 @@ export const ALL_CHECKS: readonly Check[] = [
   port3101Check,
   pnpmPathCheck,
   localHookSecretCheck,
+  pendingJobsDepthCheck,
+  pendingJobsOldestCheck,
+  pendingJobsDeadLetterCheck,
 ];

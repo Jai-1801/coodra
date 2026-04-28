@@ -24,6 +24,7 @@ import { createUserPromptSubmitHandler } from '../../../src/handlers/user-prompt
 import { composeDispatch } from '../../../src/lib/dispatch.js';
 import { createProjectSlugResolver } from '../../../src/lib/resolve-project-slug.js';
 import { createRunRecorder } from '../../../src/lib/run-recorder.js';
+import { drainOutbox } from '../_helpers/drain-outbox.js';
 
 /**
  * F7 closure (verification 2026-04-27) — drives a PreToolUse hook from
@@ -90,21 +91,10 @@ beforeAll(async () => {
     reason: 'forbidden by global policy (F7)',
   });
 
-  const pending: Array<Promise<void>> = [];
   const policy = createPolicyClient({ db: handle, cacheTtlMs: 100 });
   const projectSlugResolver = createProjectSlugResolver({ cacheTtlMs: 100 });
-  const runRecorder = createRunRecorder({
-    db: handle,
-    schedule: (cb) => {
-      pending.push(cb());
-    },
-  });
-  const drain = async (): Promise<void> => {
-    while (pending.length > 0) {
-      const inflight = pending.splice(0, pending.length);
-      await Promise.all(inflight);
-    }
-  };
+  const runRecorder = createRunRecorder({ db: handle });
+  const drain = (): Promise<void> => drainOutbox(handle);
   const preToolUse = createPreToolUseHandler({ policy, projectSlugResolver, db: handle, runRecorder });
   const postToolUse = createPostToolUseHandler({ runRecorder, projectSlugResolver, db: handle });
   const sessionStart = createSessionStartHandler({ runRecorder, projectSlugResolver, db: handle, mode: 'solo' });

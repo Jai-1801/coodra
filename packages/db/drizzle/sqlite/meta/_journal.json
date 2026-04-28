@@ -29,6 +29,13 @@
       "when": 1777042202463,
       "tag": "0003_cloudy_colossus",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1777317745648,
+      "tag": "0004_early_guardian",
+      "breakpoints": true
     }
   ]
 }

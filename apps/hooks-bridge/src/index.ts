@@ -3,6 +3,7 @@
 // import in the file.
 import './bootstrap/ensure-stderr-logging.js';
 
+import { OutboxWorker } from '@contextos/cli/lib/outbox';
 import { ensureGlobalProject, migrateSqlite } from '@contextos/db';
 import { createPolicyClient } from '@contextos/policy';
 import { createLogger } from '@contextos/shared';
@@ -17,6 +18,7 @@ import { createSessionStartHandler } from './handlers/session-start.js';
 import { createUserPromptSubmitHandler } from './handlers/user-prompt-submit.js';
 import { createHooksBridgeDbClient, resolveSqlitePathFromEnv } from './lib/db.js';
 import { composeDispatch } from './lib/dispatch.js';
+import { createBridgeDispatchHandler } from './lib/outbox-dispatch.js';
 import { createProjectSlugResolver } from './lib/resolve-project-slug.js';
 import { createRunRecorder } from './lib/run-recorder.js';
 
@@ -63,7 +65,22 @@ async function main(): Promise<void> {
   // (4b) Build dispatch chain.
   const policy = createPolicyClient({ db: dbClient.handle });
   const projectSlugResolver = createProjectSlugResolver();
-  const runRecorder = createRunRecorder({ db: dbClient.handle });
+
+  // (4c) Wire the durable-outbox worker. Module 03.1: every audit
+  // write enqueues into pending_jobs via scheduleDurableWrite; the
+  // worker drains the queue to its destination tables. The worker
+  // is started AFTER the recorder is constructed so the kick()
+  // back-channel is ready before the first hook fires.
+  const outboxWorker = new OutboxWorker({
+    db: dbClient.handle,
+    dispatchHandler: createBridgeDispatchHandler({ db: dbClient.handle }),
+  });
+  const runRecorder = createRunRecorder({
+    db: dbClient.handle,
+    kick: () => outboxWorker.kick(),
+  });
+  outboxWorker.start();
+  bootLogger.info({ event: 'outbox_worker_started' }, 'OutboxWorker started; pending_jobs draining');
   const preToolUse = createPreToolUseHandler({ policy, projectSlugResolver, db: dbClient.handle, runRecorder });
   const postToolUse = createPostToolUseHandler({ runRecorder, projectSlugResolver, db: dbClient.handle });
   const sessionStart = createSessionStartHandler({
@@ -105,11 +122,17 @@ async function main(): Promise<void> {
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
-    bootLogger.info({ event: 'shutdown_begin', signal }, 'received shutdown signal; closing listener + db');
+    bootLogger.info({ event: 'shutdown_begin', signal }, 'received shutdown signal; closing listener + outbox + db');
     // Close listener first so no new requests start while we drain.
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
     });
+    // Stop the outbox worker — awaits any in-flight dispatch so the
+    // last audit row lands at the destination before we close the
+    // DB. New rows already in pending_jobs (not yet picked) stay
+    // durable for the next process to drain.
+    await outboxWorker.stop();
+    bootLogger.info({ event: 'outbox_worker_stopped' }, 'OutboxWorker stopped');
     await dbClient.close();
     bootLogger.info({ event: 'shutdown_complete' }, 'shutdown complete');
     process.exit(0);

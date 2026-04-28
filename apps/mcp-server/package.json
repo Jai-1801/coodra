@@ -24,6 +24,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
+    "@contextos/cli": "workspace:*",
     "@contextos/db": "workspace:*",
     "@contextos/policy": "workspace:*",
     "@contextos/shared": "workspace:*",

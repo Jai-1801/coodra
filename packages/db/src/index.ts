@@ -12,6 +12,14 @@ export {
   type SqliteDb,
   type SqliteHandle,
 } from './client.js';
+export {
+  type CloseRunArgs,
+  closeRun,
+  type InsertRunEventRow,
+  type InsertRunRow,
+  insertRun,
+  insertRunEvent,
+} from './destinations.js';
 export { ensureGlobalProject, GLOBAL_PROJECT_ID, GLOBAL_PROJECT_SLUG } from './ensure-global-project.js';
 export {
   type EnsureProjectArgs,
@@ -27,4 +35,9 @@ export {
   migrateSqlite,
   resolveMigrationsFolder,
 } from './migrate.js';
+export {
+  type ScheduleDurableWriteArgs,
+  type ScheduleDurableWriteResult,
+  scheduleDurableWrite,
+} from './schedule-durable-write.js';
 export { postgresSchema, sqliteSchema } from './schema/index.js';

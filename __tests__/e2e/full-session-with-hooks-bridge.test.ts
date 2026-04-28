@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
+import { OutboxWorker } from '@contextos/cli/lib/outbox';
 import { sqliteSchema } from '@contextos/db';
 import { createPolicyClient } from '@contextos/policy';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -16,6 +16,7 @@ import { createSessionEndHandler } from '../../apps/hooks-bridge/src/handlers/se
 import { createSessionStartHandler } from '../../apps/hooks-bridge/src/handlers/session-start.js';
 import { createUserPromptSubmitHandler } from '../../apps/hooks-bridge/src/handlers/user-prompt-submit.js';
 import { composeDispatch } from '../../apps/hooks-bridge/src/lib/dispatch.js';
+import { createBridgeDispatchHandler } from '../../apps/hooks-bridge/src/lib/outbox-dispatch.js';
 import { createProjectSlugResolver } from '../../apps/hooks-bridge/src/lib/resolve-project-slug.js';
 import { createRunRecorder } from '../../apps/hooks-bridge/src/lib/run-recorder.js';
 
@@ -99,19 +100,21 @@ beforeAll(async () => {
   });
 
   // Build hooks-bridge in-process against the shared sqlite handle.
-  const pending: Array<Promise<void>> = [];
   const policy = createPolicyClient({ db: handle, cacheTtlMs: 100 });
   const projectSlugResolver = createProjectSlugResolver({ cacheTtlMs: 100 });
-  const runRecorder = createRunRecorder({
+  const runRecorder = createRunRecorder({ db: handle });
+  // Module 03.1: drain via the OutboxWorker. Mirrors the production
+  // path — bridge enqueues durably; the worker drains pending_jobs
+  // to its destination tables.
+  const drainWorker = new OutboxWorker({
     db: handle,
-    schedule: (cb) => {
-      pending.push(cb());
-    },
+    dispatchHandler: createBridgeDispatchHandler({ db: handle }),
+    tickMs: 60_000,
+    leaseMs: 1_000,
   });
   const drain = async (): Promise<void> => {
-    while (pending.length > 0) {
-      const inflight = pending.splice(0, pending.length);
-      await Promise.all(inflight);
+    for (let i = 0; i < 50; i += 1) {
+      await drainWorker.tick();
     }
   };
   const preToolUse = createPreToolUseHandler({ policy, projectSlugResolver, db: handle, runRecorder });
