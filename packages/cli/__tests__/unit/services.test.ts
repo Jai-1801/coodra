@@ -51,14 +51,27 @@ describe('resolveServices — log routing', () => {
  */
 describe('resolveServices — env layering', () => {
   let tmpHome: string;
+  let cleanCwd: string;
+  let cwdSpy: ReturnType<typeof vi.spyOn> | null = null;
 
   beforeEach(() => {
     tmpHome = mkdtempSync(join(tmpdir(), 'contextos-services-test-'));
     mkdirSync(join(tmpHome, 'logs'), { recursive: true });
+    // Layered loader (post-Finding-A) reads `<process.cwd()>/.env` too.
+    // Mock cwd to a freshly-created tmp dir with no .env so these tests
+    // are deterministic regardless of where vitest runs from.
+    // Without this, running from a real ContextOS checkout (which has its
+    // own .env at the workspace root) leaks CLERK_SECRET_KEY into the
+    // "absent .env file is non-fatal" assertion.
+    cleanCwd = mkdtempSync(join(tmpdir(), 'contextos-services-cwd-'));
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(cleanCwd);
   });
 
   afterEach(() => {
+    cwdSpy?.mockRestore();
+    cwdSpy = null;
     rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(cleanCwd, { recursive: true, force: true });
   });
 
   it('dotenv-loads <CONTEXTOS_HOME>/.env and forwards keys to the daemon unit env', async () => {
