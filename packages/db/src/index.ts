@@ -27,6 +27,7 @@ export {
   ensureProject,
   SOLO_ORG_ID,
 } from './ensure-project.js';
+export { type EnsureDefaultPolicyResult, ensureDefaultPolicy } from './ensure-default-policy.js';
 export { lookupRunId } from './lookup-run.js';
 export {
   ensurePgVector,
