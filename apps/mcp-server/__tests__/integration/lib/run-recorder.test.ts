@@ -1,5 +1,5 @@
-import { migrateSqlite, type SqliteHandle } from '@contextos/db';
-import { ValidationError } from '@contextos/shared';
+import { migrateSqlite, type SqliteHandle } from '@coodra/contextos-db';
+import { ValidationError } from '@coodra/contextos-shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createDbClient } from '../../../src/lib/db.js';

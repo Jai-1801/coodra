@@ -3,10 +3,10 @@
 // import in the file.
 import './bootstrap/ensure-stderr-logging.js';
 
-import { AUDIT_QUEUE_KINDS, OutboxWorker } from '@contextos/cli/lib/outbox';
-import { ensureGlobalProject, migrateSqlite } from '@contextos/db';
-import { createPolicyClient } from '@contextos/policy';
-import { createLogger } from '@contextos/shared';
+import { AUDIT_QUEUE_KINDS, OutboxWorker } from '@coodra/contextos-cli/lib/outbox';
+import { ensureGlobalProject, migrateSqlite } from '@coodra/contextos-db';
+import { createPolicyClient } from '@coodra/contextos-policy';
+import { createLogger } from '@coodra/contextos-shared';
 import { serve } from '@hono/node-server';
 
 import { buildApp } from './app.js';

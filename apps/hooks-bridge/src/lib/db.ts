@@ -1,5 +1,5 @@
-import { createDb, type DbHandle } from '@contextos/db';
-import { createLogger } from '@contextos/shared';
+import { createDb, type DbHandle } from '@coodra/contextos-db';
+import { createLogger } from '@coodra/contextos-shared';
 
 import type { HooksBridgeEnv } from '../config/env.js';
 

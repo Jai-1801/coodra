@@ -1,4 +1,4 @@
-import { ValidationError } from '@contextos/shared';
+import { ValidationError } from '@coodra/contextos-shared';
 import { z } from 'zod';
 
 /**
@@ -6,7 +6,7 @@ import { z } from 'zod';
  *
  * - `DATABASE_URL` is required (the daemon has no purpose without a
  *   cloud Postgres to push to).
- * - `CONTEXTOS_HOME` and `CONTEXTOS_SQLITE_PATH` are read by `@contextos/db`'s
+ * - `CONTEXTOS_HOME` and `CONTEXTOS_SQLITE_PATH` are read by `@coodra/contextos-db`'s
  *   `resolveSqlitePath` directly; we don't re-validate them here.
  * - `CONTEXTOS_SYNC_TICK_MS` and `CONTEXTOS_SYNC_LEASE_MS` let operators
  *   tune the worker without code changes. Defaults match M03.1's

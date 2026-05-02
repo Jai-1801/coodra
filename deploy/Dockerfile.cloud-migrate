@@ -15,7 +15,7 @@ COPY apps ./apps
 COPY packages ./packages
 RUN pnpm install --frozen-lockfile
 # CLI carries its own build that includes the cloud-migrate command.
-RUN pnpm exec turbo run build --filter=@contextos/cli
+RUN pnpm exec turbo run build --filter=@coodra/contextos-cli
 
 FROM node:22-alpine AS runtime
 RUN apk add --no-cache libstdc++ libc6-compat

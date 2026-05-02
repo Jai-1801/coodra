@@ -55,7 +55,7 @@ export const manifest = {
 } as const;
 ```
 
-The tool's `manifest.ts` description MUST follow the five-part recipe in `system-architecture.md` §24.3. A `manifest.test.ts` file asserts: starts with imperative trigger phrase, 40–80 words, mentions return shape. Use `assertManifestDescriptionValid` from `@contextos/shared/test-utils` — do NOT hand-roll per-tool description assertions.
+The tool's `manifest.ts` description MUST follow the five-part recipe in `system-architecture.md` §24.3. A `manifest.test.ts` file asserts: starts with imperative trigger phrase, 40–80 words, mentions return shape. Use `assertManifestDescriptionValid` from `@coodra/contextos-shared/test-utils` — do NOT hand-roll per-tool description assertions.
 
 ### 9.1.1 Factory-pattern tools vs static-const tools (landed S8)
 

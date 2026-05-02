@@ -1,5 +1,5 @@
 {
-  "name": "@contextos/cli",
+  "name": "@coodra/contextos-cli",
   "version": "0.0.0",
   "private": true,
   "description": "ContextOS CLI — single-binary install/configure/run/diagnose surface for solo and team modes. Module 08a.",
@@ -54,9 +54,9 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@contextos/db": "workspace:*",
-    "@contextos/policy": "workspace:*",
-    "@contextos/shared": "workspace:*",
+    "@coodra/contextos-db": "workspace:*",
+    "@coodra/contextos-policy": "workspace:*",
+    "@coodra/contextos-shared": "workspace:*",
     "commander": "^13.1.0",
     "dotenv": "^17.4.2",
     "env-paths": "^3.0.0",

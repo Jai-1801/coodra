@@ -1,5 +1,5 @@
 /**
- * `@contextos/shared/auth/types` — auth-abstraction primitives shared
+ * `@coodra/contextos-shared/auth/types` — auth-abstraction primitives shared
  * across services.
  *
  * Module 03 S3 moved this from `apps/mcp-server/src/framework/tool-

@@ -6,12 +6,12 @@
 
 | Layer                    | Technology                                       | Version    | Where it lives                                       | Why this and not the alternative |
 |--------------------------|--------------------------------------------------|------------|------------------------------------------------------|---------------------------------|
-| Schema                   | `@contextos/db` (Drizzle ORM)                    | already pinned | `packages/db/src/schema/{sqlite,postgres}.ts`     | Existing schema-parity discipline. Migration 0004 emits via `pnpm db:generate`. |
+| Schema                   | `@coodra/contextos-db` (Drizzle ORM)                    | already pinned | `packages/db/src/schema/{sqlite,postgres}.ts`     | Existing schema-parity discipline. Migration 0004 emits via `pnpm db:generate`. |
 | SQLite driver (solo)     | `better-sqlite3`                                 | already pinned | `packages/db/src/client.ts`                       | Synchronous API → simpler worker pickup logic; WAL mode + `synchronous = NORMAL` give durability without per-write fsync. ADR-008. |
 | Postgres driver (team)   | `postgres.js`                                    | already pinned | `packages/db/src/client.ts`                       | Native pgvector support already wired; lib chosen over `pg` for ADR-003 reasons. |
 | ORM                      | Drizzle ORM                                      | already pinned | both clients                                       | ADR-003. The `ON CONFLICT (id) DO NOTHING` and `RETURNING *` shapes the worker needs are first-class in both dialects. |
 | Worker process model     | In-process (one per service)                     | n/a        | `packages/cli/src/lib/outbox/worker.ts` (new)        | Single-process keeps SQLite WAL writes serialized; no IPC overhead. The worker is a class, not a separate process — boots/stops with the host service. |
-| Logger                   | `@contextos/shared::createLogger` (pino)         | already pinned | `packages/shared/src/logger.ts`                   | Existing structured logging; correlation IDs already plumbed. |
+| Logger                   | `@coodra/contextos-shared::createLogger` (pino)         | already pinned | `packages/shared/src/logger.ts`                   | Existing structured logging; correlation IDs already plumbed. |
 | Test framework           | Vitest                                           | already pinned | every `__tests__/`                                | ADR-005. Fakers (`vi.useFakeTimers`) are how the backoff scheduler is tested without real wall-clock waits. |
 | Crash-safety harness     | Plain Node + execa (subprocess kill -9)          | already pinned | `__tests__/manual/`                                | Same model as `verify-sigterm-drain.ts`; subprocess SIGTERM/-9 lets us prove crash safety without testcontainers. |
 
@@ -24,9 +24,9 @@
 ## Deps audit
 
 ```bash
-$ pnpm --filter @contextos/db ls --depth 0
-@contextos/db@0.0.0
-├── @contextos/shared@workspace:*
+$ pnpm --filter @coodra/contextos-db ls --depth 0
+@coodra/contextos-db@0.0.0
+├── @coodra/contextos-shared@workspace:*
 ├── better-sqlite3@<pinned>
 ├── drizzle-orm@<pinned>
 ├── postgres@<pinned>
@@ -36,10 +36,10 @@ $ pnpm --filter @contextos/db ls --depth 0
 No additions. Confirmed by reading `packages/db/package.json`.
 
 ```bash
-$ pnpm --filter @contextos/cli ls --depth 0
-@contextos/cli@0.0.0
-├── @contextos/db@workspace:*
-├── @contextos/shared@workspace:*
+$ pnpm --filter @coodra/contextos-cli ls --depth 0
+@coodra/contextos-cli@0.0.0
+├── @coodra/contextos-db@workspace:*
+├── @coodra/contextos-shared@workspace:*
 ├── commander@<pinned>
 ├── env-paths@<pinned>
 ├── execa@<pinned>
@@ -48,7 +48,7 @@ $ pnpm --filter @contextos/cli ls --depth 0
 └── zod@<pinned>
 ```
 
-No additions. The OutboxWorker uses Node built-ins (`node:crypto`, `node:timers/promises`) + Drizzle from `@contextos/db`.
+No additions. The OutboxWorker uses Node built-ins (`node:crypto`, `node:timers/promises`) + Drizzle from `@coodra/contextos-db`.
 
 ## Architecture cross-references
 

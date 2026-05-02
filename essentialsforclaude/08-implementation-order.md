@@ -9,7 +9,7 @@ Modules MUST be implemented in order. Each depends on the previous ones.
 | 01 | Foundation | — | `docs/feature-packs/01-foundation/` |
 | 02 | MCP Server (incl. tool manifest per `system-architecture.md` §24) | 01 | `docs/feature-packs/02-mcp-server/` |
 | 03 | Hooks Bridge | 01, 02 | `docs/feature-packs/03-hooks-bridge/` |
-| 08a | CLI (`@contextos/cli`) — install + lifecycle | 01, 02, 03 | `docs/feature-packs/08a-cli/` |
+| 08a | CLI (`@coodra/contextos-cli`) — install + lifecycle | 01, 02, 03 | `docs/feature-packs/08a-cli/` |
 | 04 | Web App | 01, 02, 08a | `docs/feature-packs/04-web-app/` |
 | 05 | NL Assembly | 01, 02 | `docs/feature-packs/05-nl-assembly/` |
 | 06 | Semantic Diff | 01, 03 | `docs/feature-packs/06-semantic-diff/` |

@@ -1,7 +1,7 @@
 import { runKeySegmentSchema } from '../idempotency.js';
 
 /**
- * `@contextos/shared/hooks/normalize-session-id` — single function that
+ * `@coodra/contextos-shared/hooks/normalize-session-id` — single function that
  * turns an agent-supplied raw session id into a value safe to embed in
  * a ContextOS run-key (`run:{projectId}:{sessionId}:{uuid}` per
  * `system-architecture.md` §4.3).

@@ -18,7 +18,7 @@ export interface ContextosMcpEntry {
 /**
  * Build the canonical `contextos` entry for `.mcp.json`. When the
  * `contextos-mcp-server` binary is on disk (dev monorepo case), the entry
- * points at it directly. Otherwise the entry uses `npx @contextos/cli mcp-stdio`
+ * points at it directly. Otherwise the entry uses `npx @coodra/contextos-cli mcp-stdio`
  * — the path resolves at IDE-startup time, sidestepping the npx-cache-GC
  * footgun named in techstack.md Gotchas.
  */
@@ -32,7 +32,7 @@ export function buildContextosMcpEntry(options: BuildMcpEntryOptions): Contextos
   }
   return {
     command: 'npx',
-    args: ['-y', '@contextos/cli', 'mcp-stdio'],
+    args: ['-y', '@coodra/contextos-cli', 'mcp-stdio'],
     env: { CONTEXTOS_LOG_DESTINATION: 'stderr', CLERK_SECRET_KEY: options.clerkSecretKey },
   };
 }

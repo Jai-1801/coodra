@@ -46,7 +46,7 @@ afterEach(async () => {
   handle.raw.prepare('DELETE FROM pending_jobs').run();
 });
 
-describe('@contextos/db::scheduleAuditWriteWithSync', () => {
+describe('@coodra/contextos-db::scheduleAuditWriteWithSync', () => {
   it('enqueues paired audit + sync_to_cloud rows in team mode', async () => {
     const result = await scheduleAuditWriteWithSync(handle, {
       mode: 'team',

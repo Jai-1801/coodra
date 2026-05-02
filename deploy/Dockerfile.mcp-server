@@ -12,7 +12,7 @@ COPY pnpm-lock.yaml package.json pnpm-workspace.yaml turbo.json tsconfig.base.js
 COPY apps ./apps
 COPY packages ./packages
 RUN pnpm install --frozen-lockfile
-RUN pnpm exec turbo run build --filter=@contextos/mcp-server
+RUN pnpm exec turbo run build --filter=@coodra/contextos-mcp-server
 
 # ──────────────────────────────────────────────────────────────────────
 # Runtime image

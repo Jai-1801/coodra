@@ -58,7 +58,7 @@ Valid JSON, single server entry named `contextos` pointing to `http://127.0.0.1:
 
 ### S6 — `packages/shared`
 
-Package `@contextos/shared`.
+Package `@coodra/contextos-shared`.
 
 **Files:** `packages/shared/package.json`, `packages/shared/tsconfig.json`, `packages/shared/src/index.ts`, `packages/shared/src/logger.ts`, `packages/shared/src/config.ts`, `packages/shared/src/errors/index.ts` (`AppError`, `ValidationError`, `NotFoundError`, `ConflictError`, `UnauthorizedError`, `InternalError`), `packages/shared/src/idempotency.ts` (exactly `generateRunKey({ projectId, sessionId })` and `generateRunEventKey({ sessionId, toolUseId, phase })` — no other helpers until needed), and matching `__tests__/unit/*.test.ts`.
 
@@ -79,15 +79,15 @@ Package `@contextos/shared`.
 
 ### S7 — `packages/db`
 
-Package `@contextos/db`.
+Package `@coodra/contextos-db`.
 
 **Files:** `packages/db/package.json`, `packages/db/tsconfig.json`, `packages/db/drizzle.sqlite.config.ts`, `packages/db/drizzle.postgres.config.ts`, `packages/db/src/schema/sqlite.ts`, `packages/db/src/schema/postgres.ts`, `packages/db/src/schema/index.ts` (dialect-aware re-export), `packages/db/src/client.ts` (`createDb()` factory), `packages/db/src/migrate.ts` (programmatic migrator for Vitest + CLI), `packages/db/__tests__/unit/schema-parity.test.ts`, and the generated migrations under `packages/db/drizzle/sqlite/` and `packages/db/drizzle/postgres/`.
 
 **Commands run in this step:**
 
 ```bash
-pnpm --filter @contextos/db exec drizzle-kit generate --config=drizzle.sqlite.config.ts
-pnpm --filter @contextos/db exec drizzle-kit generate --config=drizzle.postgres.config.ts
+pnpm --filter @coodra/contextos-db exec drizzle-kit generate --config=drizzle.sqlite.config.ts
+pnpm --filter @coodra/contextos-db exec drizzle-kit generate --config=drizzle.postgres.config.ts
 ```
 
 The produced SQL is committed.
@@ -121,7 +121,7 @@ pnpm install
 pnpm lint
 pnpm typecheck
 pnpm test:unit
-pnpm --filter @contextos/db run schema:parity   # alias for the parity test, same thing run alone
+pnpm --filter @coodra/contextos-db run schema:parity   # alias for the parity test, same thing run alone
 ```
 
 All four must pass before moving to S11. Any failure triggers a fix commit on this branch — never a workaround.

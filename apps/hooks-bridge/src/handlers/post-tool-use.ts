@@ -1,6 +1,6 @@
-import { type DbHandle, GLOBAL_PROJECT_ID, lookupRunId } from '@contextos/db';
-import { createLogger } from '@contextos/shared';
-import type { HookEvent } from '@contextos/shared/hooks';
+import { type DbHandle, GLOBAL_PROJECT_ID, lookupRunId } from '@coodra/contextos-db';
+import { createLogger } from '@coodra/contextos-shared';
+import type { HookEvent } from '@coodra/contextos-shared/hooks';
 
 import type { HookDispatchResult } from '../app.js';
 import type { ProjectSlugResolver } from '../lib/resolve-project-slug.js';

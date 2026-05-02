@@ -33,9 +33,9 @@ $ pnpm build
 
 | Workspace | Result | Cache |
 |---|---|---|
-| `@contextos/shared` | ✅ pass | cache miss |
-| `@contextos/db` | ✅ pass | cache miss |
-| `@contextos/mcp-server` | ✅ pass | cache miss |
+| `@coodra/contextos-shared` | ✅ pass | cache miss |
+| `@coodra/contextos-db` | ✅ pass | cache miss |
+| `@coodra/contextos-mcp-server` | ✅ pass | cache miss |
 
 `Tasks: 3 successful, 3 total · Time: 19.152s`. Zero TypeScript errors.
 
@@ -44,7 +44,7 @@ $ pnpm build
 Boot under `--transport http` with `CONTEXTOS_MODE=solo`, `CONTEXTOS_SQLITE_PATH=/tmp/contextos-verify/data.db`. All eight lib clients + the registry + the HTTP transport report ready:
 
 ```
-event=boot                serverName=@contextos/mcp-server  serverVersion=0.0.0  mode=solo
+event=boot                serverName=@coodra/contextos-mcp-server  serverVersion=0.0.0  mode=solo
 event=db_client_opened    kind=sqlite
 event=auth_solo_bypass_in_use  identity={user_dev_local, org_dev_local, solo-bypass}   ← intentional WARN per S7b
 event=policy_engine_wired  mode=solo  cacheTtlMs=60000  timeoutMs=100  breakerThreshold=5  breakerHalfOpenMs=30000
@@ -108,7 +108,7 @@ Boot `--transport http`, `CONTEXTOS_MODE=solo`, `CLERK_SECRET_KEY=sk_test_replac
 | Probe | Status | Body |
 |---|---|---|
 | `GET /healthz` | 200 + `Cache-Control: no-store` | `ok` |
-| `POST /mcp` JSON-RPC `initialize`, no Authorization header | 200 (SSE stream) | `serverInfo.name = "@contextos/mcp-server"`, capabilities populated |
+| `POST /mcp` JSON-RPC `initialize`, no Authorization header | 200 (SSE stream) | `serverInfo.name = "@coodra/contextos-mcp-server"`, capabilities populated |
 
 **Pass / Fail:** ✅ pass.
 
@@ -293,7 +293,7 @@ Ranked by impact (highest first):
 
 ### 8.1 No automatic migrations at server boot — **HIGH IMPACT**
 
-`apps/mcp-server/src/index.ts` builds `createDbClient()` and never calls `migrateSqlite` / `migratePostgres`. A fresh user running `pnpm --filter @contextos/mcp-server start` against an empty `~/.contextos/data.db` gets `no such table: projects` on the first tool call.
+`apps/mcp-server/src/index.ts` builds `createDbClient()` and never calls `migrateSqlite` / `migratePostgres`. A fresh user running `pnpm --filter @coodra/contextos-mcp-server start` against an empty `~/.contextos/data.db` gets `no such table: projects` on the first tool call.
 
 Repro:
 ```bash

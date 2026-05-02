@@ -127,16 +127,16 @@ Format:
 ## 2026-04-24 14:00 — npm scope claim for `@contextos` before Module 08a publish
 
 **What is needed:** Reserve the `@contextos` npm scope (or pick an alternative scope if taken).
-**Why:** Module 08a's CLI is `@contextos/cli`. The scope must be claimed before the publish-flag-day at the end of 08a.
+**Why:** Module 08a's CLI is `@coodra/contextos-cli`. The scope must be claimed before the publish-flag-day at the end of 08a.
 **Steps:** Visit <https://www.npmjs.com/signup>, sign in (or create an org), then create the `@contextos` org at <https://www.npmjs.com/org/create>. If `@contextos` is taken, pick `@coodra` or another available scope and update the workspace package names in the same commit.
 **What to paste back:** Confirmation of the scope claimed (just the name).
 **Blocking module:** Module 08a S9 publish-flag-day (the package builds and runs without the scope; only `npm publish` requires it).
 
 ## 2026-04-24 14:00 — Anthropic MCP marketplace listing (post-08a)
 
-**What is needed:** Submission of `@contextos/cli` to the Anthropic MCP marketplace (when the marketplace opens to third-party submissions).
+**What is needed:** Submission of `@coodra/contextos-cli` to the Anthropic MCP marketplace (when the marketplace opens to third-party submissions).
 **Why:** Discovery channel — Claude Code users will browse the marketplace before they search npm.
-**Steps:** Watch <https://docs.anthropic.com/> for the marketplace submission portal launch. When live, follow the submission steps with `@contextos/cli` as the package name. No action required from you today.
+**Steps:** Watch <https://docs.anthropic.com/> for the marketplace submission portal launch. When live, follow the submission steps with `@coodra/contextos-cli` as the package name. No action required from you today.
 **What to paste back:** Submission confirmation when the marketplace accepts the listing.
 **Blocking module:** None (post-launch ops, not on the critical path).
 

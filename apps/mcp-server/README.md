@@ -1,4 +1,4 @@
-# `@contextos/mcp-server`
+# `@coodra/contextos-mcp-server`
 
 ContextOS MCP server — the process that speaks the Model Context Protocol
 on behalf of the platform. This is the package that MCP clients (Claude
@@ -29,16 +29,16 @@ the real tools land in S6–S15.
 ```bash
 # From the repo root:
 pnpm install                           # triggers `prepare` hook wiring
-pnpm --filter @contextos/shared build  # @contextos/db imports the built dist
-pnpm --filter @contextos/db build      # mcp-server imports the built dist
-pnpm --filter @contextos/mcp-server build
-pnpm --filter @contextos/mcp-server start
+pnpm --filter @coodra/contextos-shared build  # @coodra/contextos-db imports the built dist
+pnpm --filter @coodra/contextos-db build      # mcp-server imports the built dist
+pnpm --filter @coodra/contextos-mcp-server build
+pnpm --filter @coodra/contextos-mcp-server start
 ```
 
 Or run against source with hot reload:
 
 ```bash
-pnpm --filter @contextos/mcp-server dev
+pnpm --filter @coodra/contextos-mcp-server dev
 ```
 
 The `dev` script sets `CONTEXTOS_LOG_DESTINATION=stderr` for you.
@@ -74,8 +74,8 @@ time. After first build, reload the IDE to have it spawn the server.
   corrupt the transport and the client will disconnect. `src/index.ts`
   imports `./bootstrap/ensure-stderr-logging.js` as its very first
   statement; that module sets `CONTEXTOS_LOG_DESTINATION=stderr` before
-  `@contextos/shared`'s logger is loaded, which in turn routes every
-  downstream `createLogger` call (including deep inside `@contextos/db`)
+  `@coodra/contextos-shared`'s logger is loaded, which in turn routes every
+  downstream `createLogger` call (including deep inside `@coodra/contextos-db`)
   to fd 2.
 - **No `process.env.X!` outside `src/config/env.ts`.** That module is
   the one place that reads `process.env` and exports a typed,

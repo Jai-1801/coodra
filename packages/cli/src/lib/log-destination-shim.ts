@@ -1,7 +1,7 @@
 /**
  * `packages/cli/src/lib/log-destination-shim` — must be imported first
  * in the CLI binary's entry point, before any module that constructs
- * a `@contextos/shared` logger (`createLogger` reads the env var at
+ * a `@coodra/contextos-shared` logger (`createLogger` reads the env var at
  * module-init time).
  *
  * Closes integration finding 2026-04-27 (post-08a walk): `contextos init`

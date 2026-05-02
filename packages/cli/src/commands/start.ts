@@ -39,7 +39,7 @@ export async function runStartCommand(options: StartOptions = {}, io: StartIO = 
   if (options.foreground === true) {
     io.writeStderr(
       `${pc.yellow('contextos start --foreground')}: not implemented in 08a — for foreground debug use ` +
-        '`pnpm --filter @contextos/{mcp-server,hooks-bridge} dev` directly per docs/DEVELOPMENT.md.\n',
+        '`pnpm --filter @coodra/contextos-{mcp-server,hooks-bridge} dev` directly per docs/DEVELOPMENT.md.\n',
     );
     return io.exit(EXIT_USER_RECOVERABLE);
   }

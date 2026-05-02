@@ -43,7 +43,7 @@ The single load-bearing acceptance criterion: **a SIGTERM mid-PreToolUse with a 
 ### 3.1 In scope
 
 1. **Schema migration 0004** — add `picked_at`, `failed_at`, `last_error` columns to `pending_jobs` (sqlite + postgres dialects, `@preserve`-block-locked migration parity per M01 discipline). Existing columns (`id`, `queue`, `payload`, `attempts`, `status`, `run_after`, `created_at`) stay as-is.
-2. **`scheduleDurableWrite(handle, job)` helper** in `@contextos/db` — synchronous (from caller's POV) INSERT into `pending_jobs`. Wraps the canonical envelope: `{ id, queue, payload (JSON-serialized), attempts: 0, status: 'pending', run_after: now }`.
+2. **`scheduleDurableWrite(handle, job)` helper** in `@coodra/contextos-db` — synchronous (from caller's POV) INSERT into `pending_jobs`. Wraps the canonical envelope: `{ id, queue, payload (JSON-serialized), attempts: 0, status: 'pending', run_after: now }`.
 3. **`OutboxWorker` class** in `packages/cli/src/lib/outbox/` (one helper, two consumers). Owns the drain loop:
    - **Pickup:** `UPDATE pending_jobs SET status='picked', picked_at=now() WHERE status='pending' AND run_after <= now() RETURNING *` (single-row pickup; SQLite + postgres support RETURNING).
    - **Lease recovery:** rows with `status='picked' AND picked_at < now() - lease_timeout` are re-eligible (treated as orphans — the picking worker died).
@@ -208,8 +208,8 @@ Five questions. Each has a recommendation in §11; the user signs off (or amends
 
 - **Recommendation:** **each service owns its own drain worker** (bridge + mcp-server, both pulling from the same `pending_jobs` table; lease serializes pickup).
 - **Why this answer:** the bridge is the source of most audit events but not all of them — `check_policy` on the MCP server has its own audit write. If only the bridge drains, MCP-originated audits become bridge-availability-coupled. If only MCP drains, bridge audits couple the other way. Independent workers mean each service's audit trail is durable as long as ANY worker is running. The lease mechanism (`status='picked' AND picked_at >= now()-30s`) prevents double-dispatch; idempotency at the destination handles the rare overlap.
-- **Alternative:** single worker — choose bridge (the dominant source) and accept that MCP-only deployments aren't supported. Trade-off: simpler concurrency model, but couples MCP audit durability to bridge uptime. Not chosen because solo-mode dev workflows can run mcp-server without the bridge (e.g., via `pnpm --filter @contextos/mcp-server dev` for tooling smoke-tests).
-- **What this constrains:** `OutboxWorker` is a generic class with a `dispatch(queue, payload)` map; both services compose it with their own dispatch handlers (the bridge handler and mcp-server handler can dispatch the same `queue` types — they share the same destination insert functions from `@contextos/db`).
+- **Alternative:** single worker — choose bridge (the dominant source) and accept that MCP-only deployments aren't supported. Trade-off: simpler concurrency model, but couples MCP audit durability to bridge uptime. Not chosen because solo-mode dev workflows can run mcp-server without the bridge (e.g., via `pnpm --filter @coodra/contextos-mcp-server dev` for tooling smoke-tests).
+- **What this constrains:** `OutboxWorker` is a generic class with a `dispatch(queue, payload)` map; both services compose it with their own dispatch handlers (the bridge handler and mcp-server handler can dispatch the same `queue` types — they share the same destination insert functions from `@coodra/contextos-db`).
 
 ### OQ3 — Failure policy specifics
 
@@ -245,7 +245,7 @@ Five questions. Each has a recommendation in §11; the user signs off (or amends
 
 | Slice | Title                                                                                  |
 |-------|----------------------------------------------------------------------------------------|
-| S0    | Schema migration 0004 + `scheduleDurableWrite` helper in `@contextos/db`               |
+| S0    | Schema migration 0004 + `scheduleDurableWrite` helper in `@coodra/contextos-db`               |
 | S1    | `OutboxWorker` class — pickup, lease, dispatch, retry, give-up                         |
 | S2    | Replace 7 audit-write `setImmediate` callsites with `scheduleDurableWrite`             |
 | S3    | Worker lifecycle wiring in `apps/hooks-bridge/src/index.ts` + mcp-server `index.ts`    |

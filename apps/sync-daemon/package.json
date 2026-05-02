@@ -1,5 +1,5 @@
 {
-  "name": "@contextos/sync-daemon",
+  "name": "@coodra/contextos-sync-daemon",
   "version": "0.0.0",
   "private": true,
   "description": "ContextOS Sync Daemon — third managed process in team mode. Drains pending_jobs sync_to_cloud rows from local SQLite and pushes the referenced row into cloud Postgres. Module 04a.",
@@ -24,9 +24,9 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@contextos/cli": "workspace:*",
-    "@contextos/db": "workspace:*",
-    "@contextos/shared": "workspace:*",
+    "@coodra/contextos-cli": "workspace:*",
+    "@coodra/contextos-db": "workspace:*",
+    "@coodra/contextos-shared": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "zod": "^4.3.6"
   },

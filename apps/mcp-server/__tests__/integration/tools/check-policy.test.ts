@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { migrateSqlite, type SqliteHandle, sqliteSchema } from '@contextos/db';
+import { migrateSqlite, type SqliteHandle, sqliteSchema } from '@coodra/contextos-db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 

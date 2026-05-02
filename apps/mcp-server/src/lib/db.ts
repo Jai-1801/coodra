@@ -1,4 +1,4 @@
-import { type CreateSqliteDbOptions, createDb, type DbHandle } from '@contextos/db';
+import { type CreateSqliteDbOptions, createDb, type DbHandle } from '@coodra/contextos-db';
 
 import type { DbClient } from '../framework/tool-context.js';
 import { createMcpLogger } from './logger.js';
@@ -11,7 +11,7 @@ import { createMcpLogger } from './logger.js';
  *   - The factory is called exactly once at boot in `src/index.ts`.
  *     The returned `DbClient` is handed to `ToolRegistry` inside the
  *     `ContextDeps` bag; every tool invocation receives it through
- *     `ctx.db`. Tools never call `@contextos/db::createDb` directly.
+ *     `ctx.db`. Tools never call `@coodra/contextos-db::createDb` directly.
  *   - `DbClient.db` is typed as `unknown` at the ToolContext
  *     boundary (see `tool-context.ts`) to keep the driver choice out
  *     of the ToolContext interface. This file re-exports the

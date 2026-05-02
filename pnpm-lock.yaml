@@ -11,22 +11,22 @@ importers:
       '@biomejs/biome':
         specifier: ^2.4.12
         version: 2.4.12
-      '@contextos/cli':
+      '@coodra/contextos-cli':
         specifier: workspace:*
         version: link:packages/cli
-      '@contextos/db':
+      '@coodra/contextos-db':
         specifier: workspace:*
         version: link:packages/db
-      '@contextos/hooks-bridge':
+      '@coodra/contextos-hooks-bridge':
         specifier: workspace:*
         version: link:apps/hooks-bridge
-      '@contextos/mcp-server':
+      '@coodra/contextos-mcp-server':
         specifier: workspace:*
         version: link:apps/mcp-server
-      '@contextos/policy':
+      '@coodra/contextos-policy':
         specifier: workspace:*
         version: link:packages/policy
-      '@contextos/shared':
+      '@coodra/contextos-shared':
         specifier: workspace:*
         version: link:packages/shared
       '@modelcontextprotocol/sdk':
@@ -65,16 +65,16 @@ importers:
 
   apps/hooks-bridge:
     dependencies:
-      '@contextos/cli':
+      '@coodra/contextos-cli':
         specifier: workspace:*
         version: link:../../packages/cli
-      '@contextos/db':
+      '@coodra/contextos-db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@contextos/policy':
+      '@coodra/contextos-policy':
         specifier: workspace:*
         version: link:../../packages/policy
-      '@contextos/shared':
+      '@coodra/contextos-shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@hono/node-server':
@@ -102,16 +102,16 @@ importers:
 
   apps/mcp-server:
     dependencies:
-      '@contextos/cli':
+      '@coodra/contextos-cli':
         specifier: workspace:*
         version: link:../../packages/cli
-      '@contextos/db':
+      '@coodra/contextos-db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@contextos/policy':
+      '@coodra/contextos-policy':
         specifier: workspace:*
         version: link:../../packages/policy
-      '@contextos/shared':
+      '@coodra/contextos-shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@hono/node-server':
@@ -145,13 +145,13 @@ importers:
 
   apps/sync-daemon:
     dependencies:
-      '@contextos/cli':
+      '@coodra/contextos-cli':
         specifier: workspace:*
         version: link:../../packages/cli
-      '@contextos/db':
+      '@coodra/contextos-db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@contextos/shared':
+      '@coodra/contextos-shared':
         specifier: workspace:*
         version: link:../../packages/shared
       drizzle-orm:
@@ -170,13 +170,13 @@ importers:
 
   packages/cli:
     dependencies:
-      '@contextos/db':
+      '@coodra/contextos-db':
         specifier: workspace:*
         version: link:../db
-      '@contextos/policy':
+      '@coodra/contextos-policy':
         specifier: workspace:*
         version: link:../policy
-      '@contextos/shared':
+      '@coodra/contextos-shared':
         specifier: workspace:*
         version: link:../shared
       commander:
@@ -213,7 +213,7 @@ importers:
 
   packages/db:
     dependencies:
-      '@contextos/shared':
+      '@coodra/contextos-shared':
         specifier: workspace:*
         version: link:../shared
       better-sqlite3:
@@ -241,10 +241,10 @@ importers:
 
   packages/policy:
     dependencies:
-      '@contextos/db':
+      '@coodra/contextos-db':
         specifier: workspace:*
         version: link:../db
-      '@contextos/shared':
+      '@coodra/contextos-shared':
         specifier: workspace:*
         version: link:../shared
       cockatiel:

@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { createLogger, InternalError, ValidationError } from '@contextos/shared';
+import { createLogger, InternalError, ValidationError } from '@coodra/contextos-shared';
 import Database, { type Database as BetterSqliteDatabase } from 'better-sqlite3';
 import { type BetterSQLite3Database, drizzle as drizzleSqlite } from 'drizzle-orm/better-sqlite3';
 import { drizzle as drizzlePostgres, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';

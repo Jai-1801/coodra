@@ -1,4 +1,4 @@
-import { runKeySegmentSchema } from '@contextos/shared';
+import { runKeySegmentSchema } from '@coodra/contextos-shared';
 import { z } from 'zod';
 
 /**

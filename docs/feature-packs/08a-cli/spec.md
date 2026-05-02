@@ -1,4 +1,4 @@
-# Module 08a — CLI (`@contextos/cli`) — Spec
+# Module 08a — CLI (`@coodra/contextos-cli`) — Spec
 
 > **Status:** in progress on `feat/08a-cli` (refined 2026-04-27 after M03 post-merge findings F7–F15 landed; open-question sign-off landed 2026-04-27 — see §11).
 > **Depends on:** 01 Foundation, 02 MCP Server, 03 Hooks Bridge
@@ -6,9 +6,9 @@
 > **Aware of:** Module 03.1 (Durable Audit Outbox) placeholder — `contextos doctor` surfaces "audit writes are still `setImmediate`-based" as a YELLOW warn until M03.1 lands. See `docs/feature-packs/03.1-durable-outbox/spec.md`.
 > **Source of truth:** `system-architecture.md` §1 (two-mode), §13 (Server Setup), §19 (Auth — `LOCAL_HOOK_SECRET` config-file path), `essentialsforclaude/02-agent-human-boundary.md` §2.4 (sentinels vs real values), `essentialsforclaude/08-implementation-order.md`. M02 closeout pack §8.5 (the deferred first-run UX gap that named this module). M03 closeout pack §"Post-merge integration findings" (F7–F15 — `contextos doctor` surfaces the integration seams those findings exposed).
 
-## 1. What `@contextos/cli` is
+## 1. What `@coodra/contextos-cli` is
 
-A single Node.js CLI installed via `npm i -g @contextos/cli` (or `npx @contextos/cli <cmd>` for one-shot use) that takes a developer from **zero** to **a working ContextOS install on their machine** in under 90 seconds, without manual `.mcp.json` editing, build steps, or service-orchestration knowledge.
+A single Node.js CLI installed via `npm i -g @coodra/contextos-cli` (or `npx @coodra/contextos-cli <cmd>` for one-shot use) that takes a developer from **zero** to **a working ContextOS install on their machine** in under 90 seconds, without manual `.mcp.json` editing, build steps, or service-orchestration knowledge.
 
 It is the only supported install path. After Module 08a ships, no documentation page should ever instruct a user to "clone the repo, `pnpm install`, build, then edit `.mcp.json`" — that path remains valid for ContextOS contributors but is removed from the user-facing onboarding.
 
@@ -18,7 +18,7 @@ The CLI is **the system's UX surface for setup and lifecycle management**. The W
 
 Module 08a is "complete" when **every** item below holds on a clean machine:
 
-1. `npx @contextos/cli init` in any project root completes in under 90 seconds for a 50k-line codebase, with no questions asked, and produces a working ContextOS install (Claude Code or Cursor sees the `contextos__*` tools after IDE restart).
+1. `npx @coodra/contextos-cli init` in any project root completes in under 90 seconds for a 50k-line codebase, with no questions asked, and produces a working ContextOS install (Claude Code or Cursor sees the `contextos__*` tools after IDE restart).
 2. `contextos start` launches the MCP Server (Module 02) and Hooks Bridge (Module 03) as background daemons via the platform's native daemon manager (launchd on macOS, systemd on Linux, Task Scheduler on Windows). Falls back to a detached child process when no daemon manager is reachable. Writes PIDs to `~/.contextos/pids/`.
 3. `contextos stop` reliably terminates every service started by `start`. Idempotent (safe to call when nothing is running).
 4. `contextos status` prints a per-service report (`MCP Server: running on :3100, PID 41234, uptime 4m20s`) in under 200 ms. No state is implied — every line is a live probe.
@@ -26,7 +26,7 @@ Module 08a is "complete" when **every** item below holds on a clean machine:
 6. `contextos team join <token>` (stub in 08a — full flow lands when team mode is reachable) fails cleanly with a clear "team mode not yet generally available" message and exit code 2. The command, flag set, and help text exist in 08a so the surface is stable; the OAuth round-trip is wired in the team-mode-launch slice.
 7. `contextos --version` prints the published version. `contextos --help` prints a compact command list. Every subcommand supports `--help` with its own help block.
 8. The CLI **never** writes secrets to logs (the `LOCAL_HOOK_SECRET` lifecycle in particular). The CLI **never** asks the user to paste a secret into the terminal — secrets land via `~/.contextos/config.json` (file-mode `0600`) or env var only.
-9. `pnpm --filter @contextos/cli test:unit` passes with ≥ 80% line coverage on `src/`. Integration tests cover at minimum: `init` against a tmp project, `start`/`stop` lifecycle on macOS+Linux runners (Windows runner deferred to 08a follow-up), `doctor` against three known-broken states.
+9. `pnpm --filter @coodra/contextos-cli test:unit` passes with ≥ 80% line coverage on `src/`. Integration tests cover at minimum: `init` against a tmp project, `start`/`stop` lifecycle on macOS+Linux runners (Windows runner deferred to 08a follow-up), `doctor` against three known-broken states.
 10. Module 08a Context Pack saved to `docs/context-packs/YYYY-MM-DD-module-08a-cli.md` per `essentialsforclaude/08-implementation-order.md` §8.4.
 
 ## 3. Non-goals
@@ -39,8 +39,8 @@ These are deliberately excluded from Module 08a and are **not** stubbed:
 - **No `team join` OAuth round-trip in 08a.** The command, help text, and exit codes exist for surface stability, but the actual Clerk-mediated browser OAuth dance lands when team mode is reachable end-to-end. Until then, the command exits with `code 2` and a clear message.
 - **No Windows daemon-manager (Task Scheduler) parity in 08a's CI matrix.** macOS (launchd) and Linux (systemd) are required. Windows ships best-effort with detached-child fallback; full Task Scheduler integration is an 08a follow-up, tracked in the Module 08a Context Pack's "what should be built next" section.
 - **No installer GUI, no `.dmg`, no `.exe`.** Pure CLI via npm.
-- **No telemetry / phone-home.** Zero outbound network calls during `init` / `start` / `stop` / `status` / `doctor` other than (a) optional Graphify scan of the local repo, (b) optional version-check against `npm view @contextos/cli version` gated behind a `--check-updates` flag (default off).
-- **No automatic updates.** Users run `npm i -g @contextos/cli@latest` to update. Update detection is opt-in.
+- **No telemetry / phone-home.** Zero outbound network calls during `init` / `start` / `stop` / `status` / `doctor` other than (a) optional Graphify scan of the local repo, (b) optional version-check against `npm view @coodra/contextos-cli version` gated behind a `--check-updates` flag (default off).
+- **No automatic updates.** Users run `npm i -g @coodra/contextos-cli@latest` to update. Update detection is opt-in.
 
 ## 4. Commands — the surface
 
@@ -61,7 +61,7 @@ Every command must:
 - Print human output by default and JSON output behind `--json` (where applicable) for shell-script consumers.
 - Exit with a non-zero code on any failure that requires user action; never `process.exit(1)` silently.
 - Log to `~/.contextos/logs/<command>-YYYY-MM-DD.log` in addition to stderr.
-- **Never write secrets to logs** — the `LOCAL_HOOK_SECRET` lifecycle in particular. Log lines that touch it must redact via the shared `@contextos/shared` logger's redaction config.
+- **Never write secrets to logs** — the `LOCAL_HOOK_SECRET` lifecycle in particular. Log lines that touch it must redact via the shared `@coodra/contextos-shared` logger's redaction config.
 
 ## 4.1 What `contextos init` writes — sentinels vs real values per §2.4
 
@@ -85,7 +85,7 @@ Doctor's job is to make M01+M02+M03's invariants observable. Each check maps to 
 |---|---|---|---|
 | 1 | Node version ≥ 22.16.0 | red | Repo engine requirement. |
 | 2 | `~/.contextos/` directory exists, writable, mode `0700` | red | First-run UX gate; `init` must have run. |
-| 3 | `~/.contextos/data.db` opens via `@contextos/db::createDb({kind:'local'})` | red | DB integrity; M03 F11 reminder that this binary is SQLite-only. |
+| 3 | `~/.contextos/data.db` opens via `@coodra/contextos-db::createDb({kind:'local'})` | red | DB integrity; M03 F11 reminder that this binary is SQLite-only. |
 | 4 | DB migrations are at head (`__drizzle_migrations` matches latest) | red | Missing `init` step or partial upgrade. |
 | 5 | `__global__` sentinel project row exists in `projects` (F7 invariant) | red | F7 closure live; if missing, audit-on-unregistered-cwd path is broken. |
 | 6 | Recent (last 100) `policy_decisions` rows have `idempotency_key` matching `^pd:[^:]+:[^:]+:[^:]+:.+$` (F14 shape — 4 segments after `pd:`) | yellow | F14 closure live; legacy 3-segment rows surface as YELLOW with a one-liner "regenerate via `init --force`-style migration only if needed." |
@@ -133,7 +133,7 @@ Run `contextos doctor` for the full diagnostic.
 ## 5. The "first 5 minutes" — the experience this spec is buying
 
 ```
-$ npx @contextos/cli init
+$ npx @coodra/contextos-cli init
 ✓ Detected project: TypeScript monorepo at /Users/you/work/myapp
 ✓ Detected IDE: Claude Code (~/.claude/ exists)
 ✓ Detected: existing .mcp.json (merging, original backed up to .mcp.json.bak)
@@ -210,9 +210,9 @@ The five open questions raised at M08a kickoff are now locked. Each subsection r
 - **Why this answer:** Adding `--fix` doubles the test matrix (each check needs its fix tested AND its detection tested) and introduces silent-recovery footguns: a `doctor --fix` that flips a check from red to green can mask the underlying install bug that caused the red. Read-only doctor is also predictable for CI usage (`doctor --json | jq` is safe to run in pipelines without unintended side effects). If user demand for `--fix` surfaces post-launch, add in a follow-up slice with the design-cost paid then.
 - **What this constrains:** S3 implements the 20 checks per §4.5 with `remediation` strings only. No write paths in any check. The Check interface does not include a `fix()` method. `doctor --json` schema does not include a "would-fix" field.
 
-### Decision 5 — Standalone npm package `@contextos/cli` (publish step out of 08a scope)
+### Decision 5 — Standalone npm package `@coodra/contextos-cli` (publish step out of 08a scope)
 
 - **Question (was):** Is the CLI a workspace-only bin, or a published npm package?
-- **Decision:** Standalone npm package, scope `@contextos`, package `@contextos/cli`. The package builds and runs locally in 08a. `package.json` ships with `bin`, `files`, `engines`, `repository`, `publishConfig`. **Publication itself is out of 08a scope** (per existing non-goals §3) — `pending-user-actions.md`'s "publish-flag-day" entry remains a separate ops task. S9 locks the `npm pack --dry-run` file list with a unit test so the published tarball shape is stable when the publish-flag-day comes.
-- **Why this answer:** Matches the existing `pending-user-actions.md` npm-scope-claim entry (2026-04-24). The `init` UX (`npx @contextos/cli init` for one-shot, `npm i -g` for repeat use) matches every comparable tool (vite, eslint, npm itself). Building the package shape now means the publish-flag-day is a "log in to npm and run `pnpm publish`" event — no scrambling to add `bin` / `files` then.
-- **What this constrains:** S1 `package.json` includes `bin` + `files` + `engines` + `repository` + `publishConfig` from day one. S9 locks the file list. The contributor dev-loop (DEVELOPMENT.md §"Iterating on the CLI") describes how to invoke the CLI without `npm i -g`: `pnpm --filter @contextos/cli build && pnpm --filter @contextos/cli cli init`. No new build tool — same TS pipeline as every other workspace package.
+- **Decision:** Standalone npm package, scope `@contextos`, package `@coodra/contextos-cli`. The package builds and runs locally in 08a. `package.json` ships with `bin`, `files`, `engines`, `repository`, `publishConfig`. **Publication itself is out of 08a scope** (per existing non-goals §3) — `pending-user-actions.md`'s "publish-flag-day" entry remains a separate ops task. S9 locks the `npm pack --dry-run` file list with a unit test so the published tarball shape is stable when the publish-flag-day comes.
+- **Why this answer:** Matches the existing `pending-user-actions.md` npm-scope-claim entry (2026-04-24). The `init` UX (`npx @coodra/contextos-cli init` for one-shot, `npm i -g` for repeat use) matches every comparable tool (vite, eslint, npm itself). Building the package shape now means the publish-flag-day is a "log in to npm and run `pnpm publish`" event — no scrambling to add `bin` / `files` then.
+- **What this constrains:** S1 `package.json` includes `bin` + `files` + `engines` + `repository` + `publishConfig` from day one. S9 locks the file list. The contributor dev-loop (DEVELOPMENT.md §"Iterating on the CLI") describes how to invoke the CLI without `npm i -g`: `pnpm --filter @coodra/contextos-cli build && pnpm --filter @coodra/contextos-cli cli init`. No new build tool — same TS pipeline as every other workspace package.

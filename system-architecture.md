@@ -71,7 +71,7 @@ The previous AI plan was designed for a public SaaS at scale. Wrong mental model
 
 **Mode detection:** Each service reads `CONTEXTOS_MODE` from `.env` or `~/.contextos/config.json`. In both solo and team modes, **local services always write to local SQLite** — the storage adapter returned by `createDb()` is always `better-sqlite3` on the developer's machine. `team` mode adds the Sync Daemon (which has its own Postgres connection for pushing unsynced records to the cloud) and switches the **cloud-deployed services** (cloud API, BullMQ workers) to use Postgres. All local service logic is identical across modes; only the cloud services differ.
 
-**What "local services always write to local SQLite" means in code (Module 03 S4 / verification F11):** `apps/mcp-server/src/lib/db.ts` and `apps/hooks-bridge/src/lib/db.ts` both pass `kind: 'local'` to `@contextos/db::createDb` unconditionally. There is **no env knob, no flag, no boot path** that gives either binary a Postgres handle. The Module 02 stop-gap `CONTEXTOS_DB_OVERRIDE_MODE` was removed in M03 S4. Cloud writes are owned exclusively by the future Sync Daemon and Module 05 NL Assembly's embeddings-ingest worker — services that don't exist yet. If a future verification brief or test asks to "boot the binary against Postgres," that's a category error: the binaries are SQLite-only by design, and the integration is exercised through `@contextos/db`'s own `kind: 'cloud'` test path (`packages/db/__tests__/integration/cloud-mode-write.test.ts`).
+**What "local services always write to local SQLite" means in code (Module 03 S4 / verification F11):** `apps/mcp-server/src/lib/db.ts` and `apps/hooks-bridge/src/lib/db.ts` both pass `kind: 'local'` to `@coodra/contextos-db::createDb` unconditionally. There is **no env knob, no flag, no boot path** that gives either binary a Postgres handle. The Module 02 stop-gap `CONTEXTOS_DB_OVERRIDE_MODE` was removed in M03 S4. Cloud writes are owned exclusively by the future Sync Daemon and Module 05 NL Assembly's embeddings-ingest worker — services that don't exist yet. If a future verification brief or test asks to "boot the binary against Postgres," that's a category error: the binaries are SQLite-only by design, and the integration is exercised through `@coodra/contextos-db`'s own `kind: 'cloud'` test path (`packages/db/__tests__/integration/cloud-mode-write.test.ts`).
 
 ---
 
@@ -837,7 +837,7 @@ Not a scaling problem. One developer, one machine. Design for correctness.
 3. **Outbox pattern** — Queue as outbox. Worker drains to DB. Response returned before DB write.
 4. **Fail-open** — Every error path returns allow/continue.
 5. **Dependency injection at construction** — Handlers are factories. Tests inject mocks.
-6. **Zod at every external boundary** — Invalid payloads fail-open. Shared schemas in `@contextos/shared`.
+6. **Zod at every external boundary** — Invalid payloads fail-open. Shared schemas in `@coodra/contextos-shared`.
 7. **Schema as canonical type source** — Drizzle schema → Drizzle types. Zod schemas → TS types.
 8. **Polymorphic knowledge graph** — `knowledge_edges` table: (sourceType, sourceId) → (targetType, targetId).
 9. **Feature pack inheritance** — Scalar override + array concatenation, root → leaf, with cycle detection.
@@ -1708,7 +1708,7 @@ All three are served from Postgres in <10 ms (solo: SQLite, same shape). No GitH
 5. Nested CODEOWNERS files (e.g., `apps/web/.github/CODEOWNERS`) are not supported by GitHub and not parsed.
 6. Parser surfaces invalid lines (e.g., unresolvable team) as warnings attached to the integration's health panel.
 
-The parser is a standalone pure function in `@contextos/shared/codeowners.ts`, fully unit-tested with fixtures from the official docs, and reused by both the web app (to render the "who owns this file?" panel) and the policy engine.
+The parser is a standalone pure function in `@coodra/contextos-shared/codeowners.ts`, fully unit-tested with fixtures from the official docs, and reused by both the web app (to render the "who owns this file?" panel) and the policy engine.
 
 ### 23.5 PR Context Resolution
 
@@ -2439,7 +2439,7 @@ The `tools/list` handler in `apps/mcp-server/src/handlers/tools-list.ts` is a pu
 
 Descriptions drift. The following safeguards exist:
 
-1. **Manifest unit tests.** Each `manifest.test.ts` asserts the description via `assertManifestDescriptionValid` from `@contextos/shared/test-utils` — starts with an imperative trigger phrase ("Call this"), word count in 40–120 (soft target 40–80, hard max 120 per Q-02-6), char length in `[200, 800)`, mentions the return shape, and the manifest `name` matches the MCP pattern (and the folder name when supplied). Single helper, single source of truth for §24.3 — used by every ContextOS tool manifest in `apps/mcp-server/` and future `@contextos/tools-*` packages.
+1. **Manifest unit tests.** Each `manifest.test.ts` asserts the description via `assertManifestDescriptionValid` from `@coodra/contextos-shared/test-utils` — starts with an imperative trigger phrase ("Call this"), word count in 40–120 (soft target 40–80, hard max 120 per Q-02-6), char length in `[200, 800)`, mentions the return shape, and the manifest `name` matches the MCP pattern (and the folder name when supplied). Single helper, single source of truth for §24.3 — used by every ContextOS tool manifest in `apps/mcp-server/` and future `@coodra/contextos-tools-*` packages.
 2. **`tools/list` snapshot test.** `apps/mcp-server/__tests__/tools-list.snapshot.test.ts` snapshots the full `tools/list` response. A diff forces human review of every manifest change.
 3. **Description-PR checklist.** Any PR that changes a `manifest.ts` file triggers a CI bot comment asking the author to confirm `CLAUDE.md §5` is still correct. See `.github/workflows/tool-manifest-check.yml`.
 4. **Version stability.** Within a major version, descriptions may be clarified but not weakened. A tool's trigger phrase (the first sentence) is frozen for the major version. Adding a tool is always allowed; removing or renaming requires a major version bump.

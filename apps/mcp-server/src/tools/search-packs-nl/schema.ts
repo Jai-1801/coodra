@@ -1,4 +1,4 @@
-import { EMBEDDING_DIM } from '@contextos/shared';
+import { EMBEDDING_DIM } from '@coodra/contextos-shared';
 import { z } from 'zod';
 
 /**

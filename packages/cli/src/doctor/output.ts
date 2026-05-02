@@ -19,7 +19,7 @@ const STATUS_COLOR: Record<CheckStatus, (s: string) => string> = {
 
 export function formatHuman(report: DoctorReport): string {
   const lines: string[] = [];
-  lines.push(`contextos doctor — @contextos/cli ${report.version}`);
+  lines.push(`contextos doctor — @coodra/contextos-cli ${report.version}`);
   lines.push(`  contextosHome: ${report.contextosHome}`);
   lines.push(`  cwd: ${report.cwd}`);
   lines.push('');

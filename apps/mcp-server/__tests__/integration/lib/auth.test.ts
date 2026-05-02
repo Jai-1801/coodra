@@ -1,4 +1,4 @@
-import { UnauthorizedError, ValidationError } from '@contextos/shared';
+import { UnauthorizedError, ValidationError } from '@coodra/contextos-shared';
 import { describe, expect, it } from 'vitest';
 
 import type { McpServerEnv } from '../../../src/config/env.js';
@@ -28,7 +28,7 @@ function baseEnv(overrides: Partial<McpServerEnv> = {}): McpServerEnv {
  * Proves that both factory outputs satisfy the shared `AuthClient`
  * interface and that `requireIdentity` enforces its contract — the
  * solo factory resolves, the anonymous factory rejects with
- * `UnauthorizedError` from `@contextos/shared`.
+ * `UnauthorizedError` from `@coodra/contextos-shared`.
  *
  * This locks the S7a invariant that tool code never branches on
  * "is this solo or Clerk?" — both paths respond to the same

@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // CRITICAL: this import must be FIRST, before anything else. It sets
-// CONTEXTOS_LOG_DESTINATION=stderr so that when @contextos/shared's
+// CONTEXTOS_LOG_DESTINATION=stderr so that when @coodra/contextos-shared's
 // logger module is subsequently loaded (transitively via env.ts,
 // tool-registry.ts, stdio.ts), it resolves its destination to fd 2.
 // ES modules hoist imports, so only the order of `import` statements
@@ -10,9 +10,9 @@ import './bootstrap/ensure-stderr-logging.js';
 
 import { randomUUID } from 'node:crypto';
 
-import { AUDIT_QUEUE_KINDS, OutboxWorker } from '@contextos/cli/lib/outbox';
-import { ensureGlobalProject, migrateSqlite } from '@contextos/db';
-import { createLogger } from '@contextos/shared';
+import { AUDIT_QUEUE_KINDS, OutboxWorker } from '@coodra/contextos-cli/lib/outbox';
+import { ensureGlobalProject, migrateSqlite } from '@coodra/contextos-db';
+import { createLogger } from '@coodra/contextos-shared';
 
 import { env } from './config/env.js';
 import type { ContextDeps } from './framework/tool-context.js';
@@ -33,11 +33,11 @@ import { startStdioTransport } from './transports/stdio.js';
 
 const bootLogger = createLogger('mcp-server.boot');
 
-const SERVER_NAME = '@contextos/mcp-server' as const;
+const SERVER_NAME = '@coodra/contextos-mcp-server' as const;
 const SERVER_VERSION = '0.0.0' as const;
 
 /**
- * Process entrypoint for `@contextos/mcp-server`.
+ * Process entrypoint for `@coodra/contextos-mcp-server`.
  *
  * S7a scope (walking skeleton + frozen ToolContext):
  *   - stdio transport only (HTTP deferred to S16).
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
       logDestination: env.CONTEXTOS_LOG_DESTINATION,
       nodeEnv: env.NODE_ENV,
     },
-    'starting @contextos/mcp-server',
+    'starting @coodra/contextos-mcp-server',
   );
 
   // --- Build ContextDeps from the lib factories. -----------------------
@@ -275,6 +275,6 @@ main().catch((err: unknown) => {
   // been caught inside `registry.handleCall`; reaching here means
   // startup itself failed.
   const message = err instanceof Error ? `${err.name}: ${err.message}\n${err.stack ?? ''}` : String(err);
-  process.stderr.write(`@contextos/mcp-server: fatal startup error\n${message}\n`);
+  process.stderr.write(`@coodra/contextos-mcp-server: fatal startup error\n${message}\n`);
   process.exit(1);
 });

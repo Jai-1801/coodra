@@ -25,7 +25,7 @@ describe('doctor binary — integration spawn', () => {
     const { existsSync } = await import('node:fs');
     if (!existsSync(distBin)) {
       throw new Error(
-        `dist/index.js missing at ${distBin}. Run \`pnpm --filter @contextos/cli build\` before integration tests.`,
+        `dist/index.js missing at ${distBin}. Run \`pnpm --filter @coodra/contextos-cli build\` before integration tests.`,
       );
     }
   });

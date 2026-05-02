@@ -1,5 +1,5 @@
-import type { DbHandle } from '@contextos/db';
-import { assertManifestDescriptionValid } from '@contextos/shared/test-utils';
+import type { DbHandle } from '@coodra/contextos-db';
+import { assertManifestDescriptionValid } from '@coodra/contextos-shared/test-utils';
 import { describe, expect, it } from 'vitest';
 
 import { createGetRunIdToolRegistration } from '../../../src/tools/get-run-id/manifest.js';
@@ -15,7 +15,7 @@ import { getRunIdInputSchema } from '../../../src/tools/get-run-id/schema.js';
 // never invoked in these unit tests.
 const fakeDb = { kind: 'sqlite', db: {}, raw: {}, close: () => {} } as unknown as DbHandle;
 
-describe('get_run_id — manifest contract (via @contextos/shared/test-utils)', () => {
+describe('get_run_id — manifest contract (via @coodra/contextos-shared/test-utils)', () => {
   it('satisfies every §24.3 rule (name shape, length, opening, word count, Returns)', () => {
     const registration = createGetRunIdToolRegistration({ db: fakeDb, mode: 'solo' });
     expect(() => assertManifestDescriptionValid(registration, { folderName: 'get-run-id' })).not.toThrow();

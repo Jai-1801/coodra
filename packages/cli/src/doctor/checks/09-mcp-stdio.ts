@@ -26,7 +26,7 @@ export const mcpStdioCheck: Check = {
       return {
         status: 'yellow',
         detail: `mcp-server dist not found at ${binPath}`,
-        remediation: 'Run `pnpm --filter @contextos/mcp-server build` to produce the stdio binary.',
+        remediation: 'Run `pnpm --filter @coodra/contextos-mcp-server build` to produce the stdio binary.',
       };
     }
 

@@ -14,7 +14,7 @@ import { type SearchPacksNlInput, searchPacksNlInputSchema, searchPacksNlOutputS
  * Description is §24.4 verbatim with one added sentence naming the
  * LIKE fallback and the `no_embeddings_yet` notice per the S11
  * slice amendment. §24.3 anatomy is enforced by
- * `@contextos/shared/test-utils::assertManifestDescriptionValid`.
+ * `@coodra/contextos-shared/test-utils::assertManifestDescriptionValid`.
  */
 
 const searchPacksNlIdempotencyKey: IdempotencyKeyBuilder<SearchPacksNlInput> = (input, _ctx) => {

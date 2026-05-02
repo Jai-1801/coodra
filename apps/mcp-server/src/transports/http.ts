@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
-import { createLogger } from '@contextos/shared';
+import { createLogger } from '@coodra/contextos-shared';
 import { getRequestListener } from '@hono/node-server';
 import { Server as McpSdkServer } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -14,7 +14,7 @@ import { mapAgentType } from '../lib/agent-type.js';
 import { SOLO_IDENTITY, verifyClerkJwt, verifyLocalHookSecret } from '../lib/auth.js';
 
 /**
- * HTTP (Streamable HTTP) transport for `@contextos/mcp-server` (S16).
+ * HTTP (Streamable HTTP) transport for `@coodra/contextos-mcp-server` (S16).
  *
  * Design decisions:
  *

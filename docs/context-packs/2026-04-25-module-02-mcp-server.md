@@ -87,7 +87,7 @@ Module 02 ships the ContextOS MCP server as a working production-grade product. 
 
 ## Tests
 
-- **358 unit tests** across `@contextos/shared` (75) + `@contextos/db` (42) + `@contextos/mcp-server` (241) — manifest contracts, schema boundaries, factory construction, idempotency-key shapes, registry behaviour, lib factories.
+- **358 unit tests** across `@coodra/contextos-shared` (75) + `@coodra/contextos-db` (42) + `@coodra/contextos-mcp-server` (241) — manifest contracts, schema boundaries, factory construction, idempotency-key shapes, registry behaviour, lib factories.
 - **177 integration tests** in `apps/mcp-server/__tests__/integration/` — real sqlite + Hono in-process + subprocess boot. Covers each tool against a real DB, the auth chain, transport round-trips, and the post-fix boot/migration behaviour.
 - **24 e2e tests** at the repo root in `__tests__/e2e/` (5 scenarios) — manifest e2e via SDK Client, http-roundtrip with three auth modes, policy-decisions idempotency under 10× concurrent calls (testcontainers Postgres), full single-session walk through all 9 tools with DB+FS assertions, stdio subprocess spawn.
 - **Manifest e2e via §6.6 synthetic agent test** — validates the exact 9-tool set, ≤800-char descriptions, Ajv 2020-12 JSON Schema round-trip, minimal-valid-input round-trip per tool.
@@ -139,13 +139,13 @@ Resolve the Finding #3 architectural question before locking the Module 03 sync-
 ## Commits landed across the session (newest first)
 
 ```
-fca5488 ci(repo): build @contextos/mcp-server in the integration job
+fca5488 ci(repo): build @coodra/contextos-mcp-server in the integration job
 811fcc8 docs(repo): document subprocess staleness + ship .mcp.dev.json live-reload profile (closes verification §8.2)
 9f730ae fix(mcp-server): sanitize Windows-reserved chars in context-pack filenames (closes verification §8.6)
 315c41d fix(shared,mcp-server): move sessionId no-colon validation to schema layer (closes verification §8.6)
 187c844 fix(mcp-server): boot config improvements — auto-migrate + DB-mode override + env-overridable roots (closes §8.1, §8.3, §8.5)
 c83564f docs(verification): Module 01 + 02 end-to-end verification report (2026-04-25)
-4fa47f0 ci(repo): build @contextos/db in the e2e job before running tests
+4fa47f0 ci(repo): build @coodra/contextos-db in the e2e job before running tests
 4965d45 feat(repo): S17 — e2e test suite (5 scenarios, 24 tests, testcontainers + subprocess) + sessionId colon bug fix
 dcb8071 ci(repo): allow Clerk + LOCAL_HOOK_SECRET + MCP server env vars through turbo's test:integration sandbox
 8981d6c ci(repo): set CLERK_SECRET_KEY=sk_test_replace_me on integration job
@@ -166,7 +166,7 @@ c610fb1 chore(essentialsforclaude): document factory-pattern + discriminated-uni
 dfaefe9 chore(repo): exclude .claude and context_memory from biome scope
 2b12516 feat(mcp-server): S7a — freeze ToolContext + lib factories + clock-discipline guard
 8a473bb feat(shared): assertManifestDescriptionValid + §24.3 amendment
-53edc2a feat(mcp-server): scaffold @contextos/mcp-server — stdio transport, tool framework, ping
+53edc2a feat(mcp-server): scaffold @coodra/contextos-mcp-server — stdio transport, tool framework, ping
 7e94633 feat(db): sqlite-vec extension, pgvector HNSW index, migration lock
 533934b feat(db): policies, policy_rules, policy_decisions, feature_packs tables
 ```

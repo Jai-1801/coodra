@@ -68,7 +68,7 @@ export const bridgeRunIdLogsCheck: Check = {
       status: 'yellow',
       detail: `${missing}/${inspected} pre-tool decision lines have no runId field at all`,
       remediation:
-        'Bridge may be running pre-F15 binary. Re-run `pnpm --filter @contextos/hooks-bridge build` and restart.',
+        'Bridge may be running pre-F15 binary. Re-run `pnpm --filter @coodra/contextos-hooks-bridge build` and restart.',
     };
   },
 };

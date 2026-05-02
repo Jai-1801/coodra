@@ -1,4 +1,4 @@
-import type { DbHandle } from '@contextos/db';
+import type { DbHandle } from '@coodra/contextos-db';
 
 import type { ToolRegistry } from '../framework/tool-registry.js';
 import { createCheckPolicyToolRegistration } from './check-policy/manifest.js';

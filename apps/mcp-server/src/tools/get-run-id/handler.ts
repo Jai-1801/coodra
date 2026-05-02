@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
-import { type DbHandle, postgresSchema, sqliteSchema } from '@contextos/db';
-import { createLogger, generateRunKey } from '@contextos/shared';
+import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-db';
+import { createLogger, generateRunKey } from '@coodra/contextos-shared';
 import { and, desc, eq } from 'drizzle-orm';
 import type { ToolContext } from '../../framework/tool-context.js';
 import { SOLO_IDENTITY } from '../../lib/auth.js';
@@ -143,7 +143,7 @@ async function autoCreateProject(deps: GetRunIdHandlerDeps, projectSlug: string)
 }
 
 // NOTE: The bridge's RunRecorder uses the leaner `lookupRunId` helper
-// from @contextos/db (verification F8 closure, 2026-04-27) which returns
+// from @coodra/contextos-db (verification F8 closure, 2026-04-27) which returns
 // just the id. This local `selectLatestRun` keeps the wider RunRow
 // shape (id + status + startedAt) needed by `get_run_id` to decide
 // whether to return the existing in-progress row vs mint a new one.

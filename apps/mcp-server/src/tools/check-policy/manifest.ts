@@ -20,7 +20,7 @@ import { type CheckPolicyInput, checkPolicyInputSchema, checkPolicyOutputSchema 
  * `ON CONFLICT DO NOTHING` inside `recordPolicyDecision`.
  *
  * §24.3 description anatomy (five-part recipe + 40–80 word band) is
- * enforced by `@contextos/shared/test-utils::assertManifestDescriptionValid`.
+ * enforced by `@coodra/contextos-shared/test-utils::assertManifestDescriptionValid`.
  */
 
 const checkPolicyIdempotencyKey: IdempotencyKeyBuilder<CheckPolicyInput> = (input, _ctx) => {

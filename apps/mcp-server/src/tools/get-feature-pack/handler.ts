@@ -1,4 +1,4 @@
-import { createLogger, InternalError } from '@contextos/shared';
+import { createLogger, InternalError } from '@coodra/contextos-shared';
 import picomatch from 'picomatch';
 
 import type { ToolContext } from '../../framework/tool-context.js';

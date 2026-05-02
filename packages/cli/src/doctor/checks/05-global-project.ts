@@ -1,5 +1,5 @@
 import { access } from 'node:fs/promises';
-import { GLOBAL_PROJECT_ID } from '@contextos/db';
+import { GLOBAL_PROJECT_ID } from '@coodra/contextos-db';
 import { openLocalDb } from '../../lib/open-local-db.js';
 import type { Check } from '../types.js';
 

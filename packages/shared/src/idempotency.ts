@@ -128,7 +128,7 @@ function assertRunEventKeySegment(value: unknown, field: string): asserts value 
  *
  * Module 03 S3 moved this type from `apps/mcp-server/src/framework/
  * idempotency.ts` here so the cross-package `PolicyInput` type (in
- * `@contextos/policy/types`) can reference it without depending on
+ * `@coodra/contextos-policy/types`) can reference it without depending on
  * the mcp-server-specific framework. The mcp-server framework keeps
  * its `IdempotencyKeyBuilder<Input>` + `IdempotencyContext` +
  * `assertIdempotencyKeyBuilder` helpers (those are tool-registration

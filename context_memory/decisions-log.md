@@ -1073,7 +1073,7 @@ Resolution: build the id as `re_` + sha256(sessionId + '|' + toolUseId + '|' + p
 **Slice-to-commit map:**
 
 - **S0** — `53be96a` (2026-04-25, `docs(feature-pack): Module 08a CLI — spec/implementation/techstack`).
-- **S1–S9** — squashed in `93736f6` (2026-04-27, `feat(module-08a + module-03): @contextos/cli + Hooks Bridge + post-08a integration walk (#2)`). Per-slice commit subjects preserved verbatim from the squashed PR body so the doc cites the exact `feat(cli): ...` line that landed.
+- **S1–S9** — squashed in `93736f6` (2026-04-27, `feat(module-08a + module-03): @coodra/contextos-cli + Hooks Bridge + post-08a integration walk (#2)`). Per-slice commit subjects preserved verbatim from the squashed PR body so the doc cites the exact `feat(cli): ...` line that landed.
 - **Post-S9 integration-walk fixes** — also in `93736f6` (5 fixes: `ensureProject` for user's slug, default `CONTEXTOS_LOG_DESTINATION=stderr`, tsbuildinfo out of `dist/`, doctor-check-7 → RED, daemon stdout/stderr to `~/.contextos/logs/`).
 - **Post-S9.1** — `64e4067` (PID-aware doctor checks 10/11; `bin/cli` helper).
 - **Post-S9.2** — `313d6f0` (Module 03.1 outbox lands `packages/cli/src/lib/outbox/` + doctor checks 21/22/23 + check-13 permanent-yellow → GREEN flip).

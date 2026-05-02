@@ -9,9 +9,9 @@ import {
   GLOBAL_PROJECT_ID,
   migrateSqlite,
   sqliteSchema,
-} from '@contextos/db';
-import { createPolicyClient } from '@contextos/policy';
-import type { AuthEnv } from '@contextos/shared/auth';
+} from '@coodra/contextos-db';
+import { createPolicyClient } from '@coodra/contextos-policy';
+import type { AuthEnv } from '@coodra/contextos-shared/auth';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 

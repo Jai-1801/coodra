@@ -13,7 +13,7 @@ import { type GetFeaturePackInput, getFeaturePackInputSchema, getFeaturePackOutp
  * needs to be closed over here.
  *
  * Description is verbatim from `system-architecture.md §24.4`. §24.3
- * anatomy is enforced by `@contextos/shared/test-utils::
+ * anatomy is enforced by `@coodra/contextos-shared/test-utils::
  * assertManifestDescriptionValid` in the unit tests.
  */
 

@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { OutboxWorker } from '@contextos/cli/lib/outbox';
-import { createDb, type DbHandle, ensureGlobalProject, migrateSqlite, sqliteSchema } from '@contextos/db';
-import { createPolicyClient } from '@contextos/policy';
+import { OutboxWorker } from '@coodra/contextos-cli/lib/outbox';
+import { createDb, type DbHandle, ensureGlobalProject, migrateSqlite, sqliteSchema } from '@coodra/contextos-db';
+import { createPolicyClient } from '@coodra/contextos-policy';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 

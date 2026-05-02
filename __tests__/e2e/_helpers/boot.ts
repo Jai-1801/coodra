@@ -2,8 +2,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { type DbHandle, migrateSqlite } from '@contextos/db';
-import { createLogger } from '@contextos/shared';
+import { type DbHandle, migrateSqlite } from '@coodra/contextos-db';
+import { createLogger } from '@coodra/contextos-shared';
 import { __internal as envInternal, type McpServerEnv } from '../../../apps/mcp-server/src/config/env.js';
 import type { ContextDeps } from '../../../apps/mcp-server/src/framework/tool-context.js';
 import { ToolRegistry } from '../../../apps/mcp-server/src/framework/tool-registry.js';
@@ -83,7 +83,7 @@ export async function bootForE2E(opts: BootOpts): Promise<BootHandle> {
   if (opts.withHttp) {
     http = await startHttpTransport({
       registry,
-      serverName: '@contextos/mcp-server-e2e',
+      serverName: '@coodra/contextos-mcp-server-e2e',
       serverVersion: '0.0.0-e2e',
       env: opts.env,
     });

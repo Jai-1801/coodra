@@ -1,8 +1,8 @@
-import { type BaseEnv, baseEnvSchema, parseEnv } from '@contextos/shared';
+import { type BaseEnv, baseEnvSchema, parseEnv } from '@coodra/contextos-shared';
 import { z } from 'zod';
 
 /**
- * The one and only place in `@contextos/mcp-server` that reads
+ * The one and only place in `@coodra/contextos-mcp-server` that reads
  * `process.env`. Every other module depends on the typed `env`
  * singleton exported at the bottom of this file. Any direct
  * `process.env.X` reference outside this file is a lint-level bug
@@ -15,7 +15,7 @@ import { z } from 'zod';
  *   2. The result is a fully-typed object. No `string | undefined`
  *      leaks out; every variable is either required (and validated)
  *      or has a defaulted non-undefined value.
- *   3. Failure is a `ValidationError` from `@contextos/shared` —
+ *   3. Failure is a `ValidationError` from `@coodra/contextos-shared` —
  *      same error class the db layer uses — carrying the specific
  *      Zod path so operators can find the offending variable.
  *   4. Mode-conditional rules (Clerk keys required in team mode)
@@ -182,7 +182,7 @@ export type McpServerEnv = z.infer<typeof mcpServerEnvSchema> & BaseEnv;
 
 /**
  * Typed env singleton. Parsed exactly once, at first import, via
- * @contextos/shared's `parseEnv` so the ValidationError shape is
+ * @coodra/contextos-shared's `parseEnv` so the ValidationError shape is
  * identical to every other service's startup failure.
  */
 export const env: McpServerEnv = parseEnv(mcpServerEnvSchema) as McpServerEnv;

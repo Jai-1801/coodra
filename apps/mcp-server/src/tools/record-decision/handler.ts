@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { type DbHandle, postgresSchema, sqliteSchema } from '@contextos/db';
-import { createLogger } from '@contextos/shared';
+import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-db';
+import { createLogger } from '@coodra/contextos-shared';
 import { eq } from 'drizzle-orm';
 import type { ToolContext } from '../../framework/tool-context.js';
 import type { RecordDecisionInput, RecordDecisionOutput } from './schema.js';

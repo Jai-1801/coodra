@@ -1,8 +1,8 @@
-import { type BaseEnv, baseEnvSchema, parseEnv } from '@contextos/shared';
+import { type BaseEnv, baseEnvSchema, parseEnv } from '@coodra/contextos-shared';
 import { z } from 'zod';
 
 /**
- * The one and only place in `@contextos/hooks-bridge` that reads
+ * The one and only place in `@coodra/contextos-hooks-bridge` that reads
  * `process.env`. Same contract as `apps/mcp-server/src/config/env.ts`:
  * synchronous parse at module load, fail-fast on bad config, no
  * `string | undefined` leaks past this file.
@@ -84,7 +84,7 @@ const hooksBridgeEnvSchema = baseEnvSchema
       .optional()
       .describe('Clerk secret (backend) key. Required in team mode unless the solo-bypass sentinel is set.'),
 
-    /** Clerk JWT issuer URL, used by `@contextos/shared/auth::verifyClerkJwt`. */
+    /** Clerk JWT issuer URL, used by `@coodra/contextos-shared/auth::verifyClerkJwt`. */
     CLERK_JWT_ISSUER: z
       .string()
       .url()

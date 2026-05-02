@@ -3,8 +3,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { migrateSqlite, type SqliteHandle } from '@contextos/db';
-import { EMBEDDING_DIM, ValidationError } from '@contextos/shared';
+import { migrateSqlite, type SqliteHandle } from '@coodra/contextos-db';
+import { EMBEDDING_DIM, ValidationError } from '@coodra/contextos-shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createContextPackStore } from '../../../src/lib/context-pack.js';
 import { createDbClient } from '../../../src/lib/db.js';

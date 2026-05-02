@@ -4,7 +4,7 @@ import type { Check } from '../types.js';
 
 export const dataDbOpensCheck: Check = {
   id: 3,
-  name: 'data.db opens via @contextos/db::createDb',
+  name: 'data.db opens via @coodra/contextos-db::createDb',
   severity: 'red',
   async run(ctx) {
     try {

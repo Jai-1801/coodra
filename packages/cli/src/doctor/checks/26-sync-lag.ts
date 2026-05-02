@@ -1,6 +1,6 @@
 import { access } from 'node:fs/promises';
 
-import { createPostgresDb } from '@contextos/db';
+import { createPostgresDb } from '@coodra/contextos-db';
 
 import { openLocalDb } from '../../lib/open-local-db.js';
 import type { Check } from '../types.js';

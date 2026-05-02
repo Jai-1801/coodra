@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
-import type { DbHandle } from '@contextos/db';
-import { assertManifestDescriptionValid } from '@contextos/shared/test-utils';
+import type { DbHandle } from '@coodra/contextos-db';
+import { assertManifestDescriptionValid } from '@coodra/contextos-shared/test-utils';
 import { describe, expect, it } from 'vitest';
 
 import { createRecordDecisionToolRegistration } from '../../../src/tools/record-decision/manifest.js';

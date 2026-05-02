@@ -19,9 +19,9 @@
   - `2e7feff` feat(hooks-bridge): post-tool RunRecorder + policy_decisions audit
   - `b126928` feat(hooks-bridge): pre-tool policy enforcement + project resolver
   - `9e88f14` feat(shared,hooks-bridge): per-agent adapters + HookEvent + normalizeSessionId
-  - `01982a0` feat(hooks-bridge): scaffold @contextos/hooks-bridge — Hono + auth chain
+  - `01982a0` feat(hooks-bridge): scaffold @coodra/contextos-hooks-bridge — Hono + auth chain
   - `48275f7` refactor(db,mcp-server): createDb takes kind: local|cloud
-  - `85ee536` refactor(workspace): extract @contextos/policy + @contextos/shared/auth
+  - `85ee536` refactor(workspace): extract @coodra/contextos-policy + @coodra/contextos-shared/auth
   - `128fe8a` chore(context-memory): archive module-02 closeout, begin module-03
   - `3a76f23` docs(03-hooks-bridge): spec, implementation plan, techstack, meta
   - `5b6b13d` chore(scope): apply 2026-04-24 user-directive scope updates + Module 08a placeholder
@@ -37,9 +37,9 @@ Both verification carryovers from Module 02 are closed: §8.3 (`createDb` discri
 **In scope:**
 
 - AC-1..AC-9, AC-11..AC-17, AC-21, AC-22, AC-24 from `docs/feature-packs/03-hooks-bridge/spec.md`. Slices S1..S15 landed exactly as planned (with one structural deviation — see Decisions).
-- New workspace package `@contextos/policy` (deviation from spec.md's "policy lives in shared" — necessary because of the shared←→db cycle that would form).
-- `@contextos/shared/auth` subdirectory (no DB dependency, lives in shared as planned).
-- Cross-package types `Identity`, `AuthClient`, `PolicyClient`, `PolicyInput`, `IdempotencyKey` moved to shared/auth or shared/idempotency or @contextos/policy; original mcp-server paths preserved as thin re-exports.
+- New workspace package `@coodra/contextos-policy` (deviation from spec.md's "policy lives in shared" — necessary because of the shared←→db cycle that would form).
+- `@coodra/contextos-shared/auth` subdirectory (no DB dependency, lives in shared as planned).
+- Cross-package types `Identity`, `AuthClient`, `PolicyClient`, `PolicyInput`, `IdempotencyKey` moved to shared/auth or shared/idempotency or @coodra/contextos-policy; original mcp-server paths preserved as thin re-exports.
 - `apps/hooks-bridge` complete: env + auth-chain middleware + per-agent routes + adapters + dispatch + handlers (pre / post / session_start / session_end / user_prompt) + RunRecorder + 32 integration tests + 12 unit tests.
 - Adapter shell scripts: `scripts/hook-adapters/{windsurf,cursor}-contextos.sh` + `install.sh` + `__tests__/smoke.sh` + matrix CI job (ubuntu + macos).
 - `.mcp.json` + `.mcp.dev.json` updated with `hooks` block (Claude Code POSTs all 5 events to the bridge).
@@ -57,9 +57,9 @@ Both verification carryovers from Module 02 are closed: §8.3 (`createDb` discri
 
 ## Decisions made
 
-- **Decision:** Create new workspace package `@contextos/policy` (`packages/policy/`) for the policy evaluator. (supersedes spec.md's "policy moves to `packages/shared/src/policy/`")
-  **Rationale:** `@contextos/db` already depends on `@contextos/shared`. Putting policy in shared would force shared to depend on `@contextos/db` (for `DbHandle` + the schema tables policy queries), creating a workspace cycle. Auth has no DB dep and lives in shared as planned.
-  **Alternatives considered:** Break `@contextos/db`'s shared dependency by inlining `createLogger`/`InternalError`/`ValidationError` (rejected — duplicates error types). Type-only db imports (rejected — policy uses `postgresSchema`/`sqliteSchema` as runtime values). Lazy import db (rejected — async lazy adds latency to the hot path). Put policy in `@contextos/db` (rejected — conflates schema with domain logic).
+- **Decision:** Create new workspace package `@coodra/contextos-policy` (`packages/policy/`) for the policy evaluator. (supersedes spec.md's "policy moves to `packages/shared/src/policy/`")
+  **Rationale:** `@coodra/contextos-db` already depends on `@coodra/contextos-shared`. Putting policy in shared would force shared to depend on `@coodra/contextos-db` (for `DbHandle` + the schema tables policy queries), creating a workspace cycle. Auth has no DB dep and lives in shared as planned.
+  **Alternatives considered:** Break `@coodra/contextos-db`'s shared dependency by inlining `createLogger`/`InternalError`/`ValidationError` (rejected — duplicates error types). Type-only db imports (rejected — policy uses `postgresSchema`/`sqliteSchema` as runtime values). Lazy import db (rejected — async lazy adds latency to the hot path). Put policy in `@coodra/contextos-db` (rejected — conflates schema with domain logic).
   **Cross-reference:** `context_memory/decisions-log.md` 2026-04-25 15:00; commit `85ee536`.
 
 - **Decision:** `createDb` takes a `kind: 'local' | 'cloud'` discriminator; `mode` is now an auth-strategy hint that does NOT change DB choice. Removes the M02 `CONTEXTOS_DB_OVERRIDE_MODE` env knob.
@@ -73,7 +73,7 @@ Both verification carryovers from Module 02 are closed: §8.3 (`createDb` discri
   **Cross-reference:** `context_memory/decisions-log.md` 2026-04-25 16:30; commit `9e88f14`. Closes verification finding §8.6.
 
 - **Decision:** `run_events.id` for hooks-bridge writes is `re_` + sha256(sessionId + '|' + toolUseId + '|' + phase).slice(0, 32). Architecture's stated SHAPE `{sessionId}-{toolUseId}-{phase}` (per `system-architecture.md §4.3`) is preserved in spirit (deterministic per-event triple); wire form differs.
-  **Rationale:** `@contextos/shared::generateRunEventKey` rejects hyphens in segments (`assertRunEventKeySegment`), but `normalizeSessionId` produces hyphen-rich sessionIds by design. The hash captures the same uniqueness contract while accepting any input.
+  **Rationale:** `@coodra/contextos-shared::generateRunEventKey` rejects hyphens in segments (`assertRunEventKeySegment`), but `normalizeSessionId` produces hyphen-rich sessionIds by design. The hash captures the same uniqueness contract while accepting any input.
   **Alternatives considered:** Relax shared/idempotency::generateRunEventKey to accept hyphens (rejected — that validator protects future parseable-key consumers; relaxing it silently changes the parse contract for them). Add a separate composite unique index on (session_id, tool_use_id, phase) (rejected — schema change for a contract the local recorder owns just as cleanly).
   **Cross-reference:** `context_memory/decisions-log.md` 2026-04-25 17:00; commit `2e7feff`.
 
@@ -87,8 +87,8 @@ Both verification carryovers from Module 02 are closed: §8.3 (`createDb` discri
   **Alternatives considered:** Use a real subprocess and let setImmediate fire naturally (rejected — wall-clock cost balloons + flake risk). Make the recorder methods async-await (rejected — defeats the §8 < 10ms response budget).
   **Cross-reference:** Implementation in `apps/hooks-bridge/src/lib/run-recorder.ts`; usage in `apps/hooks-bridge/__tests__/integration/handlers/post-tool-use.test.ts` + the e2e file.
 
-- **Decision:** Clerk JWT is mocked at the `@contextos/shared/auth` package boundary, not at hooks-bridge's. Hooks-bridge's auth-chain integration test stays at chain-order granularity (solo-bypass → X-Local-Hook-Secret → 401 fall-through); the SDK's verifyToken internals are exercised by the dedicated unit test in `packages/shared/__tests__/unit/auth/auth.test.ts`.
-  **Rationale:** `vi.mock('@clerk/backend')` only intercepts when test + impl share a vitest run / module resolution context. Hooks-bridge's tests run in apps/hooks-bridge's vitest; the dist of `@contextos/shared/auth` imports `@clerk/backend` through a different resolution path that bypasses the mock. Same pattern caught Module 03 S3 (auth-chain.test.ts moved from mcp-server to shared for the same reason).
+- **Decision:** Clerk JWT is mocked at the `@coodra/contextos-shared/auth` package boundary, not at hooks-bridge's. Hooks-bridge's auth-chain integration test stays at chain-order granularity (solo-bypass → X-Local-Hook-Secret → 401 fall-through); the SDK's verifyToken internals are exercised by the dedicated unit test in `packages/shared/__tests__/unit/auth/auth.test.ts`.
+  **Rationale:** `vi.mock('@clerk/backend')` only intercepts when test + impl share a vitest run / module resolution context. Hooks-bridge's tests run in apps/hooks-bridge's vitest; the dist of `@coodra/contextos-shared/auth` imports `@clerk/backend` through a different resolution path that bypasses the mock. Same pattern caught Module 03 S3 (auth-chain.test.ts moved from mcp-server to shared for the same reason).
   **Alternatives considered:** Use vitest deps.inline gymnastics (tried — didn't reliably work). Spawn a real Clerk-mock service (rejected — infra cost for a chain-order test).
   **Cross-reference:** S5 + S6 commit messages; same pattern as decisions-log 2026-04-25 15:00.
 
@@ -127,7 +127,7 @@ Grouped by package. Counts the 14 commits that landed on `feat/03-hooks-bridge`.
 - `src/framework/{policy-wrapper,idempotency,tool-context}.ts` — re-export shims for the moved types
 - `src/index.ts` — boot path always-local; defensive `kind !== 'sqlite'` throw; `CONTEXTOS_DB_OVERRIDE_MODE` wiring removed
 - `src/config/env.ts` — `CONTEXTOS_DB_OVERRIDE_MODE` removed
-- `package.json` — drops `cockatiel`, `@clerk/backend`, `@types/picomatch` (now transitive); adds `@contextos/policy`
+- `package.json` — drops `cockatiel`, `@clerk/backend`, `@types/picomatch` (now transitive); adds `@coodra/contextos-policy`
 - `__tests__/integration/boot-team-mode-local-sqlite.test.ts` — renamed + rewritten (was boot-db-override.test.ts)
 - `__tests__/unit/lib/auth-chain.test.ts` — deleted (moved to shared)
 - `vitest.config.ts` — temporary deps.inline workaround removed
@@ -152,7 +152,7 @@ Grouped by package. Counts the 14 commits that landed on `feat/03-hooks-bridge`.
 
 **Repo root:**
 
-- `package.json` — added `@contextos/{hooks-bridge,policy}` workspace deps for the e2e test imports
+- `package.json` — added `@coodra/contextos-{hooks-bridge,policy}` workspace deps for the e2e test imports
 - `.mcp.json` + `.mcp.dev.json` — added `hooks` block routing all 5 events to `127.0.0.1:3101/v1/hooks/claude-code`
 - `.gitignore` — added `.claude/` (per-machine IDE state)
 - `.github/workflows/ci.yml` — integration job builds shared → db → policy → mcp-server → hooks-bridge in dependency order; e2e job adds the same; new `hook-adapter-smoke` matrix job (ubuntu + macos)
@@ -162,7 +162,7 @@ Grouped by package. Counts the 14 commits that landed on `feat/03-hooks-bridge`.
 - `docs/feature-packs/08a-cli/{spec, implementation, techstack}.md` + `meta.json` — created (placeholder for the next module after 03 per the new build order)
 - `docs/DEVELOPMENT.md` — added "Iterating on Module 03 (Hooks Bridge)" section
 - `docs/verification/2026-04-25-module-01-02-verification.md` — §11 "Findings closed" appendix marks §8.3 + §8.6 closed
-- `External api and library reference.md` — `@contextos/policy` subsection added; module-location notes on cockatiel/@clerk/backend/picomatch
+- `External api and library reference.md` — `@coodra/contextos-policy` subsection added; module-location notes on cockatiel/@clerk/backend/picomatch
 - `context_memory/{current-session.md, decisions-log.md, pending-user-actions.md, sessions/2026-04-25-module-02-closeout.md}` — archived M02, opened M03 with running log
 
 ## Tests
@@ -171,19 +171,19 @@ Test counts at end of session:
 
 | Package | Unit | Integration | Notes |
 |---|---|---|---|
-| `@contextos/shared` | **117** (was 75 pre-M03; +42 for `auth/` and `hooks/`) | n/a | |
-| `@contextos/policy` | **7** | n/a | smoke + pure-logic; the cache+breaker is integration-tested through mcp-server |
-| `@contextos/db` | **42** unit (was reported as "6+9 skipped"; verification 2026-04-27 F2 caught the count drift — actual local pass count was already 42 at M03 closeout) | **15 in CI / 9 locally + 6 skipped without DATABASE_URL** | the 9 local cover postgres-migrate when DATABASE_URL is set; cloud-mode-write needs DATABASE_URL too |
-| `@contextos/mcp-server` | **223** (unchanged from M02) | **178** (was 177; +1 for the renamed boot-team-mode-local-sqlite.test.ts) | |
-| `@contextos/hooks-bridge` | **12** | **29** | covers healthz, auth chain order, per-agent adapter dispatch, pre-tool policy enforcement (4 happy + fail-open), post-tool RunRecorder idempotency, full session lifecycle, UserPromptSubmit |
+| `@coodra/contextos-shared` | **117** (was 75 pre-M03; +42 for `auth/` and `hooks/`) | n/a | |
+| `@coodra/contextos-policy` | **7** | n/a | smoke + pure-logic; the cache+breaker is integration-tested through mcp-server |
+| `@coodra/contextos-db` | **42** unit (was reported as "6+9 skipped"; verification 2026-04-27 F2 caught the count drift — actual local pass count was already 42 at M03 closeout) | **15 in CI / 9 locally + 6 skipped without DATABASE_URL** | the 9 local cover postgres-migrate when DATABASE_URL is set; cloud-mode-write needs DATABASE_URL too |
+| `@coodra/contextos-mcp-server` | **223** (unchanged from M02) | **178** (was 177; +1 for the renamed boot-team-mode-local-sqlite.test.ts) | |
+| `@coodra/contextos-hooks-bridge` | **12** | **29** | covers healthz, auth chain order, per-agent adapter dispatch, pre-tool policy enforcement (4 happy + fail-open), post-tool RunRecorder idempotency, full session lifecycle, UserPromptSubmit |
 | `__tests__/e2e/` (root) | n/a | **31 + 1 skipped locally / 32 in CI** | one new file: full-session-with-hooks-bridge (8 tests) |
 | `scripts/hook-adapters/` | n/a | **6 smoke assertions** (matrix on ubuntu + macos) | |
 
 **Total new tests this module: ~89** across all packages.
 
 > **Correction note (verification 2026-04-27, F2):** the original
-> `@contextos/db` row reported "6 unit + 15 in CI" which understated
-> the actual local count. A fresh `pnpm --filter @contextos/db run
+> `@coodra/contextos-db` row reported "6 unit + 15 in CI" which understated
+> the actual local count. A fresh `pnpm --filter @coodra/contextos-db run
 > test:unit` against this branch yields 42 passing (12 across two
 > files including the schema-parity + run-key tests). The integration
 > count "15" referred to test-cases inside `postgres-migrate.test.ts`

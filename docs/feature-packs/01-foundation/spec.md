@@ -75,7 +75,7 @@ Next.js 16.2.4 + React 19.2.5 is recorded in `context_memory/decisions-log.md` a
 
 - A clean `main` pointing at the squash-merged Foundation commit.
 - The 5-table core schema with generated migrations that Module 02 can extend by adding `policy_rules`, `policy_decisions`, `feature_packs`, `integrations`, `integration_tokens`, `integration_events`, `knowledge_edges` in a new numbered migration (`0001_mcp_server_tables.sql`).
-- `@contextos/shared` exporting `logger`, error types, `config`, `generateRunKey`, `generateRunEventKey`.
-- `@contextos/db` exporting `createDb`, `schema` (dialect-selected), and Drizzle query primitives.
+- `@coodra/contextos-shared` exporting `logger`, error types, `config`, `generateRunKey`, `generateRunEventKey`.
+- `@coodra/contextos-db` exporting `createDb`, `schema` (dialect-selected), and Drizzle query primitives.
 - A working `pnpm test:unit` harness so Module 02 inherits CI green.
 - A Context Pack describing everything above.

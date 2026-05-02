@@ -1,4 +1,4 @@
-import { assertManifestDescriptionValid } from '@contextos/shared/test-utils';
+import { assertManifestDescriptionValid } from '@coodra/contextos-shared/test-utils';
 import { describe, expect, it } from 'vitest';
 
 import { getFeaturePackToolRegistration } from '../../../src/tools/get-feature-pack/manifest.js';
@@ -11,7 +11,7 @@ import { getFeaturePackInputSchema } from '../../../src/tools/get-feature-pack/s
  * pack.test.ts`.
  */
 
-describe('get_feature_pack — manifest contract (via @contextos/shared/test-utils)', () => {
+describe('get_feature_pack — manifest contract (via @coodra/contextos-shared/test-utils)', () => {
   it('satisfies every §24.3 rule (name shape, length, opening, word count, Returns)', () => {
     expect(() =>
       assertManifestDescriptionValid(getFeaturePackToolRegistration, { folderName: 'get-feature-pack' }),

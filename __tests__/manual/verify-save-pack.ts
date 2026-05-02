@@ -70,7 +70,7 @@ Full findings table, per-phase results, and remediation paths in:
 - pnpm typecheck: clean (8 cached, FULL TURBO)
 - migration-lock: ok (2 blocks verified)
 - pnpm test:unit per package: shared 117/117, db 42/42, policy 7/7, mcp-server 223/223, hooks-bridge 12/12 = **401/401**
-- @contextos/db integration: each file passes individually (7/7 + 2/2); suite fails as a unit due to F3
+- @coodra/contextos-db integration: each file passes individually (7/7 + 2/2); suite fails as a unit due to F3
 - 9 MCP tools registered, all descriptions ≤800 chars, soft-failure contracts honored, idempotency proven (record_decision retry → \`created: false\`)
 - HTTP transport auth chain: solo bypass / valid X-Local-Hook-Secret / 401 (no auth) / 401 (wrong secret) / 401 (bad Bearer) all correct
 - Hooks bridge: per-agent adapters parse correctly, normalizeSessionId at boundary verified, idempotent replay (5× → 1 row), full lifecycle PASS modulo F8

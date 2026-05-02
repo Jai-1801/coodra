@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { createLogger, runKeySegmentSchema } from '@contextos/shared';
+import { createLogger, runKeySegmentSchema } from '@coodra/contextos-shared';
 import type { z } from 'zod';
 
 import {

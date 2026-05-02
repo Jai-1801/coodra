@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDb, type DbHandle, migrateSqlite, sqliteSchema } from '@contextos/db';
-import { createPolicyClient } from '@contextos/policy';
-import type { AuthEnv } from '@contextos/shared/auth';
+import { createDb, type DbHandle, migrateSqlite, sqliteSchema } from '@coodra/contextos-db';
+import { createPolicyClient } from '@coodra/contextos-policy';
+import type { AuthEnv } from '@coodra/contextos-shared/auth';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../../../src/app.js';

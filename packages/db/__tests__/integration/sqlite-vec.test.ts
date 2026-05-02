@@ -1,4 +1,4 @@
-import { EMBEDDING_DIM } from '@contextos/shared';
+import { EMBEDDING_DIM } from '@coodra/contextos-shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createSqliteDb, loadSqliteVecOrFail, type SqliteHandle } from '../../src/client.js';
@@ -18,7 +18,7 @@ import { migrateSqlite } from '../../src/migrate.js';
  *      behaviour flips on `NODE_ENV=test` / `CONTEXTOS_REQUIRE_VEC`
  *      exactly as decided on 2026-04-22 22:08.
  *
- * Runs under the integration test command (`pnpm --filter @contextos/db
+ * Runs under the integration test command (`pnpm --filter @coodra/contextos-db
  * test:integration`). It does not need `DATABASE_URL`, so it always
  * runs — unlike `postgres-migrate.test.ts` which gates on that env var.
  */

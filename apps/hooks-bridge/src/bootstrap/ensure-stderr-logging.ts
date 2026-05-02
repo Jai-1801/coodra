@@ -16,7 +16,7 @@
  *     deviation. We do NOT exit 1 the way mcp-server does — there
  *     is no transport that would break.
  *
- * Once this module has run, any subsequent `import '@contextos/shared'`
+ * Once this module has run, any subsequent `import '@coodra/contextos-shared'`
  * call resolves the shared logger pointed at the configured destination.
  */
 
@@ -28,7 +28,7 @@ if (normalized === undefined || normalized === '') {
 } else if (normalized === 'stderr' || normalized === 'stdout') {
   process.env.CONTEXTOS_LOG_DESTINATION = normalized;
 } else {
-  const msg = `@contextos/hooks-bridge: refusing to start — CONTEXTOS_LOG_DESTINATION is '${configured}', must be 'stderr' or 'stdout'.\n`;
+  const msg = `@coodra/contextos-hooks-bridge: refusing to start — CONTEXTOS_LOG_DESTINATION is '${configured}', must be 'stderr' or 'stdout'.\n`;
   process.stderr.write(msg);
   process.exit(1);
 }

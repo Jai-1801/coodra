@@ -18,7 +18,7 @@ The plan splits Module 08a into 10 slices (S0–S9). Each slice landed as one lo
 
 - `docs/feature-packs/08a-cli/spec.md` — 11 sections covering the 7-command surface, auto-migrate semantics, `~/.contextos/` layout, the agent-vs-human boundary callouts, and the five OQ resolutions baked in as Decisions 1–5.
 - `docs/feature-packs/08a-cli/implementation.md` — the 10-slice plan (this file, pre-rewrite).
-- `docs/feature-packs/08a-cli/techstack.md` — pinned libraries: `commander@13.1.0`, `env-paths@3.0.0`, `picocolors@1.1.1`, `tmp-promise@3.0.3`, `glob@11.0.4`, plus workspace deps on `@contextos/{shared,db}`.
+- `docs/feature-packs/08a-cli/techstack.md` — pinned libraries: `commander@13.1.0`, `env-paths@3.0.0`, `picocolors@1.1.1`, `tmp-promise@3.0.3`, `glob@11.0.4`, plus workspace deps on `@coodra/contextos-{shared,db}`.
 - `docs/feature-packs/08a-cli/meta.json` — `{ slug, parentSlug: '01-foundation', sourceFiles, isActive: true }`.
 - `system-architecture.md` §13 amendment — PID location + native daemon-manager registration.
 - `system-architecture.md` §1 amendment — XDG resolution for `~/.contextos/`.
@@ -33,11 +33,11 @@ The plan splits Module 08a into 10 slices (S0–S9). Each slice landed as one lo
 
 ## S1 — Package scaffold (landed 2026-04-27, squashed in `93736f6`)
 
-**Scope:** Create `packages/cli/` workspace package with the commander surface and stub command bodies (each subcommand exits 99 with "not yet implemented"). Pinned deps per techstack.md, workspace deps on `@contextos/{shared,db}`.
+**Scope:** Create `packages/cli/` workspace package with the commander surface and stub command bodies (each subcommand exits 99 with "not yet implemented"). Pinned deps per techstack.md, workspace deps on `@coodra/contextos-{shared,db}`.
 
 **What landed:**
 
-- `packages/cli/package.json` — `name: "@contextos/cli"`, `bin: { "contextos": "./dist/index.js" }`, `type: "module"`, `engines.node: ">=22.16.0 <23"`. Pinned: `commander@13.1.0`, `env-paths@3.0.0`, `picocolors@1.1.1`, `glob@11.0.4`, `tmp-promise@3.0.3`. Workspace: `@contextos/db`, `@contextos/shared`.
+- `packages/cli/package.json` — `name: "@coodra/contextos-cli"`, `bin: { "contextos": "./dist/index.js" }`, `type: "module"`, `engines.node: ">=22.16.0 <23"`. Pinned: `commander@13.1.0`, `env-paths@3.0.0`, `picocolors@1.1.1`, `glob@11.0.4`, `tmp-promise@3.0.3`. Workspace: `@coodra/contextos-db`, `@coodra/contextos-shared`.
 - `packages/cli/tsconfig.json` — extends repo base, `rootDir=src`, `outDir=dist`. `tsconfig.typecheck.json` includes `__tests__/`.
 - `packages/cli/vitest.config.ts` + `packages/cli/vitest.integration.config.ts` — v8 coverage, 80% line-threshold; integration variant boots testcontainers.
 - `packages/cli/src/{index,program}.ts` — `#!/usr/bin/env node` shebang, top-level commander program with the 7 subcommands wired (`init`, `start`, `stop`, `status`, `doctor`, `cloud-migrate`, `team {login,logout}`), each handler stubbed via the `runXxxCommand` factories in `src/commands/*.ts`.
@@ -47,9 +47,9 @@ The plan splits Module 08a into 10 slices (S0–S9). Each slice landed as one lo
 - `__tests__/unit/program.test.ts` — asserts each subcommand registers, `--help` lists 7 commands.
 - Per-command stub tests later replaced wholesale as bodies landed in S3–S8.
 
-**Gate:** `pnpm install --frozen-lockfile` clean, `pnpm --filter @contextos/cli typecheck`, `pnpm --filter @contextos/cli build` produces `dist/index.js`, `node dist/index.js --help` enumerates the 7 commands.
+**Gate:** `pnpm install --frozen-lockfile` clean, `pnpm --filter @coodra/contextos-cli typecheck`, `pnpm --filter @coodra/contextos-cli build` produces `dist/index.js`, `node dist/index.js --help` enumerates the 7 commands.
 
-**Squashed merge:** `feat(cli): scaffold @contextos/cli — workspace package + commander surface` (in `93736f6`).
+**Squashed merge:** `feat(cli): scaffold @coodra/contextos-cli — workspace package + commander surface` (in `93736f6`).
 
 ## S2 — `--help` and `--version` surfaces (landed 2026-04-27, squashed in `93736f6`)
 
@@ -120,7 +120,7 @@ The plan splits Module 08a into 10 slices (S0–S9). Each slice landed as one lo
 - `packages/cli/src/lib/init/{contextos-json,mcp-merge,env-merge,claude-settings-merge,feature-pack-seed,types}.ts` — one writer per file; each returns a `WriteOutcome` of `'wrote' | 'merged' | 'unchanged' | 'forced'` so CI consumers can read progress from `--json` output.
 - `packages/cli/src/lib/contextos-home.ts` + `runtime-paths.ts` — XDG-aware `~/.contextos/` resolver (Linux uses `$XDG_CONFIG_HOME` when set), bundled-mcp-server runtime path resolution.
 - `packages/cli/src/lib/open-local-db.ts` — opens `data.db` with the sqlite-vec extension loaded.
-- Auto-migrate via `@contextos/db::migrateSqlite`. Calls `ensureGlobalProject(handle)` for the F7 sentinel + `ensureProject(handle, { slug })` for the user's slug (the latter wired by the in-PR cleanup commit `fix(cli,db): seed projects row in init` inside the squashed merge — see §Post-S9 below).
+- Auto-migrate via `@coodra/contextos-db::migrateSqlite`. Calls `ensureGlobalProject(handle)` for the F7 sentinel + `ensureProject(handle, { slug })` for the user's slug (the latter wired by the in-PR cleanup commit `fix(cli,db): seed projects row in init` inside the squashed merge — see §Post-S9 below).
 - Generates a fresh `LOCAL_HOOK_SECRET` via `crypto.randomBytes(32).toString('hex')` per `essentialsforclaude/02-agent-human-boundary.md` §2.4 — never a literal sentinel string.
 - Feature Pack seeded with `meta.json` + `spec.md` skeleton (200-line template with TODO markers).
 - Optional Graphify scan (skipped if `--no-graphify` or absent on PATH); logs YELLOW on absence, never fails the run.
@@ -161,7 +161,7 @@ The plan splits Module 08a into 10 slices (S0–S9). Each slice landed as one lo
 
 **What landed:**
 
-- `packages/cli/src/commands/{start,stop}.ts` — full flows. Health-check polling uses `@contextos/shared`'s logger and an exponential backoff capped at 1s.
+- `packages/cli/src/commands/{start,stop}.ts` — full flows. Health-check polling uses `@coodra/contextos-shared`'s logger and an exponential backoff capped at 1s.
 - `packages/cli/src/lib/services.ts` — service registry (mcp-server / hooks-bridge / sync-daemon-when-team) + spawn env composition.
 - `packages/cli/src/lib/wait-for-health.ts` — polled probe.
 
@@ -276,7 +276,7 @@ The next seven commits extended the CLI surface as Module 03.1 / functest-cleanu
 
 ## After M08a — what gets unblocked
 
-- Module 04 (Web App) can build its onboarding flow knowing the CLI exists. The web app's "Get Started" page reduces to "run `npx @contextos/cli init` then `contextos team login <invite-token>` (when team mode opens)" — exact CLI name locked per spec §11 Decision 1.
+- Module 04 (Web App) can build its onboarding flow knowing the CLI exists. The web app's "Get Started" page reduces to "run `npx @coodra/contextos-cli init` then `contextos team login <invite-token>` (when team mode opens)" — exact CLI name locked per spec §11 Decision 1.
 - Module 07 (VS Code Extension) can shell out to `contextos start` / `stop` / `status` for service control without re-implementing daemon management.
 - The `pending-user-actions.md` entry "LOCAL_HOOK_SECRET config-file reads via a future contextos team login CLI" updates to "command surface lives in 08a as stub; OAuth round-trip + secret-write body land when team mode opens" — fully closes when team mode launches.
 

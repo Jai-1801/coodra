@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ensureGlobalProject, migrateSqlite } from '@contextos/db';
+import { ensureGlobalProject, migrateSqlite } from '@coodra/contextos-db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildCheckContext } from '../../../src/doctor/context.js';
 import { ALL_CHECKS } from '../../../src/doctor/registry.js';

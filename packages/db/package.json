@@ -1,5 +1,5 @@
 {
-  "name": "@contextos/db",
+  "name": "@coodra/contextos-db",
   "version": "0.0.0",
   "private": true,
   "description": "ContextOS database layer — Drizzle ORM schemas (SQLite + Postgres), createDb factory, numbered migrations.",
@@ -49,7 +49,7 @@
     "check:migration-lock": "node scripts/check-migration-lock.mjs"
   },
   "dependencies": {
-    "@contextos/shared": "workspace:*",
+    "@coodra/contextos-shared": "workspace:*",
     "better-sqlite3": "^12.9.0",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.9",

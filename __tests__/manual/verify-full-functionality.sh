@@ -75,7 +75,7 @@ pnpm lint > /dev/null
 green "lint"
 pnpm test:unit > /dev/null 2>&1
 green "test:unit"
-pnpm --filter @contextos/db run check:migration-lock > /dev/null
+pnpm --filter @coodra/contextos-db run check:migration-lock > /dev/null
 green "migration-lock"
 
 # ---------------------------------------------------------------------------

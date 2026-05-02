@@ -1,4 +1,4 @@
-# @contextos/cli
+# @coodra/contextos-cli
 
 > **Status:** in development on `feat/08a-cli`. Not yet published to npm — the publish-flag-day is tracked separately as a user-side ops task.
 
@@ -8,10 +8,10 @@ The single-binary install / configure / run / diagnose surface for ContextOS, th
 
 ```bash
 # Global install (recommended for repeat use)
-npm i -g @contextos/cli
+npm i -g @coodra/contextos-cli
 
 # One-shot use without installing
-npx @contextos/cli init
+npx @coodra/contextos-cli init
 ```
 
 ## Commands

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 
-import { ValidationError } from '@contextos/shared';
+import { ValidationError } from '@coodra/contextos-shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createDb, createSqliteDb, resolveSqlitePath } from '../../src/client.js';

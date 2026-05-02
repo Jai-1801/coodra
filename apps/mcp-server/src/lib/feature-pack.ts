@@ -3,8 +3,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-import { type DbHandle, postgresSchema, sqliteSchema } from '@contextos/db';
-import { InternalError, type Logger } from '@contextos/shared';
+import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-db';
+import { InternalError, type Logger } from '@coodra/contextos-shared';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
@@ -337,7 +337,7 @@ export function createFeaturePackStore(deps: CreateFeaturePackStoreDeps): Featur
     throw new TypeError('createFeaturePackStore requires an options object');
   }
   if (!deps.db || typeof deps.db !== 'object' || !('kind' in deps.db)) {
-    throw new TypeError('createFeaturePackStore: deps.db must be a DbHandle from @contextos/db');
+    throw new TypeError('createFeaturePackStore: deps.db must be a DbHandle from @coodra/contextos-db');
   }
   const log = deps.logger ?? featurePackLogger;
   const root = deps.featurePacksRoot ?? defaultFeaturePacksRoot();

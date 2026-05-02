@@ -1,5 +1,5 @@
-import { createLogger } from '@contextos/shared';
-import type { AuthEnv } from '@contextos/shared/auth';
+import { createLogger } from '@coodra/contextos-shared';
+import type { AuthEnv } from '@coodra/contextos-shared/auth';
 import {
   adaptClaudeCode,
   adaptCursor,
@@ -8,7 +8,7 @@ import {
   CursorHookPayloadSchema,
   type HookEvent,
   WindsurfHookPayloadSchema,
-} from '@contextos/shared/hooks';
+} from '@coodra/contextos-shared/hooks';
 import { Hono } from 'hono';
 
 import { createAuthChainMiddleware } from './lib/auth-middleware.js';

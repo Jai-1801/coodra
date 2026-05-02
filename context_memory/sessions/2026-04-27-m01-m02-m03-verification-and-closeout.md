@@ -18,7 +18,7 @@ Verify ContextOS as a single shipped product. Treat Modules 01 (Foundation), 02 
 
 ## Next action
 
-**Module 08a kickoff.** All 2026-04-27 verification + fix-batch + post-merge + single-pass-integration + closeout documentation is committed. Module 08a (`@contextos/cli`) per `essentialsforclaude/08-implementation-order.md`. Spec at `docs/feature-packs/08a-cli/`. Two CLI commands the verification batch already created the contracts for: `contextos init` writes `.contextos.json`; `contextos team login` writes `~/.contextos/config.json` for `LOCAL_HOOK_SECRET`.
+**Module 08a kickoff.** All 2026-04-27 verification + fix-batch + post-merge + single-pass-integration + closeout documentation is committed. Module 08a (`@coodra/contextos-cli`) per `essentialsforclaude/08-implementation-order.md`. Spec at `docs/feature-packs/08a-cli/`. Two CLI commands the verification batch already created the contracts for: `contextos init` writes `.contextos.json`; `contextos team login` writes `~/.contextos/config.json` for `LOCAL_HOOK_SECRET`.
 
 Pending user-side scheduling (separate from M08a kickoff): **Module 03.1 (Durable Audit Outbox)** placeholder at `docs/feature-packs/03.1-durable-outbox/`; pending-user-actions entry asks for scheduling decision to land 03.1 BEFORE Module 04. Does not block 08a.
 

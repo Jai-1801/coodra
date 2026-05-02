@@ -12,7 +12,7 @@ COPY pnpm-lock.yaml package.json pnpm-workspace.yaml turbo.json tsconfig.base.js
 COPY apps ./apps
 COPY packages ./packages
 RUN pnpm install --frozen-lockfile
-RUN pnpm exec turbo run build --filter=@contextos/hooks-bridge
+RUN pnpm exec turbo run build --filter=@coodra/contextos-hooks-bridge
 
 FROM node:22-alpine AS runtime
 RUN apk add --no-cache libstdc++ libc6-compat

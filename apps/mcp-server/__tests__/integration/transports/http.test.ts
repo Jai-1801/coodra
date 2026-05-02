@@ -1,4 +1,4 @@
-import { migrateSqlite } from '@contextos/db';
+import { migrateSqlite } from '@coodra/contextos-db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { __internal as envInternal } from '../../../src/config/env.js';
 import type { ContextDeps } from '../../../src/framework/tool-context.js';
@@ -77,7 +77,7 @@ async function openHarness(envOverride: EnvOverride = {}): Promise<Harness> {
 
   const handle2 = await startHttpTransport({
     registry,
-    serverName: '@contextos/mcp-server-test',
+    serverName: '@coodra/contextos-mcp-server-test',
     serverVersion: '0.0.0-test',
     env,
   });
@@ -185,7 +185,7 @@ describe('http transport — /mcp auth: solo-bypass (sentinel CLERK_SECRET_KEY)'
       result?: { protocolVersion?: string; serverInfo?: { name: string } };
     };
     expect(body.jsonrpc).toBe('2.0');
-    expect(body.result?.serverInfo?.name).toBe('@contextos/mcp-server-test');
+    expect(body.result?.serverInfo?.name).toBe('@coodra/contextos-mcp-server-test');
   });
 });
 

@@ -23,7 +23,7 @@ Pause. Wait for OQ sign-off.
 - New unit test under `packages/cli/__tests__/unit/commands/cloud-migrate.test.ts` (against a testcontainers Postgres).
 - Existing migration files unchanged — this slice is the operator-runnable wrapper, not a new schema.
 
-**Verify:** `pnpm --filter @contextos/cli test:unit` green. `DATABASE_URL=... pnpm exec contextos cloud-migrate` against a fresh postgres lands all 4 migrations.
+**Verify:** `pnpm --filter @coodra/contextos-cli test:unit` green. `DATABASE_URL=... pnpm exec contextos cloud-migrate` against a fresh postgres lands all 4 migrations.
 
 **Commit:** `feat(cli): contextos cloud-migrate runs Drizzle pg migrations idempotently`.
 
@@ -40,7 +40,7 @@ Pause. Wait for OQ sign-off.
   - `packages/db/__tests__/integration/schedule-audit-write-with-sync.test.ts` — asserts both jobs land for one logical audit; only the audit job lands in solo mode.
   - Bridge + MCP integration tests pick up the paired enqueue automatically (they assert audit destination state, which is unchanged).
 
-**Verify:** `pnpm --filter @contextos/db test:integration` green; bridge + MCP integration green; M03.1 crash-safety harness still passes (M03.1 path untouched).
+**Verify:** `pnpm --filter @coodra/contextos-db test:integration` green; bridge + MCP integration green; M03.1 crash-safety harness still passes (M03.1 path untouched).
 
 **Commit:** `feat(db,bridge,mcp-server): paired sync_to_cloud enqueue at M03.1 audit callsites (team mode only)`.
 
@@ -60,7 +60,7 @@ Pause. Wait for OQ sign-off.
 - Tests:
   - `apps/sync-daemon/__tests__/integration/dispatch.test.ts` — spin a SQLite in-memory + a testcontainers postgres; enqueue 5 sync jobs across 5 tables; tick the worker; assert 5 cloud rows landed; tick again, assert no duplicates.
   - `apps/sync-daemon/__tests__/integration/cloud-unreachable.test.ts` — break the cloud handle mid-tick; assert jobs go to retry; restore; assert eventual drain.
-- Wire `pnpm --filter @contextos/sync-daemon` into the workspace + turbo pipeline (build + test:unit + test:integration). Lint passes.
+- Wire `pnpm --filter @coodra/contextos-sync-daemon` into the workspace + turbo pipeline (build + test:unit + test:integration). Lint passes.
 
 **Verify:** new package's tests green; existing tests unaffected.
 
@@ -78,7 +78,7 @@ Pause. Wait for OQ sign-off.
 - Update existing `start`/`stop`/`status` command tests to cover the third service.
 - Solo mode: `contextos start` skips the sync-daemon entry (no `DATABASE_URL` expected).
 
-**Verify:** `pnpm --filter @contextos/cli test:unit` green; manual smoke (`contextos start && contextos status && contextos stop`) shows three services in team mode, two in solo.
+**Verify:** `pnpm --filter @coodra/contextos-cli test:unit` green; manual smoke (`contextos start && contextos status && contextos stop`) shows three services in team mode, two in solo.
 
 **Commit:** `feat(cli): supervise sync-daemon as third managed process in team mode`.
 

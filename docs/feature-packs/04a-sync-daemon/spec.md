@@ -31,7 +31,7 @@ The secondary AC: **the team-mode stack is installable on a fresh machine with o
 
 ### 3.1 In scope
 
-1. **`apps/sync-daemon`** — new long-running TypeScript process. Boots a SQLite handle (local source) and a Postgres handle (cloud destination). Runs an `OutboxWorker` (reused from `@contextos/cli/lib/outbox`) configured for the `sync_to_cloud` queue. Same lease/retry/dead-letter machinery as M03.1; same `pending_jobs` table; same doctor surfaces extended with sync-specific checks.
+1. **`apps/sync-daemon`** — new long-running TypeScript process. Boots a SQLite handle (local source) and a Postgres handle (cloud destination). Runs an `OutboxWorker` (reused from `@coodra/contextos-cli/lib/outbox`) configured for the `sync_to_cloud` queue. Same lease/retry/dead-letter machinery as M03.1; same `pending_jobs` table; same doctor surfaces extended with sync-specific checks.
 
 2. **Sync substrate.** Reuse `pending_jobs` with a new queue value `'sync_to_cloud'`. Each existing audit-write job dispatched in M03.1 gains a paired sync enqueue at the same point (see OQ7 — single-job-with-sync-side-effect vs paired-jobs is a design choice; spec assumes paired for now). The Sync Daemon's worker only claims rows where `queue='sync_to_cloud'`; the bridge/MCP workers continue to claim only their own audit-destination queues.
 

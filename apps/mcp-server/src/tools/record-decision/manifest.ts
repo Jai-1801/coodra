@@ -21,7 +21,7 @@ import { type RecordDecisionInput, recordDecisionInputSchema, recordDecisionOutp
  * Mismatch would hide retries in the log.
  *
  * §24.3 description anatomy (five-part recipe + 40–80 word band) is
- * enforced by `@contextos/shared/test-utils::assertManifestDescriptionValid`
+ * enforced by `@coodra/contextos-shared/test-utils::assertManifestDescriptionValid`
  * in the unit suite — do NOT hand-roll per-tool anatomy assertions.
  */
 

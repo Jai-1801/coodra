@@ -26,7 +26,7 @@ cd Coodra
 nvm use                 # picks the version from .nvmrc
 corepack enable
 pnpm install            # resolves workspaces + runs postinstalls
-pnpm --filter @contextos/shared build   # builds the workspace package
+pnpm --filter @coodra/contextos-shared build   # builds the workspace package
                                         # that others import
 ```
 
@@ -38,7 +38,7 @@ docker compose up -d             # brings up postgres + redis
 # Wait ~5 s for health-checks, then:
 export DATABASE_URL="postgres://contextos:contextos_dev_password@127.0.0.1:5432/contextos"
 export REDIS_URL="redis://127.0.0.1:6379/0"
-pnpm test:integration            # currently: @contextos/db Postgres smoke
+pnpm test:integration            # currently: @coodra/contextos-db Postgres smoke
 ```
 
 Stop and reset:
@@ -51,8 +51,8 @@ docker compose down -v           # removes named volumes too
 
 ```
 packages/
-  shared/                 # @contextos/shared — logger, errors, zod env, idempotency
-  db/                     # @contextos/db     — Drizzle schemas (sqlite + postgres), createDb
+  shared/                 # @coodra/contextos-shared — logger, errors, zod env, idempotency
+  db/                     # @coodra/contextos-db     — Drizzle schemas (sqlite + postgres), createDb
   # (Module 02+ adds: mcp-server, hooks-bridge, ai-core, sync-daemon, ui, cli)
 
 docs/
@@ -81,7 +81,7 @@ pnpm typecheck          # turbo run typecheck (builds deps first)
 pnpm test:unit          # turbo run test:unit across workspaces
 pnpm test:integration   # turbo run test:integration (needs Postgres)
 pnpm build              # turbo run build
-pnpm --filter @contextos/db db:generate   # regenerate Drizzle migrations
+pnpm --filter @coodra/contextos-db db:generate   # regenerate Drizzle migrations
 ```
 
 All of these are the same commands CI runs. If they pass locally they
@@ -129,7 +129,7 @@ To exercise the team-mode auth chain locally:
 CONTEXTOS_MODE=team \
 CLERK_SECRET_KEY=sk_test_replace_me \
 CLERK_PUBLISHABLE_KEY=pk_test_xxx \
-pnpm --filter @contextos/mcp-server dev
+pnpm --filter @coodra/contextos-mcp-server dev
 ```
 
 The auth client routes through the solo-bypass branch (because the secret is the sentinel), the DB stays SQLite, and `tools/list` returns all 9 tools. Use this for local UI smoke tests where you want to exercise the team-mode auth surface but don't need real Clerk JWTs.
@@ -141,7 +141,7 @@ The Hooks Bridge is a separate Hono service on `127.0.0.1:3101`. Claude Code POS
 ```bash
 # Terminal 1 — bridge in watch mode
 LOCAL_HOOK_SECRET=$(openssl rand -hex 24) \
-  pnpm --filter @contextos/hooks-bridge dev
+  pnpm --filter @coodra/contextos-hooks-bridge dev
 
 # Terminal 2 — tail the bridge log to watch hooks land
 # (the bridge writes pino JSON to stderr by default)
@@ -158,21 +158,21 @@ For Windsurf / Cursor adapters, run `bash scripts/hook-adapters/install.sh` to c
 
 ### Iterating on the CLI (Module 08a)
 
-`@contextos/cli` is a regular workspace TypeScript package — same `tsc → dist/` pipeline as `@contextos/shared` and every other package. There is no separate build tool. Module 08a Decision 5 ships it as a published npm package (`@contextos/cli`); the publish step itself is out of 08a scope.
+`@coodra/contextos-cli` is a regular workspace TypeScript package — same `tsc → dist/` pipeline as `@coodra/contextos-shared` and every other package. There is no separate build tool. Module 08a Decision 5 ships it as a published npm package (`@coodra/contextos-cli`); the publish step itself is out of 08a scope.
 
-For contributors working on the CLI itself, **do not** `npm i -g @contextos/cli` from a published version — you'd shadow your local edits with the registry copy. Instead, invoke the workspace `cli` script:
+For contributors working on the CLI itself, **do not** `npm i -g @coodra/contextos-cli` from a published version — you'd shadow your local edits with the registry copy. Instead, invoke the workspace `cli` script:
 
 ```bash
 # One-time per branch
-pnpm --filter @contextos/cli build       # tsc — writes packages/cli/dist/
+pnpm --filter @coodra/contextos-cli build       # tsc — writes packages/cli/dist/
 
 # Run any subcommand against the freshly-built dist
-pnpm --filter @contextos/cli cli --help
-pnpm --filter @contextos/cli cli doctor
-pnpm --filter @contextos/cli cli init --dry-run
+pnpm --filter @coodra/contextos-cli cli --help
+pnpm --filter @coodra/contextos-cli cli doctor
+pnpm --filter @coodra/contextos-cli cli init --dry-run
 
 # Faster edit/run loop — runs from src/ via tsx, no rebuild needed
-pnpm --filter @contextos/cli dev doctor
+pnpm --filter @coodra/contextos-cli dev doctor
 ```
 
 The `cli` script in `packages/cli/package.json` runs `node dist/index.js`. We use a script (not `pnpm exec contextos`) because pnpm does not auto-link a workspace package's *own* `bin` into `node_modules/.bin/` — `bin` is a contract for downstream installers (`npm i -g`, the published-tarball path), not a self-link in workspace dev. The script keeps the invocation workspace-aware (no hard-coded path; `pnpm --filter <pkg>` runs in the package's cwd) without depending on a symlink that isn't created. The `dev <cmd>` script runs via `tsx` against `src/index.ts` so file edits land without a rebuild — useful when iterating on a single command. Use the built form for end-to-end tests and snapshot assertions.
@@ -184,7 +184,7 @@ When testing daemon lifecycle (`start` / `stop`), prefer a tmp project root and 
 ```bash
 HOME=/tmp/contextos-dev-home \
 XDG_CONFIG_HOME=/tmp/contextos-dev-xdg \
-pnpm --filter @contextos/cli cli init --project-slug devtest
+pnpm --filter @coodra/contextos-cli cli init --project-slug devtest
 ```
 
 ### Why I can't boot the binaries against Postgres (F11)
@@ -193,7 +193,7 @@ Closes verification finding F11 (`docs/verification/2026-04-27-module-01-02-03-v
 
 `apps/mcp-server` and `apps/hooks-bridge` are SQLite-only by design (`system-architecture.md §1`). Their `lib/db.ts` files unconditionally call `createDb({ kind: 'local' })` — there is no env knob, no flag, no boot path that yields a Postgres handle. The Module 02 stop-gap `CONTEXTOS_DB_OVERRIDE_MODE` was removed in M03 S4.
 
-If you need to exercise the cloud-write path, it lives in `@contextos/db::createDb({ kind: 'cloud', postgres: { databaseUrl } })` and is tested in `packages/db/__tests__/integration/cloud-mode-write.test.ts`. Future modules (Sync Daemon, Module 05 NL Assembly's embeddings-ingest worker) will ship services that boot against Postgres directly — but those services don't exist yet, and the local mcp-server/hooks-bridge binaries never will.
+If you need to exercise the cloud-write path, it lives in `@coodra/contextos-db::createDb({ kind: 'cloud', postgres: { databaseUrl } })` and is tested in `packages/db/__tests__/integration/cloud-mode-write.test.ts`. Future modules (Sync Daemon, Module 05 NL Assembly's embeddings-ingest worker) will ship services that boot against Postgres directly — but those services don't exist yet, and the local mcp-server/hooks-bridge binaries never will.
 
 ### Context Pack file conventions (F13)
 
@@ -213,8 +213,8 @@ Override the runtime root via `CONTEXTOS_CONTEXT_PACKS_ROOT=/path/to/dir` (env) 
 ### Running a single package
 
 ```bash
-pnpm --filter @contextos/shared test:unit
-pnpm --filter @contextos/db typecheck
+pnpm --filter @coodra/contextos-shared test:unit
+pnpm --filter @coodra/contextos-db typecheck
 ```
 
 ### Regenerating Drizzle migrations
@@ -222,7 +222,7 @@ pnpm --filter @contextos/db typecheck
 After changing `packages/db/src/schema/{sqlite,postgres}.ts`:
 
 ```bash
-pnpm --filter @contextos/db db:generate
+pnpm --filter @coodra/contextos-db db:generate
 ```
 
 Commit both the schema change and the generated SQL in the same commit.
@@ -250,7 +250,7 @@ lineRange, generatedAt }`. CI (`.github/workflows/ci.yml` → `verify`
 job) and the `.githooks/pre-commit` hook both run the checker:
 
 ```bash
-pnpm --filter @contextos/db run check:migration-lock
+pnpm --filter @coodra/contextos-db run check:migration-lock
 ```
 
 The checker surfaces three failure modes, each with a diffable
@@ -265,7 +265,7 @@ remediation command:
   regenerate the lock:
 
   ```bash
-  pnpm --filter @contextos/db run check:migration-lock -- --write
+  pnpm --filter @coodra/contextos-db run check:migration-lock -- --write
   git diff packages/db/migrations.lock.json   # sanity check
   git add packages/db/migrations.lock.json
   ```
@@ -316,8 +316,8 @@ The full sequence for shipping a module is documented in
 
 ## Troubleshooting
 
-- **`Cannot find module '@contextos/shared'`** — rebuild the workspace
-  package: `pnpm --filter @contextos/shared build`. Turbo's
+- **`Cannot find module '@coodra/contextos-shared'`** — rebuild the workspace
+  package: `pnpm --filter @coodra/contextos-shared build`. Turbo's
   `typecheck` task depends on `^build`, so `pnpm typecheck` from the
   root handles it automatically.
 - **`better-sqlite3` native build failure** — ensure your Node matches
@@ -328,7 +328,7 @@ The full sequence for shipping a module is documented in
 - **Drizzle-kit can't find the schema file** — you probably ran it
   from the repo root; every `db:*` script is defined in
   `packages/db/package.json` and must be invoked via
-  `pnpm --filter @contextos/db ...`.
+  `pnpm --filter @coodra/contextos-db ...`.
 
 ## Known platform-specific behaviour
 

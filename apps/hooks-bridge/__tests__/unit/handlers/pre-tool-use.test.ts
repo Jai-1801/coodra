@@ -1,6 +1,6 @@
-import type { DbHandle } from '@contextos/db';
-import { createPolicyClientFromCheck } from '@contextos/policy';
-import type { HookEvent } from '@contextos/shared/hooks';
+import type { DbHandle } from '@coodra/contextos-db';
+import { createPolicyClientFromCheck } from '@coodra/contextos-policy';
+import type { HookEvent } from '@coodra/contextos-shared/hooks';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createPreToolUseHandler } from '../../../src/handlers/pre-tool-use.js';

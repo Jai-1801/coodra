@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { type DbHandle, postgresSchema, sqliteSchema } from '@contextos/db';
-import { createLogger } from '@contextos/shared';
+import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-db';
+import { createLogger } from '@coodra/contextos-shared';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 

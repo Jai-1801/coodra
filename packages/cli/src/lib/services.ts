@@ -96,7 +96,7 @@ export async function resolveServices(options: BuildServiceUnitOptions): Promise
     throw new Error(
       'Cannot locate the ContextOS repo root from either the CLI install path or the current directory. ' +
         'In 08a `start`/`stop` only work from within the dev monorepo; ' +
-        '`npm i -g @contextos/cli` deployment is tracked as a follow-up.',
+        '`npm i -g @coodra/contextos-cli` deployment is tracked as a follow-up.',
     );
   }
   // Layer the env, low → high precedence:

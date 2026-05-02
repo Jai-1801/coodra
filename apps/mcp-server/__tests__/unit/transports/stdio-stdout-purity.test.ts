@@ -10,10 +10,10 @@ import { describe, expect, it } from 'vitest';
  * This is the authoritative end-to-end check that the stderr-logging
  * contract (README "Critical invariants") is maintained across:
  *   - our `bootstrap/ensure-stderr-logging.ts` side effect,
- *   - @contextos/shared's logger reading CONTEXTOS_LOG_DESTINATION,
- *   - @contextos/db's transitively-loaded sqlite-vec loader (which
+ *   - @coodra/contextos-shared's logger reading CONTEXTOS_LOG_DESTINATION,
+ *   - @coodra/contextos-db's transitively-loaded sqlite-vec loader (which
  *     would WARN via `db.sqlite-vec-loader` on this sandbox, where no
- *     DB path is provided — but nothing imports @contextos/db from
+ *     DB path is provided — but nothing imports @coodra/contextos-db from
  *     the mcp-server yet; S7a does).
  *
  * The test spawns the built entrypoint via `tsx` and asserts:

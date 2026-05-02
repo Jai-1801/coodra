@@ -2,9 +2,9 @@
 // that transitively reaches the shared logger.
 import './bootstrap/ensure-stderr-logging.js';
 
-import { OutboxWorker } from '@contextos/cli/lib/outbox';
-import { createDb, type PostgresHandle, type SqliteHandle } from '@contextos/db';
-import { createLogger } from '@contextos/shared';
+import { OutboxWorker } from '@coodra/contextos-cli/lib/outbox';
+import { createDb, type PostgresHandle, type SqliteHandle } from '@coodra/contextos-db';
+import { createLogger } from '@coodra/contextos-shared';
 
 import { env } from './config/env.js';
 import { createSyncDispatchHandler } from './lib/dispatch.js';

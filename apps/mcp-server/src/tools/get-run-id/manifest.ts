@@ -15,7 +15,7 @@ import { type GetRunIdInput, getRunIdInputSchema, getRunIdOutputSchema } from '.
  *
  * Description below is verbatim from `system-architecture.md §24.4`.
  * The §24.3 description-anatomy assertion in
- * `@contextos/shared/test-utils::assertManifestDescriptionValid` is
+ * `@coodra/contextos-shared/test-utils::assertManifestDescriptionValid` is
  * the CI guard that this string stays within the rules (imperative
  * opener, 40–120 words, mentions Returns).
  */

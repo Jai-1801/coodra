@@ -37,7 +37,7 @@ afterAll(() => {
   if (cwd) rmSync(cwd, { recursive: true, force: true });
 });
 
-describe('@contextos/db::scheduleDurableWrite', () => {
+describe('@coodra/contextos-db::scheduleDurableWrite', () => {
   it('inserts a pending row with the canonical envelope on a fresh enqueue', async () => {
     if (handle.kind !== 'sqlite') throw new Error('expected sqlite');
     const before = Date.now();

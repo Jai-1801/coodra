@@ -1,5 +1,5 @@
-import { type DbHandle, postgresSchema, sqliteSchema } from '@contextos/db';
-import { createLogger, EMBEDDING_DIM } from '@contextos/shared';
+import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-db';
+import { createLogger, EMBEDDING_DIM } from '@coodra/contextos-shared';
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 
 import type { ToolContext } from '../../framework/tool-context.js';

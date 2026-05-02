@@ -1,4 +1,4 @@
-import type { AuthEnv } from '@contextos/shared/auth';
+import type { AuthEnv } from '@coodra/contextos-shared/auth';
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildApp, type DispatchHookEvent } from '../../src/app.js';

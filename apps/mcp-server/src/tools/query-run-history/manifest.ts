@@ -15,7 +15,7 @@ import { type QueryRunHistoryInput, queryRunHistoryInputSchema, queryRunHistoryO
  * so retries can be correlated without collapsing two distinct reads.
  *
  * §24.3 description anatomy (five-part recipe + 40–80 word band) is
- * enforced by `@contextos/shared/test-utils::assertManifestDescriptionValid`
+ * enforced by `@coodra/contextos-shared/test-utils::assertManifestDescriptionValid`
  * in the unit suite.
  */
 

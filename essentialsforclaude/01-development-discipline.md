@@ -64,7 +64,7 @@ AI agents frequently produce incomplete code to save tokens. Do not do this.
 Use **pino** for all TypeScript logging. Use Python's **structlog** or `logging` with JSON output.
 
 ```typescript
-import { logger } from '@contextos/shared';
+import { logger } from '@coodra/contextos-shared';
 
 logger.info({ projectId, packId, version }, 'Fetching feature pack');
 logger.error({ err, projectId, packId }, 'Feature pack fetch failed');
@@ -80,7 +80,7 @@ Every log line MUST include:
 
 Every write operation must be idempotent. Retries (network timeout, agent retry) must produce the same result, not duplicate data.
 
-- **Run Events:** keyed by `{runId}:{eventType}:{toolName}:{timestamp}` — use `generateIdempotencyKey()` from `@contextos/shared`.
+- **Run Events:** keyed by `{runId}:{eventType}:{toolName}:{timestamp}` — use `generateIdempotencyKey()` from `@coodra/contextos-shared`.
 - **Runs:** keyed by `run:{projectId}:{sessionId}:{uuid}` — use `generateRunKey()`.
 - **Context Packs:** one per run. If one exists for a runId, return the existing one.
 - **Policy Decisions:** logged with their own idempotency key to prevent duplicate audit entries.

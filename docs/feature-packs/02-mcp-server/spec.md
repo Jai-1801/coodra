@@ -127,7 +127,7 @@ Per §7, §16 pattern 4, and §24.4:
 
 - A clean `main` pointing at the squash-merged Module 02 commit.
 - The nine-table schema (5 from Module 01 + 4 from Module 02) with numbered migrations that Module 03 can extend by adding `integrations`, `integration_tokens`, `integration_events`, and `knowledge_edges` in `0002_hooks_bridge.sql`.
-- `@contextos/mcp-server` binary at `apps/mcp-server/dist/index.js` runnable via `pnpm --filter @contextos/mcp-server dev` (tsx watch) or `node dist/index.js` (compiled).
+- `@coodra/contextos-mcp-server` binary at `apps/mcp-server/dist/index.js` runnable via `pnpm --filter @coodra/contextos-mcp-server dev` (tsx watch) or `node dist/index.js` (compiled).
 - Eight `contextos__*` tools callable over both transports.
 - Two partial-capability fallbacks (`search_packs_nl` LIKE branch, `query_codebase_graph` graphify-missing notice) active today; automatically upgrade when Modules 05 / 17 ship their dependencies.
 - A Module 02 Context Pack describing everything above.

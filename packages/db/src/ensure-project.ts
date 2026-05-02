@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { createLogger } from '@contextos/shared';
+import { createLogger } from '@coodra/contextos-shared';
 import { eq } from 'drizzle-orm';
 
 import type { DbHandle } from './client.js';

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // MUST be the first import — sets CONTEXTOS_LOG_DESTINATION=stderr before
-// any module that constructs a @contextos/shared logger. See
+// any module that constructs a @coodra/contextos-shared logger. See
 // `lib/log-destination-shim.ts` for the rationale.
 import './lib/log-destination-shim.js';
 // MUST be imported AFTER the log shim and BEFORE `buildProgram` — layers

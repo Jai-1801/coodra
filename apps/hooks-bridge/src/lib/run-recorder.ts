@@ -5,11 +5,11 @@ import type {
   RunIdResolution,
   SessionClosePayloadV1,
   SessionOpenPayloadV1,
-} from '@contextos/cli/lib/outbox';
-import { type DbHandle, GLOBAL_PROJECT_ID, scheduleAuditWriteWithSync } from '@contextos/db';
-import { buildPolicyDecisionIdempotencyKey } from '@contextos/policy';
-import { createLogger, generateRunKey } from '@contextos/shared';
-import type { HookEvent } from '@contextos/shared/hooks';
+} from '@coodra/contextos-cli/lib/outbox';
+import { type DbHandle, GLOBAL_PROJECT_ID, scheduleAuditWriteWithSync } from '@coodra/contextos-db';
+import { buildPolicyDecisionIdempotencyKey } from '@coodra/contextos-policy';
+import { createLogger, generateRunKey } from '@coodra/contextos-shared';
+import type { HookEvent } from '@coodra/contextos-shared/hooks';
 
 /**
  * `apps/hooks-bridge/src/lib/run-recorder` — durable + idempotent
@@ -17,7 +17,7 @@ import type { HookEvent } from '@contextos/shared/hooks';
  *
  * Module 03.1 — every audit write goes through `pending_jobs` via
  * `scheduleDurableWrite` (the durable outbox). The OutboxWorker
- * (`@contextos/cli/lib/outbox`) drains the queue and applies each
+ * (`@coodra/contextos-cli/lib/outbox`) drains the queue and applies each
  * row to its destination table. This recorder's only job is to
  * build the queue payload and enqueue durably; on success the
  * caller's HTTP response can return immediately without waiting
@@ -43,7 +43,7 @@ import type { HookEvent } from '@contextos/shared/hooks';
  * null. By the time the worker dispatches the policy_decision job
  * (~1s later), the session_open job has likely landed and the
  * lookup succeeds. The dispatcher in
- * `@contextos/cli/lib/outbox::dispatcher` performs the
+ * `@coodra/contextos-cli/lib/outbox::dispatcher` performs the
  * `lookupRunId(projectId, sessionId)` call.
  *
  * Idempotency.

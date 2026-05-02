@@ -58,7 +58,7 @@ export const mcpConfigValidityCheck: Check = {
       return {
         status: 'yellow',
         detail: ".mcp.json `contextos.command` is `npx` — npx-cache paths can be GC'd unexpectedly",
-        remediation: 'Install globally with `npm i -g @contextos/cli` for stable resolution (see techstack Gotchas).',
+        remediation: 'Install globally with `npm i -g @coodra/contextos-cli` for stable resolution (see techstack Gotchas).',
       };
     }
     if (isAbsolute(cmd)) {

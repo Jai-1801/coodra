@@ -37,7 +37,7 @@ afterAll(() => {
   if (cwd) rmSync(cwd, { recursive: true, force: true });
 });
 
-describe('@contextos/db::ensureGlobalProject', () => {
+describe('@coodra/contextos-db::ensureGlobalProject', () => {
   it('inserts the __global__ row on a fresh DB', async () => {
     if (handle.kind !== 'sqlite') throw new Error('expected sqlite');
     await ensureGlobalProject(handle);

@@ -27,25 +27,25 @@ Archive `context_memory/current-session.md` (final Module 02 entries) to `contex
 
 ### S3 — Extract policy + auth modules from `apps/mcp-server`
 
-**Deviation from plan:** spec.md originally said both modules move to `packages/shared/src/{policy,auth}/`. Auth has no DB dependency and lives there as planned. **Policy cannot.** `@contextos/db` already depends on `@contextos/shared`; if `shared/policy` imports `@contextos/db` (for `DbHandle` + the schema tables), the workspace forms a cycle. Resolved by creating a new workspace package `@contextos/policy` (`packages/policy/`) that depends on both `shared` and `db`. Decision recorded in `context_memory/decisions-log.md` 2026-04-25 in the same commit.
+**Deviation from plan:** spec.md originally said both modules move to `packages/shared/src/{policy,auth}/`. Auth has no DB dependency and lives there as planned. **Policy cannot.** `@coodra/contextos-db` already depends on `@coodra/contextos-shared`; if `shared/policy` imports `@coodra/contextos-db` (for `DbHandle` + the schema tables), the workspace forms a cycle. Resolved by creating a new workspace package `@coodra/contextos-policy` (`packages/policy/`) that depends on both `shared` and `db`. Decision recorded in `context_memory/decisions-log.md` 2026-04-25 in the same commit.
 
 **What actually lands:**
 
-- New workspace package `packages/policy/` with `package.json` (deps: `@contextos/shared`, `@contextos/db`, `cockatiel@3.2.1`, `drizzle-orm@^0.45.2`, `picomatch@4.0.2`), `tsconfig.json`, `tsconfig.typecheck.json`, `vitest.config.ts`, `src/{index,policy,types}.ts`, `__tests__/unit/exports.test.ts` (smoke + pure-logic for the no-DB surface). Subpath exports: `.` + `./types`.
+- New workspace package `packages/policy/` with `package.json` (deps: `@coodra/contextos-shared`, `@coodra/contextos-db`, `cockatiel@3.2.1`, `drizzle-orm@^0.45.2`, `picomatch@4.0.2`), `tsconfig.json`, `tsconfig.typecheck.json`, `vitest.config.ts`, `src/{index,policy,types}.ts`, `__tests__/unit/exports.test.ts` (smoke + pure-logic for the no-DB surface). Subpath exports: `.` + `./types`.
 - `packages/shared/src/auth/` — new subdirectory: `index.ts` (barrel), `auth.ts` (factories + `verifyClerkJwt` + `verifyLocalHookSecret`), `types.ts` (`Identity` + `AuthClient` + structural `AuthEnv` subset replacing the app-specific `McpServerEnv` parameter type). `@clerk/backend@3.3.0` added to `packages/shared/package.json` deps. New subpath export `./auth`.
 - `packages/shared/src/idempotency.ts` — `IdempotencyKey` discriminated value-shape moved here so the cross-package `PolicyInput.idempotencyKey` field can reference it without depending on the mcp-server framework. Framework-only `IdempotencyKeyBuilder` + `IdempotencyContext` + `assertIdempotencyKeyBuilder` stay in mcp-server's `framework/idempotency.ts` (those are tool-registration concerns). The shared `index.ts` barrel re-exports the new type.
-- `apps/mcp-server/src/lib/{policy,auth}.ts` — now thin re-export shims pointing at `@contextos/policy` and `@contextos/shared/auth` respectively. Existing import sites (handlers, tests, `framework/tool-context.ts`) keep working unchanged.
+- `apps/mcp-server/src/lib/{policy,auth}.ts` — now thin re-export shims pointing at `@coodra/contextos-policy` and `@coodra/contextos-shared/auth` respectively. Existing import sites (handlers, tests, `framework/tool-context.ts`) keep working unchanged.
 - `apps/mcp-server/src/framework/policy-wrapper.ts` — re-export shim for the moved types.
-- `apps/mcp-server/src/framework/tool-context.ts` — `Identity` / `AuthClient` interfaces now imported from `@contextos/shared/auth`; `PolicyClient` from `@contextos/policy`. Re-exported so existing `import type { Identity } from '../framework/tool-context.js'` keeps working.
-- `apps/mcp-server/src/framework/idempotency.ts` — `IdempotencyKey` is now `import type` from `@contextos/shared` plus a re-export.
-- `apps/mcp-server/package.json` — drop `cockatiel`, `@clerk/backend`, `@types/picomatch` (now transitive through shared/policy). Add `@contextos/policy` workspace dep. Keep `picomatch` (still used directly in `tools/get-feature-pack/handler.ts` + a unit test).
+- `apps/mcp-server/src/framework/tool-context.ts` — `Identity` / `AuthClient` interfaces now imported from `@coodra/contextos-shared/auth`; `PolicyClient` from `@coodra/contextos-policy`. Re-exported so existing `import type { Identity } from '../framework/tool-context.js'` keeps working.
+- `apps/mcp-server/src/framework/idempotency.ts` — `IdempotencyKey` is now `import type` from `@coodra/contextos-shared` plus a re-export.
+- `apps/mcp-server/package.json` — drop `cockatiel`, `@clerk/backend`, `@types/picomatch` (now transitive through shared/policy). Add `@coodra/contextos-policy` workspace dep. Keep `picomatch` (still used directly in `tools/get-feature-pack/handler.ts` + a unit test).
 - `apps/mcp-server/__tests__/unit/lib/auth-chain.test.ts` — moved to `packages/shared/__tests__/unit/auth/auth.test.ts`. `vi.mock('@clerk/backend')` only intercepts when the test runs in the same package as the implementation; in mcp-server it bound only to the test file's own resolution context and the dist's transitive import bypassed it. Switch the type cast from `McpServerEnv` to `AuthEnv` (structural subset). 18 tests intact, all green.
 
 `pnpm install` re-links the workspace. The full gate (lint + typecheck + unit + integration on mcp-server, unit on shared + policy) is green at this commit.
 
-**Reference updates in the same commit (amendment B):** Module 03 adds `@contextos/policy` as a new workspace package — call out the package's role + dep set in `External api and library reference.md` (new subsection under Validation/Schemas/Resilience).
+**Reference updates in the same commit (amendment B):** Module 03 adds `@coodra/contextos-policy` as a new workspace package — call out the package's role + dep set in `External api and library reference.md` (new subsection under Validation/Schemas/Resilience).
 
-**Commit:** `refactor(workspace): extract @contextos/policy package + @contextos/shared/auth from mcp-server (closes the workspace cycle implied by the original plan)`.
+**Commit:** `refactor(workspace): extract @coodra/contextos-policy package + @coodra/contextos-shared/auth from mcp-server (closes the workspace cycle implied by the original plan)`.
 
 ### S4 — `createDb` local-vs-cloud refactor (closes verification §8.3)
 
@@ -78,7 +78,7 @@ Update existing tests that asserted Postgres routing for `mode: 'team'`: pass `k
 
 Scaffold `apps/hooks-bridge/`:
 
-- `package.json` — private workspace package, `"type": "module"`, `bin` points at `dist/index.js`. Deps: `@hono/node-server@^2.0.0`, `hono@^4.12.15`, `@hono/zod-validator@^0.7.6`, `drizzle-orm@^0.45.2`, `@contextos/shared@workspace:*`, `@contextos/db@workspace:*`. devDeps: `tsx`, `vitest`, `@types/node`.
+- `package.json` — private workspace package, `"type": "module"`, `bin` points at `dist/index.js`. Deps: `@hono/node-server@^2.0.0`, `hono@^4.12.15`, `@hono/zod-validator@^0.7.6`, `drizzle-orm@^0.45.2`, `@coodra/contextos-shared@workspace:*`, `@coodra/contextos-db@workspace:*`. devDeps: `tsx`, `vitest`, `@types/node`.
 - `tsconfig.json` + `tsconfig.typecheck.json` (extends `../../tsconfig.base.json`).
 - `vitest.config.ts` — same config shape as `apps/mcp-server`'s.
 - `README.md`, `.env.example` (HOOKS_BRIDGE_PORT, LOCAL_HOOK_SECRET, CONTEXTOS_LOG_DESTINATION, CONTEXTOS_MODE, CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY, CONTEXTOS_SQLITE_PATH).
@@ -86,12 +86,12 @@ Scaffold `apps/hooks-bridge/`:
 
 Source layout (mirror mcp-server's conventions):
 
-- `src/index.ts` — boot entry. Calls `ensureStderrLogging()` first (imported from `@contextos/shared`), parses env, builds `dbHandle = createDb({ kind: 'local', mode: env.CONTEXTOS_MODE, sqlitePath: env.CONTEXTOS_SQLITE_PATH })`, runs migrations idempotently (`migrateSqlite(dbHandle.db)` — same auto-migrate stance as mcp-server post-Module-02 `187c844`), constructs the Hono app, starts the listener on `127.0.0.1:${env.HOOKS_BRIDGE_PORT}` (default 3101), wires `process.on('SIGTERM' | 'SIGINT')` for graceful shutdown.
+- `src/index.ts` — boot entry. Calls `ensureStderrLogging()` first (imported from `@coodra/contextos-shared`), parses env, builds `dbHandle = createDb({ kind: 'local', mode: env.CONTEXTOS_MODE, sqlitePath: env.CONTEXTOS_SQLITE_PATH })`, runs migrations idempotently (`migrateSqlite(dbHandle.db)` — same auto-migrate stance as mcp-server post-Module-02 `187c844`), constructs the Hono app, starts the listener on `127.0.0.1:${env.HOOKS_BRIDGE_PORT}` (default 3101), wires `process.on('SIGTERM' | 'SIGINT')` for graceful shutdown.
 - `src/bootstrap/ensure-stderr-logging.ts` — re-exported from shared if it lives there now; otherwise a thin local copy.
 - `src/config/env.ts` — Zod-validated env with the same strictness rules as mcp-server's. New shape adds `HOOKS_BRIDGE_PORT` (default 3101, range 1024–65535).
-- `src/lib/auth.ts` — re-exports `createAuthChainMiddleware` from `@contextos/shared/auth`.
+- `src/lib/auth.ts` — re-exports `createAuthChainMiddleware` from `@coodra/contextos-shared/auth`.
 - `src/app.ts` — exported builder `buildApp(deps): Hono`. Wires `GET /healthz` (no auth) and the three `POST /v1/hooks/{agent}` routes (the routes themselves are stubbed with `c.json({ ok: true })` until S6; the auth middleware + zValidator wiring lands here).
-- `src/lib/db.ts` — re-exports `createDbClient` and the same `DbHandle`-typed factory from mcp-server's `lib/db.ts`. Hooks bridge does NOT depend on apps/mcp-server; both apps independently call the shared factory in `@contextos/db`.
+- `src/lib/db.ts` — re-exports `createDbClient` and the same `DbHandle`-typed factory from mcp-server's `lib/db.ts`. Hooks bridge does NOT depend on apps/mcp-server; both apps independently call the shared factory in `@coodra/contextos-db`.
 
 Tests:
 
@@ -183,7 +183,7 @@ Wire the adapters into the Hono routes in `apps/hooks-bridge/src/app.ts` (still 
 
 ```ts
 export function createPreToolUseHandler(deps: { db: DbHandle; mode: 'solo'|'team' }) {
-  const evaluator = createPolicyClient(deps);  // from @contextos/policy
+  const evaluator = createPolicyClient(deps);  // from @coodra/contextos-policy
   return async function handle(event: HookEvent): Promise<PolicyDecisionEnvelope> {
     if (event.eventPhase !== 'pre') return { permissionDecision: 'allow', reason: 'event_phase_mismatch' };
     try {
@@ -366,7 +366,7 @@ Update the repo root `.mcp.json` so Claude Code, when running in this repo, fire
 
 `.mcp.dev.json` (introduced in Module 02 commit `811fcc8`) gets the same `hooks` block so the live-reload dev profile observes hooks too.
 
-`docs/DEVELOPMENT.md` "Iterating on Module 03" section explains: (a) the IDE must be restarted once after this commit lands so Claude Code re-reads `.mcp.json`, (b) hooks-bridge must be running (`pnpm --filter @contextos/hooks-bridge dev`), (c) verify via `tail -f` on the hooks-bridge stderr while running an agent turn in Claude Code.
+`docs/DEVELOPMENT.md` "Iterating on Module 03" section explains: (a) the IDE must be restarted once after this commit lands so Claude Code re-reads `.mcp.json`, (b) hooks-bridge must be running (`pnpm --filter @coodra/contextos-hooks-bridge dev`), (c) verify via `tail -f` on the hooks-bridge stderr while running an agent turn in Claude Code.
 
 **Files:** `.mcp.json`, `.mcp.dev.json`, `docs/DEVELOPMENT.md`.
 
@@ -440,8 +440,8 @@ After all 15 slices land:
 1. `pnpm build` — clean compile, all packages green.
 2. `pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:integration && pnpm test:e2e` — full repo green.
 3. **Manual Claude Code session test:**
-   - Run `pnpm --filter @contextos/hooks-bridge dev` in one terminal.
-   - Run `pnpm --filter @contextos/mcp-server dev` in another (or use the IDE's stdio launch).
+   - Run `pnpm --filter @coodra/contextos-hooks-bridge dev` in one terminal.
+   - Run `pnpm --filter @coodra/contextos-mcp-server dev` in another (or use the IDE's stdio launch).
    - Restart Claude Code so it re-reads `.mcp.json` with the new `hooks` block.
    - Open a test repo with a `.contextos.json` registered, ask Claude to make a small edit.
    - Verify hooks-bridge stderr shows `pre_tool_use` + `post_tool_use` log lines for that edit.

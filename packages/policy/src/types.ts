@@ -1,7 +1,7 @@
-import type { IdempotencyKey } from '@contextos/shared/idempotency';
+import type { IdempotencyKey } from '@coodra/contextos-shared/idempotency';
 
 /**
- * `@contextos/policy/types` — policy-evaluation primitives shared by
+ * `@coodra/contextos-policy/types` — policy-evaluation primitives shared by
  * the registry, the `PolicyClient` interface, and every consumer that
  * wraps / implements a policy check.
  *

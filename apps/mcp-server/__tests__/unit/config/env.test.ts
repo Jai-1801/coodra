@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *   no-process-env-in-source   — (structural) no file under src/ except env.ts
  *                                reads process.env directly.
  */
-describe('@contextos/mcp-server env schema', () => {
+describe('@coodra/contextos-mcp-server env schema', () => {
   // Back up the full env before each test; restore after. We isolate
   // only the variables the schema parses so other tools (e.g. vitest)
   // see their expected environment.

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { postgresSchema } from '@contextos/db';
+import { postgresSchema } from '@coodra/contextos-db';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { eq } from 'drizzle-orm';
@@ -75,7 +75,7 @@ afterAll(async () => {
 // beforeAll because `kind` is always 'sqlite'.
 //
 // `essentialsforclaude/04-when-in-doubt.md` §4.5 codifies this: the
-// cloud-write path lives only in `@contextos/db::createDb({ kind:
+// cloud-write path lives only in `@coodra/contextos-db::createDb({ kind:
 // 'cloud' })` and is exercised through the package's own integration
 // tests. The rule was added precisely to stop authors writing tests
 // that boot the binary against Postgres.
@@ -83,7 +83,7 @@ afterAll(async () => {
 // Flagged broken in M03.1 S2 (`replace 7 setImmediate audit dispatches
 // with scheduleDurableWrite`). Confirmed broken pre-M03.1 — not a
 // regression. Skipped here so main stays green; lift the skip and
-// retarget either at the @contextos/db package level (closer to the
+// retarget either at the @coodra/contextos-db package level (closer to the
 // actual ON CONFLICT semantics) or once Module 04 brings team-mode
 // boot back online.
 describe.skip('e2e — policy_decisions idempotency under concurrent retries (skipped: SQLite-only binary post-M03 S4)', () => {

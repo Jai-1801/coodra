@@ -1,5 +1,5 @@
 {
-  "name": "@contextos/mcp-server",
+  "name": "@coodra/contextos-mcp-server",
   "version": "0.0.0",
   "private": true,
   "description": "ContextOS MCP server — stdio transport (S5 walking skeleton), tool-registration framework with enforced invariants, typed env config, Clerk + solo-bypass auth chain (wired in later slices).",
@@ -24,10 +24,10 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@contextos/cli": "workspace:*",
-    "@contextos/db": "workspace:*",
-    "@contextos/policy": "workspace:*",
-    "@contextos/shared": "workspace:*",
+    "@coodra/contextos-cli": "workspace:*",
+    "@coodra/contextos-db": "workspace:*",
+    "@coodra/contextos-policy": "workspace:*",
+    "@coodra/contextos-shared": "workspace:*",
     "@hono/node-server": "2.0.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "drizzle-orm": "^0.45.2",

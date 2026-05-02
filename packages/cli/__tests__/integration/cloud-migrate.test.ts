@@ -1,4 +1,4 @@
-import { createPostgresDb, type PostgresHandle } from '@contextos/db';
+import { createPostgresDb, type PostgresHandle } from '@coodra/contextos-db';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { runCloudMigrateCommand } from '../../src/commands/cloud-migrate.js';

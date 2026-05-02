@@ -2,8 +2,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { migrateSqlite, type SqliteHandle } from '@contextos/db';
-import { EMBEDDING_DIM } from '@contextos/shared';
+import { migrateSqlite, type SqliteHandle } from '@coodra/contextos-db';
+import { EMBEDDING_DIM } from '@coodra/contextos-shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ContextDeps } from '../../../src/framework/tool-context.js';
 import { ToolRegistry } from '../../../src/framework/tool-registry.js';

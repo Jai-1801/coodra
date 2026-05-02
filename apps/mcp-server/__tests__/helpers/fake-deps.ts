@@ -1,4 +1,4 @@
-import { createLogger } from '@contextos/shared';
+import { createLogger } from '@coodra/contextos-shared';
 
 import type { PolicyCheck } from '../../src/framework/policy-wrapper.js';
 import type {

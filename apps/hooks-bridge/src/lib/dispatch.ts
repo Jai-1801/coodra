@@ -1,5 +1,5 @@
-import { createLogger } from '@contextos/shared';
-import type { HookEvent } from '@contextos/shared/hooks';
+import { createLogger } from '@coodra/contextos-shared';
+import type { HookEvent } from '@coodra/contextos-shared/hooks';
 
 import type { DispatchHookEvent, HookDispatchResult } from '../app.js';
 

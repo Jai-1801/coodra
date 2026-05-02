@@ -1,4 +1,4 @@
-import { type DbHandle, migratePostgres } from '@contextos/db';
+import { type DbHandle, migratePostgres } from '@coodra/contextos-db';
 import { sql } from 'drizzle-orm';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 import { createDbClient } from '../../../apps/mcp-server/src/lib/db.js';

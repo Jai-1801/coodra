@@ -1,8 +1,8 @@
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { migrateSqlite, type SqliteHandle, sqliteSchema } from '@contextos/db';
-import { EMBEDDING_DIM, ValidationError } from '@contextos/shared';
+import { migrateSqlite, type SqliteHandle, sqliteSchema } from '@coodra/contextos-db';
+import { EMBEDDING_DIM, ValidationError } from '@coodra/contextos-shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type ContextPackWriteResult, createContextPackStore } from '../../../src/lib/context-pack.js';

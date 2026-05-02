@@ -17,7 +17,7 @@ describe('contextos --help (snapshot-locked surface)', () => {
       ContextOS CLI — install, configure, run, and diagnose ContextOS on your machine.
 
       Options:
-        -v, --version            Print the @contextos/cli version and exit.
+        -v, --version            Print the @coodra/contextos-cli version and exit.
         -h, --help               Show help for a command.
 
       Commands:

@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1.7
 #
-# Multi-stage build for @contextos/mcp-server.
+# Multi-stage build for @coodra/contextos-mcp-server.
 #
 # Stage 1 (deps):    resolve and install the full pnpm workspace, including
 #                    dev deps, so TypeScript can compile against the same
 #                    graph CI uses.
-# Stage 2 (build):   tsc the workspace packages @contextos/mcp-server
+# Stage 2 (build):   tsc the workspace packages @coodra/contextos-mcp-server
 #                    depends on (shared + db + mcp-server itself).
 # Stage 3 (deploy):  use `pnpm deploy` to carve out a minimal, self-contained
-#                    deploy directory containing ONLY @contextos/mcp-server
+#                    deploy directory containing ONLY @coodra/contextos-mcp-server
 #                    and its production deps (no workspace symlinks, no dev
 #                    deps, no test files). This is what pnpm's `deploy`
 #                    command is designed for — see
@@ -79,9 +79,9 @@ COPY apps/mcp-server ./apps/mcp-server
 # Build in dependency order. Turbo handles this when invoked from root,
 # but we call the scripts directly here so the Dockerfile does not
 # depend on .turbo cache state.
-RUN pnpm --filter @contextos/shared build \
- && pnpm --filter @contextos/db build \
- && pnpm --filter @contextos/mcp-server build
+RUN pnpm --filter @coodra/contextos-shared build \
+ && pnpm --filter @coodra/contextos-db build \
+ && pnpm --filter @coodra/contextos-mcp-server build
 
 # ──────────────────────────────────────────────────────────────────────
 # Stage 3 — deploy: `pnpm deploy` carves out a production-only tree
@@ -94,7 +94,7 @@ WORKDIR /repo
 # transitive production-only deps into a new directory with no
 # symlinks or workspace:* rewrites. The output is ready to run with
 # a bare `node dist/index.js`.
-RUN pnpm --filter @contextos/mcp-server deploy --prod --legacy /out
+RUN pnpm --filter @coodra/contextos-mcp-server deploy --prod --legacy /out
 
 # ──────────────────────────────────────────────────────────────────────
 # Stage 4 — runtime: minimal production image

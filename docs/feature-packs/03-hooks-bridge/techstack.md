@@ -20,19 +20,19 @@
 | `hono` | `^4.12.15` | Hono app — three `POST /v1/hooks/{agent}` routes + `GET /healthz`. Same Hono version as `apps/mcp-server` (caret pin keeps them in lockstep). | Already pinned — no change |
 | `@hono/node-server` | `^2.0.0` | Node listener for Hono's `fetch` handler on `127.0.0.1:3101`. Same major as mcp-server. | Already pinned — no change |
 | `@hono/zod-validator` | `^0.7.6` | Per-route Zod body validation middleware. Validates the agent payload **before** any business-logic lookup so malformed bodies fail fast (still fail-open by returning `allow` from the route, but the Zod result is the trigger to fail-open). | **NEW** — first usage in Module 03. Pin verified via `npm view`. |
-| `cockatiel` | `3.2.1` exact | Reuses the policy module's existing breaker. No new instance in hooks-bridge — the breaker lives inside `@contextos/policy`. | Already pinned — no change |
-| `@clerk/backend` | `3.3.0` exact | Auth chain inheritance via the `@contextos/shared/auth` middleware. No new direct dependency in hooks-bridge — pulled transitively through shared. | Already pinned — no change |
-| `picomatch` | `4.0.2` exact | Used inside `@contextos/policy` for path-glob matching. Pulled transitively. | Already pinned — no change |
-| `drizzle-orm` | `^0.45.2` | Used by `apps/hooks-bridge/src/lib/run-recorder.ts` to write to `runs` and `run_events`. Caret pin matches `@contextos/db`. | Already pinned — no change |
-| `@contextos/shared` | workspace | Adapters, HookEvent schema, normalizeSessionId, auth, logger, env helpers. | n/a |
-| `@contextos/policy` | workspace | The policy evaluator + audit-write helper. New package landed in S3. | n/a |
-| `@contextos/db` | workspace | DbHandle type + createDb factory (post-§8.3 refactor). | n/a |
+| `cockatiel` | `3.2.1` exact | Reuses the policy module's existing breaker. No new instance in hooks-bridge — the breaker lives inside `@coodra/contextos-policy`. | Already pinned — no change |
+| `@clerk/backend` | `3.3.0` exact | Auth chain inheritance via the `@coodra/contextos-shared/auth` middleware. No new direct dependency in hooks-bridge — pulled transitively through shared. | Already pinned — no change |
+| `picomatch` | `4.0.2` exact | Used inside `@coodra/contextos-policy` for path-glob matching. Pulled transitively. | Already pinned — no change |
+| `drizzle-orm` | `^0.45.2` | Used by `apps/hooks-bridge/src/lib/run-recorder.ts` to write to `runs` and `run_events`. Caret pin matches `@coodra/contextos-db`. | Already pinned — no change |
+| `@coodra/contextos-shared` | workspace | Adapters, HookEvent schema, normalizeSessionId, auth, logger, env helpers. | n/a |
+| `@coodra/contextos-policy` | workspace | The policy evaluator + audit-write helper. New package landed in S3. | n/a |
+| `@coodra/contextos-db` | workspace | DbHandle type + createDb factory (post-§8.3 refactor). | n/a |
 
 `apps/hooks-bridge/package.json` devDependencies:
 
 | Package | Pin | Role | Reference action |
 |---|---|---|---|
-| `tsx` | `^4.20.6` | `pnpm --filter @contextos/hooks-bridge dev` watch mode. Same version as mcp-server. | Already pinned — no change |
+| `tsx` | `^4.20.6` | `pnpm --filter @coodra/contextos-hooks-bridge dev` watch mode. Same version as mcp-server. | Already pinned — no change |
 | `vitest` | `^3.0.0` | Unit + integration test runner. Workspace-shared. | Already pinned — no change |
 | `@types/node` | `^22.14.1` | Node typings. | Already pinned — no change |
 | `testcontainers` | `^11.14.0` | Docker-backed Postgres for the cross-mode integration test that exercises `createDb({ kind: 'cloud' })`. | Already pinned — no change |
@@ -40,21 +40,21 @@
 
 ## Workspace dependency additions (installed in S3)
 
-`@contextos/shared` (auth lives here):
+`@coodra/contextos-shared` (auth lives here):
 
 | Package | Pin | Role |
 |---|---|---|
 | `@clerk/backend` | `3.3.0` exact (moved from mcp-server) | Auth chain — `verifyClerkJwt` lives under `packages/shared/src/auth/`. mcp-server now pulls it transitively. |
 
-`@contextos/policy` (new workspace package — policy lives here):
+`@coodra/contextos-policy` (new workspace package — policy lives here):
 
 | Package | Pin | Role |
 |---|---|---|
 | `cockatiel` | `3.2.1` exact (moved from mcp-server) | Policy-engine timeout + breaker fuse. |
 | `picomatch` | `4.0.2` exact (moved) | Path-glob matching. |
 | `drizzle-orm` | `^0.45.2` | Reads `policies`/`policy_rules`, writes `policy_decisions`. |
-| `@contextos/db` | workspace | `DbHandle` + schema tables. |
-| `@contextos/shared` | workspace | Logger + `IdempotencyKey` value-shape (moved here in S3). |
+| `@coodra/contextos-db` | workspace | `DbHandle` + schema tables. |
+| `@coodra/contextos-shared` | workspace | Logger + `IdempotencyKey` value-shape (moved here in S3). |
 
 mcp-server keeps `picomatch` as a direct dep (still used in `tools/get-feature-pack/handler.ts`). It drops `cockatiel`, `@clerk/backend`, and `@types/picomatch` (now transitive).
 
@@ -81,7 +81,7 @@ Every new/updated version above is amended in `External api and library referenc
 
 | Commit | Reference changes |
 |---|---|
-| S3 (`refactor(workspace): extract @contextos/policy package + @contextos/shared/auth from mcp-server`) | New "@contextos/policy package" subsection under Validation/Schemas/Resilience naming the dep set + cycle rationale; note in `cockatiel`/`picomatch` subsections that they now live under `@contextos/policy`; note in `@clerk/backend` that it lives under `@contextos/shared/auth`. No version changes. |
+| S3 (`refactor(workspace): extract @coodra/contextos-policy package + @coodra/contextos-shared/auth from mcp-server`) | New "@coodra/contextos-policy package" subsection under Validation/Schemas/Resilience naming the dep set + cycle rationale; note in `cockatiel`/`picomatch` subsections that they now live under `@coodra/contextos-policy`; note in `@clerk/backend` that it lives under `@coodra/contextos-shared/auth`. No version changes. |
 | S4 (`refactor(db): split createDb into local-vs-cloud kinds (closes verification §8.3)`) | `Drizzle ORM` subsection — add a "Local-vs-cloud routing" paragraph documenting the new `kind` discriminator. |
 | S5 (`feat(hooks-bridge): scaffold + Hono app + healthz`) | `@hono/zod-validator` new subsection — pin `^0.7.6`, snippet showing the route validator pattern, gotcha about `c.req.valid('json')` returning the Zod-parsed value. |
 | S15 (`docs(03-hooks-bridge): module-03 closeout context pack + .mcp.json hook config`) | No reference changes; closeout only. |

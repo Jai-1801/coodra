@@ -38,5 +38,5 @@ printf '✓ installed Cursor adapter → %s\n' "$CURSOR_TARGET"
 printf '\n'
 printf 'NEXT STEPS\n'
 printf '  1. Set LOCAL_HOOK_SECRET in your shell or .env (openssl rand -hex 24)\n'
-printf '  2. Start the hooks bridge: pnpm --filter @contextos/hooks-bridge dev\n'
+printf '  2. Start the hooks bridge: pnpm --filter @coodra/contextos-hooks-bridge dev\n'
 printf '  3. Trigger a hook from your IDE — tail the bridge log to confirm.\n'

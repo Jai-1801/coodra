@@ -1,5 +1,5 @@
-import { type DbHandle, postgresSchema, sqliteSchema } from '@contextos/db';
-import { EMBEDDING_DIM, type Logger, ValidationError } from '@contextos/shared';
+import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-db';
+import { EMBEDDING_DIM, type Logger, ValidationError } from '@coodra/contextos-shared';
 import { eq, sql } from 'drizzle-orm';
 
 import type { SqliteVecClient } from '../framework/tool-context.js';
@@ -24,7 +24,7 @@ import { createMcpLogger } from './logger.js';
  *     operator with the HNSW index installed in migration 0001.
  *
  * Embedding dimension: every call validates `embedding.length ===
- * EMBEDDING_DIM` (384, sourced from `@contextos/shared`). A
+ * EMBEDDING_DIM` (384, sourced from `@coodra/contextos-shared`). A
  * mismatch throws `ValidationError` before any DB work.
  *
  * The `filter.projectSlug` scope is resolved to `projectId` via a
@@ -43,7 +43,7 @@ export function createSqliteVecClient(deps: CreateSqliteVecClientDeps): SqliteVe
     throw new TypeError('createSqliteVecClient requires an options object');
   }
   if (!deps.db || typeof deps.db !== 'object' || !('kind' in deps.db)) {
-    throw new TypeError('createSqliteVecClient: deps.db must be a DbHandle from @contextos/db');
+    throw new TypeError('createSqliteVecClient: deps.db must be a DbHandle from @coodra/contextos-db');
   }
   const log = deps.logger ?? sqliteVecLogger;
 

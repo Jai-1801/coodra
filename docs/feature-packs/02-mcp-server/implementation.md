@@ -41,8 +41,8 @@ CREATE UNIQUE INDEX feature_packs_slug_idx    ON feature_packs (slug);
 Generate `0001_module_02_mcp_server.sql` for both dialects:
 
 ```bash
-pnpm --filter @contextos/db exec drizzle-kit generate --config=drizzle.sqlite.config.ts
-pnpm --filter @contextos/db exec drizzle-kit generate --config=drizzle.postgres.config.ts
+pnpm --filter @coodra/contextos-db exec drizzle-kit generate --config=drizzle.sqlite.config.ts
+pnpm --filter @coodra/contextos-db exec drizzle-kit generate --config=drizzle.postgres.config.ts
 ```
 
 The produced SQL is committed.
@@ -87,9 +87,9 @@ Record the sha256 of each block in `packages/db/migrations.lock.json` with this 
 }
 ```
 
-Add `packages/db/scripts/check-migration-lock.mjs` — extracts each `@preserve-begin / @preserve-end` block, recomputes sha256, diffs against `migrations.lock.json`, exits non-zero on mismatch. Wire it as `pnpm --filter @contextos/db run check:migration-lock` and add it as the first step of the `verify` CI job (before `lint`). Drop a `CI: migration lock integrity` reminder paragraph into `docs/DEVELOPMENT.md` explaining what to do if `drizzle-kit` regenerate overwrites a block.
+Add `packages/db/scripts/check-migration-lock.mjs` — extracts each `@preserve-begin / @preserve-end` block, recomputes sha256, diffs against `migrations.lock.json`, exits non-zero on mismatch. Wire it as `pnpm --filter @coodra/contextos-db run check:migration-lock` and add it as the first step of the `verify` CI job (before `lint`). Drop a `CI: migration lock integrity` reminder paragraph into `docs/DEVELOPMENT.md` explaining what to do if `drizzle-kit` regenerate overwrites a block.
 
-Install `sqlite-vec@^0.1.9` as a dev dependency of `@contextos/db`. Wire `sqliteVec.load(db)` inside `createSqliteDb` immediately after the better-sqlite3 connection opens, wrapped in try/catch — on failure, log a structured `sqlite_vec_unavailable` warning and continue (the search-packs-nl LIKE fallback takes over).
+Install `sqlite-vec@^0.1.9` as a dev dependency of `@coodra/contextos-db`. Wire `sqliteVec.load(db)` inside `createSqliteDb` immediately after the better-sqlite3 connection opens, wrapped in try/catch — on failure, log a structured `sqlite_vec_unavailable` warning and continue (the search-packs-nl LIKE fallback takes over).
 
 Extend `packages/db/__tests__/integration/postgres-migrate.test.ts` to verify the HNSW index exists. Add `packages/db/__tests__/integration/sqlite-vec.test.ts` that loads the extension, creates the virtual table, inserts a 384-d vector, and performs a `MATCH` KNN query — assert the expected row is returned.
 
@@ -108,10 +108,10 @@ Extend `packages/db/__tests__/integration/postgres-migrate.test.ts` to verify th
 **What lands in S5:**
 
 - `apps/mcp-server/package.json` (private, `"type": "module"`, `bin`), `tsconfig.json` + `tsconfig.typecheck.json` (extends `../../tsconfig.base.json`), `vitest.config.ts`, `README.md`, `.env.example`, `.dockerignore`.
-- Runtime deps pinned EXACT where protocol stability demands it: `@modelcontextprotocol/sdk@1.29.0` (no caret — MCP minor bumps can add required fields), `zod@^4.3.6` (matches shared), `@contextos/shared` + `@contextos/db` as workspace deps. The HTTP-transport deps (`hono`, `@hono/node-server`, `cockatiel`, `@clerk/backend`, `ajv`, `ajv-formats`) are deferred to S16 (HTTP transport) per the directive's "stdio-only in S5" constraint — installing them now would bloat the dev graph with unused code.
+- Runtime deps pinned EXACT where protocol stability demands it: `@modelcontextprotocol/sdk@1.29.0` (no caret — MCP minor bumps can add required fields), `zod@^4.3.6` (matches shared), `@coodra/contextos-shared` + `@coodra/contextos-db` as workspace deps. The HTTP-transport deps (`hono`, `@hono/node-server`, `cockatiel`, `@clerk/backend`, `ajv`, `ajv-formats`) are deferred to S16 (HTTP transport) per the directive's "stdio-only in S5" constraint — installing them now would bloat the dev graph with unused code.
 - `zod-to-json-schema` **dropped** in favour of Zod v4's built-in `z.toJSONSchema()`. Deviates from techstack.md's original `^3.25.2` pin; decision recorded in `decisions-log.md 2026-04-23`.
-- `src/bootstrap/ensure-stderr-logging.ts` — side-effect module imported first in `src/index.ts`. Sets `CONTEXTOS_LOG_DESTINATION=stderr` before `@contextos/shared`'s logger module evaluates, so every transitively-loaded log call (including db's sqlite-vec loader in future slices) routes to fd 2.
-- `src/config/env.ts` — zod-validated, typed `env` singleton, parsed once at module load via `@contextos/shared::parseEnv`. The ONE module in mcp-server allowed to read `process.env`. Strictness rules (team-mode Clerk requirements, LOCAL_HOOK_SECRET length floor, CONTEXTOS_LOG_DESTINATION enum) are enforced here and locked by 8 regression fixtures in `__tests__/unit/config/env.test.ts`.
+- `src/bootstrap/ensure-stderr-logging.ts` — side-effect module imported first in `src/index.ts`. Sets `CONTEXTOS_LOG_DESTINATION=stderr` before `@coodra/contextos-shared`'s logger module evaluates, so every transitively-loaded log call (including db's sqlite-vec loader in future slices) routes to fd 2.
+- `src/config/env.ts` — zod-validated, typed `env` singleton, parsed once at module load via `@coodra/contextos-shared::parseEnv`. The ONE module in mcp-server allowed to read `process.env`. Strictness rules (team-mode Clerk requirements, LOCAL_HOOK_SECRET length floor, CONTEXTOS_LOG_DESTINATION enum) are enforced here and locked by 8 regression fixtures in `__tests__/unit/config/env.test.ts`.
 - `src/framework/manifest-from-zod.ts` — wraps `z.toJSONSchema` with ContextOS's target (`draft-2020-12`) and runtime `type: 'object'` check.
 - `src/framework/idempotency.ts` — `IdempotencyKeyBuilder<Input>` contract + `assertIdempotencyKeyBuilder` runtime probe. Read-only tools return `{ kind: 'readonly', key }`; mutating tools return `{ kind: 'mutating', key }` which the registry forwards into the handler's context for ON-CONFLICT dedupe in DB operations.
 - `src/framework/policy-wrapper.ts` — `PolicyCheck` abstraction, `PolicyDenyError`, plus `devNullPolicyCheck` always-allow stand-in for S5. S7b replaces it with the real cache-backed `lib/policy.ts::evaluatePolicy` as a single-file swap at `src/index.ts`. `logDevNullPolicyInUse()` writes a WARN at startup so the dev-null path cannot ship to production unnoticed.
@@ -128,7 +128,7 @@ Extend `packages/db/__tests__/integration/postgres-migrate.test.ts` to verify th
 - `src/index.ts` — entrypoint. First import is `./bootstrap/ensure-stderr-logging.js`. Constructs one `ToolRegistry`, registers `pingToolRegistration`, starts the stdio transport with a per-process `sessionId = stdio:<uuid>`. SIGINT/SIGTERM → graceful shutdown.
 - `Dockerfile` — four-stage build (deps → build → pnpm deploy → runtime). Base image pinned by digest `node@sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34` (Node 22.16.0 bookworm-slim — glibc, required for better-sqlite3/sqlite-vec prebuilt binaries). Runtime stage: non-root `node` user, no build tools, `CONTEXTOS_LOG_DESTINATION=stderr` as defence-in-depth, `CMD ["node", "dist/index.js"]`.
 - `.mcp.json` — updated from the stub HTTP URL to a real stdio entry pointing at `apps/mcp-server/dist/index.js` with `env.CONTEXTOS_LOG_DESTINATION=stderr`.
-- **Logger change to `@contextos/shared`:** extended `packages/shared/src/logger.ts` to honour `CONTEXTOS_LOG_DESTINATION={unset,stdout,stderr}`. Unknown values throw at module load; `'stderr'` routes pino to fd 2 via `pino.destination({ fd: 2, sync: true })`. Four new tests in `packages/shared/__tests__/unit/logger.test.ts` lock the parse contract.
+- **Logger change to `@coodra/contextos-shared`:** extended `packages/shared/src/logger.ts` to honour `CONTEXTOS_LOG_DESTINATION={unset,stdout,stderr}`. Unknown values throw at module load; `'stderr'` routes pino to fd 2 via `pino.destination({ fd: 2, sync: true })`. Four new tests in `packages/shared/__tests__/unit/logger.test.ts` lock the parse contract.
 
 **Unit tests added (34 new, all green):**
 
@@ -153,7 +153,7 @@ Extend `packages/db/__tests__/integration/postgres-migrate.test.ts` to verify th
 
 **Files:** `apps/mcp-server/package.json`, `apps/mcp-server/tsconfig.json`, `apps/mcp-server/tsconfig.typecheck.json`, `apps/mcp-server/vitest.config.ts`, `apps/mcp-server/README.md`, `apps/mcp-server/.env.example`, `apps/mcp-server/.dockerignore`, `apps/mcp-server/Dockerfile`, `apps/mcp-server/src/bootstrap/ensure-stderr-logging.ts`, `apps/mcp-server/src/config/env.ts`, `apps/mcp-server/src/framework/{manifest-from-zod,idempotency,policy-wrapper,tool-registry}.ts`, `apps/mcp-server/src/tools/ping/{schema,handler,manifest}.ts`, `apps/mcp-server/src/transports/stdio.ts`, `apps/mcp-server/src/index.ts`, `apps/mcp-server/__tests__/unit/**`, `packages/shared/src/logger.ts`, `packages/shared/__tests__/unit/logger.test.ts`, `.mcp.json`, `External api and library reference.md`.
 
-**Commit:** `feat(mcp-server): scaffold @contextos/mcp-server — stdio transport, tool-registration framework, ping walking skeleton`.
+**Commit:** `feat(mcp-server): scaffold @coodra/contextos-mcp-server — stdio transport, tool-registration framework, ping walking skeleton`.
 
 ### S6 — §24.3 description assertion helper (shared) + §24.3 spec amendment
 
@@ -161,18 +161,18 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 
 **Landed 2026-04-23:**
 
-- **New subpath `@contextos/shared/test-utils`** (see `packages/shared/package.json` `exports`): wired as a dedicated export so production consumers of `@contextos/shared` do not transitively pick up test-only code in their bundle graph.
+- **New subpath `@coodra/contextos-shared/test-utils`** (see `packages/shared/package.json` `exports`): wired as a dedicated export so production consumers of `@coodra/contextos-shared` do not transitively pick up test-only code in their bundle graph.
 - `packages/shared/src/test-utils/manifest-assertions.ts` — `assertManifestDescriptionValid(manifest, { folderName? })`. Enforces: name matches `TOOL_NAME_PATTERN` (and folder when supplied, with hyphen → underscore translation), char length in `[200, 800)`, starts with "Call this" (case-insensitive), word count in `[40, 120]`, contains "Returns".
 - `packages/shared/src/test-utils/index.ts` — subpath entry re-exports.
 - `packages/shared/__tests__/unit/test-utils/manifest-assertions.test.ts` — 11 tests: 3 happy-path + 8 negative (one per rule) so a CI failure names exactly the rule that broke.
-- `apps/mcp-server/__tests__/unit/tools/ping.test.ts` — collapsed from 4 ad-hoc assertions to one call into the shared helper. Future tools in `apps/mcp-server/src/tools/<tool>/` and any downstream `@contextos/tools-*` package use the same helper.
+- `apps/mcp-server/__tests__/unit/tools/ping.test.ts` — collapsed from 4 ad-hoc assertions to one call into the shared helper. Future tools in `apps/mcp-server/src/tools/<tool>/` and any downstream `@coodra/contextos-tools-*` package use the same helper.
 - `system-architecture.md` §24.3 amended to "40–80 word soft target, 120-word hard maximum" per Q-02-6. §24.8 safeguard 1 updated to reference the canonical shared helper.
 
-**Decision recorded** (2026-04-23): the helper lives in `@contextos/shared/test-utils`, not `apps/mcp-server/__tests__/helpers/`, because future tool packages shipped outside the mcp-server will need the same assertion without taking a dev dep on the server package.
+**Decision recorded** (2026-04-23): the helper lives in `@coodra/contextos-shared/test-utils`, not `apps/mcp-server/__tests__/helpers/`, because future tool packages shipped outside the mcp-server will need the same assertion without taking a dev dep on the server package.
 
 **Files:** `packages/shared/package.json` (new subpath export), `packages/shared/src/test-utils/{index,manifest-assertions}.ts`, `packages/shared/__tests__/unit/test-utils/manifest-assertions.test.ts`, `apps/mcp-server/__tests__/unit/tools/ping.test.ts`, `system-architecture.md` §24.3 + §24.8.
 
-**Commit:** `feat(shared): assertManifestDescriptionValid in @contextos/shared/test-utils + §24.3 amendment`.
+**Commit:** `feat(shared): assertManifestDescriptionValid in @coodra/contextos-shared/test-utils + §24.3 amendment`.
 
 ### S7a — Lib layer + frozen `ToolContext` (landed 2026-04-23)
 
@@ -182,9 +182,9 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 
 - `apps/mcp-server/src/framework/tool-context.ts` — canonical `ToolContext` + `ContextDeps` + `PerCallContext`. Every handler receives the frozen bag; there are no hidden imports, no `globalThis`, no module-level singletons. The `AuthClient`, `PolicyClient`, `FeaturePackStore`, `ContextPackStore`, `RunRecorder`, `SqliteVecClient`, `GraphifyClient`, and `DbClient` interfaces live here — they are the vocabulary shared between the registry and the lib layer.
 - `apps/mcp-server/src/lib/{logger,errors,db,auth,policy,feature-pack,context-pack,run-recorder,sqlite-vec,graphify}.ts` — nine typed factories, one file each, each returning a value that satisfies the corresponding `ToolContext` slot. **No module-level singletons are exported.** `createXxxClient(...)` is the only way in.
-  - `logger.ts` — `createMcpLogger(moduleName)` wraps `@contextos/shared::createLogger` with an `mcp-server.<moduleName>` namespace.
-  - `errors.ts` — `NotImplementedError` (subclass of `@contextos/shared::InternalError`, name `'NotImplementedError'`, carries a `subsystem` tag) + `mcpErrorResult(err)` that translates any `AppError` / unknown throwable into the MCP `{ content, isError: true }` envelope. Used consistently by every lib stub so a CI grep can verify a single error shape across all 8 tools.
-  - `db.ts` — `createDbClient(options)` delegates to `@contextos/db::createDb`, returns `{ client, asInternalHandle() }`. `close()` is idempotent. A `_testOverrideInMemory` shorthand is reserved for the stdio-purity subprocess test.
+  - `logger.ts` — `createMcpLogger(moduleName)` wraps `@coodra/contextos-shared::createLogger` with an `mcp-server.<moduleName>` namespace.
+  - `errors.ts` — `NotImplementedError` (subclass of `@coodra/contextos-shared::InternalError`, name `'NotImplementedError'`, carries a `subsystem` tag) + `mcpErrorResult(err)` that translates any `AppError` / unknown throwable into the MCP `{ content, isError: true }` envelope. Used consistently by every lib stub so a CI grep can verify a single error shape across all 8 tools.
+  - `db.ts` — `createDbClient(options)` delegates to `@coodra/contextos-db::createDb`, returns `{ client, asInternalHandle() }`. `close()` is idempotent. A `_testOverrideInMemory` shorthand is reserved for the stdio-purity subprocess test.
   - `auth.ts` — `createSoloAuthClient()` + `createAnonymousAuthClient()`. Solo returns a stable `SOLO_IDENTITY = { userId: 'user_dev_local', orgId: 'org_dev_local', source: 'solo-bypass' }`. The solo factory emits a WARN on construction so team-mode smoke deployments see the stand-in in every log. Clerk-backed factory lands in S7b behind the same interface.
   - `policy.ts` — `createPolicyClientFromCheck(check)` wraps a `PolicyCheck` callback into a `PolicyClient`; `createDevNullPolicyClient()` is the S7a always-allow stand-in plus its WARN. The previous `framework/policy-wrapper.ts::devNullPolicyCheck` export was deleted; `policy-wrapper.ts` now holds only the shared vocabulary (`PolicyInput`, `PolicyResult`, `PolicyCheck`, `PolicyDenyError`).
   - `feature-pack.ts`, `context-pack.ts`, `run-recorder.ts`, `sqlite-vec.ts`, `graphify.ts` — factories whose methods throw `NotImplementedError('<subsystem>.<method>')`. The signatures already honour the user-directive answers: `context-pack.write(pack, embedding: Float32Array | null)` (Q3 — the store never computes an embedding; Module 04 does); `run-recorder.record({ runId: string | null, ... })` (Q2 — PreToolUse may fire before a run exists; the nullable invariant lives inside the recorder, not at every call site); `sqlite-vec` exposes a domain API (`searchSimilarPacks`) not a raw query runner; `graphify` exposes `expandContext`, not a filesystem helper.
@@ -204,7 +204,7 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 
 **Biome:** `biome.json` now enables `suspicious/noImportCycles: 'error'` on `apps/mcp-server/src/lib/**` so the factory tree stays acyclic as it grows.
 
-**Gate:** `pnpm install --frozen-lockfile` (clean), `check:migration-lock` (ok, 2 blocks), `pnpm lint` (0 errors), `pnpm typecheck` (all 3 packages), `pnpm --filter @contextos/mcp-server test:unit` (39/39), `pnpm --filter @contextos/mcp-server test:integration` (45/45), repo-wide `pnpm test:unit` (full turbo).
+**Gate:** `pnpm install --frozen-lockfile` (clean), `check:migration-lock` (ok, 2 blocks), `pnpm lint` (0 errors), `pnpm typecheck` (all 3 packages), `pnpm --filter @coodra/contextos-mcp-server test:unit` (39/39), `pnpm --filter @coodra/contextos-mcp-server test:integration` (45/45), repo-wide `pnpm test:unit` (full turbo).
 
 **Commit:** `feat(mcp-server): S7a — freeze ToolContext + lib factories + clock-discipline guard`.
 
@@ -233,7 +233,7 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 
 - `apps/mcp-server/src/index.ts` — two factory-call swaps: `createSoloAuthClient()` → `createAuthClient(env)`, and `createDevNullPolicyClient()` → `createPolicyClient({ db: dbClient.asInternalHandle() })`. Nothing else changes. Shutdown flow unchanged (no setImmediate writes from the evaluator; flush hook arrives with S14's `check_policy` audit writes).
 
-- `apps/mcp-server/package.json` — three runtime deps exact-pinned: `cockatiel@3.2.1`, `@clerk/backend@3.3.0`, `picomatch@4.0.2`. One devDep: `@types/picomatch@4.0.2`. Also adds `drizzle-orm@^0.45.2` as a direct runtime dep (matches `@contextos/db`'s pin) because `lib/policy.ts` imports `eq` from it.
+- `apps/mcp-server/package.json` — three runtime deps exact-pinned: `cockatiel@3.2.1`, `@clerk/backend@3.3.0`, `picomatch@4.0.2`. One devDep: `@types/picomatch@4.0.2`. Also adds `drizzle-orm@^0.45.2` as a direct runtime dep (matches `@coodra/contextos-db`'s pin) because `lib/policy.ts` imports `eq` from it.
 
 - `biome.json` — `.claude` and `context_memory` added to `files.includes` exclusion list. Pre-existing Claude Code internal worktrees carry their own nested biome.json which was failing root-level `pnpm lint`. This is ancillary to S7b but unblocks the gate.
 
@@ -254,11 +254,11 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 **Gate (all green):**
 
 - `pnpm install --frozen-lockfile` — clean.
-- `pnpm --filter @contextos/db run check:migration-lock` — ok, 2 blocks verified.
+- `pnpm --filter @coodra/contextos-db run check:migration-lock` — ok, 2 blocks verified.
 - `pnpm lint` — 0 errors, 1 pre-existing info (S5-era `useShorthandFunctionType` hint, intentionally left).
 - `pnpm typecheck` — all 3 packages green.
-- `pnpm --filter @contextos/mcp-server run test:unit` — **75/75** (was 40 at S7a; +35 from S7b: 17 policy-rules + 19 auth-chain − 1 deduped test setup line).
-- `pnpm --filter @contextos/mcp-server run test:integration` — **61/61** (was 45 at S7a; +16 from S7b: 9 policy-db + 4 auth dispatcher + 3 policy construction).
+- `pnpm --filter @coodra/contextos-mcp-server run test:unit` — **75/75** (was 40 at S7a; +35 from S7b: 17 policy-rules + 19 auth-chain − 1 deduped test setup line).
+- `pnpm --filter @coodra/contextos-mcp-server run test:integration` — **61/61** (was 45 at S7a; +16 from S7b: 9 policy-db + 4 auth dispatcher + 3 policy construction).
 
 **Commit:** `feat(mcp-server): S7b — real Clerk/local-hook auth + cache-first policy engine with breaker`.
 
@@ -306,12 +306,12 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 **Gate (all green):**
 
 - `pnpm install --frozen-lockfile` — clean (no new deps).
-- `pnpm --filter @contextos/db run check:migration-lock` — ok, 2 blocks verified.
-- `pnpm --filter @contextos/db run test:unit` — 42/42 (schema parity test still passes — both dialects widened together).
+- `pnpm --filter @coodra/contextos-db run check:migration-lock` — ok, 2 blocks verified.
+- `pnpm --filter @coodra/contextos-db run test:unit` — 42/42 (schema parity test still passes — both dialects widened together).
 - `pnpm lint` — 0 errors, 1 pre-existing info (`idempotency.ts:77:3` `useShorthandFunctionType`, documented leave-as-is in the chore-commit `dfaefe9` from S7b).
 - `pnpm typecheck` — 5/5 green.
-- `pnpm --filter @contextos/mcp-server run test:unit` — 84/84 (was 75; +9).
-- `pnpm --filter @contextos/mcp-server run test:integration` — 90/90 (was 61; +29).
+- `pnpm --filter @coodra/contextos-mcp-server run test:unit` — 84/84 (was 75; +9).
+- `pnpm --filter @coodra/contextos-mcp-server run test:integration` — 90/90 (was 61; +29).
 
 **Commit:** `feat(mcp-server): S7c — domain lib bodies + schema migration 0002 (run_events.run_id nullable + ON DELETE SET NULL)`.
 
@@ -330,7 +330,7 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
   2. Missing: solo auto-creates (orgId from `SOLO_IDENTITY.orgId`); team returns the structured soft-failure.
   3. `SELECT id, status, started_at FROM runs WHERE project_id = ? AND session_id = ? ORDER BY started_at DESC LIMIT 1` — latest existing run for the session.
   4. Found: return `{ runId, startedAt }`. WARN when `status !== 'in_progress'` (Q3 escalation trigger for a future migration 0003 that relaxes the unique index to `(project_id, session_id, status)` if the WARN grows common).
-  5. Missing: `INSERT INTO runs ... RETURNING` with `id = generateRunKey({ projectId, sessionId })` (from `@contextos/shared`, pattern `run:{projectId}:{sessionId}:{uuid}` per §4.3). `onConflictDoNothing({ target: [projectId, sessionId] })` resolves concurrent-insert races. If 0 rows return, re-SELECT to fetch the winner.
+  5. Missing: `INSERT INTO runs ... RETURNING` with `id = generateRunKey({ projectId, sessionId })` (from `@coodra/contextos-shared`, pattern `run:{projectId}:{sessionId}:{uuid}` per §4.3). `onConflictDoNothing({ target: [projectId, sessionId] })` resolves concurrent-insert races. If 0 rows return, re-SELECT to fetch the winner.
 
 - **`src/tools/get-run-id/manifest.ts`** — factory `createGetRunIdToolRegistration(deps)` returns a `ToolRegistration`. Description is §24.4 verbatim + a 2-line tail naming the solo/team asymmetry so callers reading the manifest see the soft-failure branch exists. Idempotency builder: `{ kind: 'mutating', key: 'get_run_id:${projectSlug}:${sessionId}' }` — uses caller-supplied `projectSlug` (not internal-resolved `projectId`) per user directive Q5 so retries with the same input dedupe regardless of whether the solo-auto-create branch ran.
 
@@ -349,18 +349,18 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 **Tests added (+40 total; unit 84→116, integration 90→98):**
 
 - **`__tests__/unit/lib/agent-type.test.ts`** (NEW, 9 tests) — mapping table round-trip lock, undefined/null/empty guards, case-insensitive, unknown client default, Object.isFrozen assertion on the table.
-- **`__tests__/unit/tools/get-run-id.test.ts`** (NEW, 11 tests) — manifest contract via `@contextos/shared/test-utils::assertManifestDescriptionValid` (§24.3 rules), name lock, idempotency-key shape, input schema boundaries (valid, empty, too long, strict, missing), factory construction contract (missing options, non-DbHandle, invalid mode).
+- **`__tests__/unit/tools/get-run-id.test.ts`** (NEW, 11 tests) — manifest contract via `@coodra/contextos-shared/test-utils::assertManifestDescriptionValid` (§24.3 rules), name lock, idempotency-key shape, input schema boundaries (valid, empty, too long, strict, missing), factory construction contract (missing options, non-DbHandle, invalid mode).
 - **`__tests__/unit/tools/_no-unregistered-tools.test.ts`** (NEW, 5 tests) — self-sanity of the folder-to-name translation (samples locked), every `src/tools/<folder>/` has a registration, inverse (no dangling registrations without a folder), folder-discovery locks.
 - **`__tests__/integration/tools/get-run-id.test.ts`** (NEW, 7 tests) — real `:memory:` SQLite with migrations applied; solo auto-create (projects row + runs row, agentType stamped); agentType=unknown default; project re-use across sessions; team-mode `project_not_found` soft-failure (no projects row written); idempotent re-call; non-in-progress return (WARN-adjacent behaviour); concurrent `Promise.all` race resolution.
 
 **Gate:**
 
 - `pnpm install --frozen-lockfile` — clean (no new deps).
-- `pnpm --filter @contextos/db run check:migration-lock` — ok, 2 blocks verified.
+- `pnpm --filter @coodra/contextos-db run check:migration-lock` — ok, 2 blocks verified.
 - `pnpm lint` — 0 errors, 1 pre-existing info (`idempotency.ts:77:3`, documented leave-as-is since S7b).
 - `pnpm typecheck` — 5/5 green.
 - `pnpm test:unit` — 233/233 repo-wide (shared 75 + db 42 + mcp-server 116).
-- `pnpm --filter @contextos/mcp-server run test:integration` — 98/98.
+- `pnpm --filter @coodra/contextos-mcp-server run test:integration` — 98/98.
 
 **Commit:** `feat(mcp-server): S8 — tool get_run_id + PerCallContext.agentType + ALL_TOOLS barrel`.
 
@@ -390,7 +390,7 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 
 **Tests added (+22 total; unit 116→128, integration 98→108):**
 
-- **`__tests__/unit/tools/get-feature-pack.test.ts`** (NEW, 12 tests) — manifest contract via `@contextos/shared/test-utils::assertManifestDescriptionValid`, name lock, idempotency-key readonly + truncation, input schema boundaries (accept slug alone, accept slug+filePath, reject empty, reject oversized, reject strict-unknown fields, reject missing slug).
+- **`__tests__/unit/tools/get-feature-pack.test.ts`** (NEW, 12 tests) — manifest contract via `@coodra/contextos-shared/test-utils::assertManifestDescriptionValid`, name lock, idempotency-key readonly + truncation, input schema boundaries (accept slug alone, accept slug+filePath, reject empty, reject oversized, reject strict-unknown fields, reject missing slug).
 - **`__tests__/integration/tools/get-feature-pack.test.ts`** (NEW, 10 tests — 2 more than the original Q9 7 per user directive Q11):
   1. Simple root-only pack, no filePath.
   2. 3-deep chain, no filePath — locks `inherited` root-first.
@@ -408,11 +408,11 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 **Gate:**
 
 - `pnpm install --frozen-lockfile` — clean (no new deps).
-- `pnpm --filter @contextos/db run check:migration-lock` — ok, 2 blocks verified.
+- `pnpm --filter @coodra/contextos-db run check:migration-lock` — ok, 2 blocks verified.
 - `pnpm lint` — 0 errors, 1 pre-existing info (`idempotency.ts:77:3`, documented leave-as-is since `dfaefe9`).
 - `pnpm typecheck` — 5/5 green.
 - `pnpm test:unit` — 245/245 repo-wide (shared 75 + db 42 + mcp-server 128).
-- `pnpm --filter @contextos/mcp-server run test:integration` — 108/108.
+- `pnpm --filter @coodra/contextos-mcp-server run test:integration` — 108/108.
 
 **Commit:** `feat(mcp-server): S9 — tool get_feature_pack + §9.1.2 soft-failure canonical shape + §24.4 amendment`.
 
@@ -454,11 +454,11 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 **Gate:**
 
 - `pnpm install --frozen-lockfile` — clean (no new deps).
-- `pnpm --filter @contextos/db run check:migration-lock` — ok, 2 blocks verified.
+- `pnpm --filter @coodra/contextos-db run check:migration-lock` — ok, 2 blocks verified.
 - `pnpm lint` — 0 errors, 1 pre-existing info (`idempotency.ts:77:3`, documented leave-as-is since `dfaefe9`).
 - `pnpm typecheck` — 5/5 green.
 - `pnpm test:unit` — 258/258 repo-wide (shared 75 + db 42 + mcp-server 141).
-- `pnpm --filter @contextos/mcp-server run test:integration` — 114/114.
+- `pnpm --filter @coodra/contextos-mcp-server run test:integration` — 114/114.
 
 **Commit:** `feat(mcp-server): S10 — tool save_context_pack + §24.4 failure-mode amendment`.
 
@@ -505,11 +505,11 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 **Gate:**
 
 - `pnpm install --frozen-lockfile` — clean (no new deps).
-- `pnpm --filter @contextos/db run check:migration-lock` — ok, 2 blocks verified.
+- `pnpm --filter @coodra/contextos-db run check:migration-lock` — ok, 2 blocks verified.
 - `pnpm lint` — 0 errors, 1 pre-existing info.
 - `pnpm typecheck` — 5/5 green.
 - `pnpm test:unit` — 273/273 repo-wide (shared 75 + db 42 + mcp-server 156).
-- `pnpm --filter @contextos/mcp-server run test:integration` — 124/124.
+- `pnpm --filter @coodra/contextos-mcp-server run test:integration` — 124/124.
 
 **Commit:** `feat(mcp-server): S11 — tool search_packs_nl (semantic + LIKE fallback) + §24.4 amendment`.
 
@@ -556,11 +556,11 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 **Gate:**
 
 - `pnpm install --frozen-lockfile` — clean (no new deps).
-- `pnpm --filter @contextos/db run check:migration-lock` — ok, 2 blocks verified.
+- `pnpm --filter @coodra/contextos-db run check:migration-lock` — ok, 2 blocks verified.
 - `pnpm lint` — 0 errors, 1 pre-existing info (idempotency.ts:77:3).
 - `pnpm typecheck` — 5/5 green.
 - `pnpm test:unit` — 309/309 repo-wide (shared 75 + db 42 + mcp-server 192).
-- `pnpm --filter @contextos/mcp-server run test:integration` — 140/140.
+- `pnpm --filter @coodra/contextos-mcp-server run test:integration` — 140/140.
 
 **Commit:** `feat(mcp-server): S12 — tool query_run_history + §24.4 amendment`.
 
@@ -604,12 +604,12 @@ The tool-registration framework and `manifest-from-zod` helper landed in S5 as p
 **Gate:**
 
 - `pnpm install --frozen-lockfile` — clean (no new deps).
-- `pnpm --filter @contextos/db run check:migration-lock` — ok, 2 blocks verified.
-- `pnpm --filter @contextos/db run db:generate` — produces `drizzle/sqlite/0003_cloudy_colossus.sql` + `drizzle/postgres/0003_slow_meteorite.sql` + updated `meta/_journal.json` + `meta/0003_snapshot.json` per dialect.
+- `pnpm --filter @coodra/contextos-db run check:migration-lock` — ok, 2 blocks verified.
+- `pnpm --filter @coodra/contextos-db run db:generate` — produces `drizzle/sqlite/0003_cloudy_colossus.sql` + `drizzle/postgres/0003_slow_meteorite.sql` + updated `meta/_journal.json` + `meta/0003_snapshot.json` per dialect.
 - `pnpm lint` — 0 errors.
 - `pnpm typecheck` — 5/5 green.
 - `pnpm test:unit` — 291/291 repo-wide (shared 75 + db 42 + mcp-server 174).
-- `pnpm --filter @contextos/mcp-server run test:integration` — 131/131.
+- `pnpm --filter @coodra/contextos-mcp-server run test:integration` — 131/131.
 
 **Commit:** `feat(mcp-server): S13 — tool record_decision (new decisions table + 0003 migration) + §24.4 amendment`.
 
@@ -672,11 +672,11 @@ Plus a Module-03-consumption note: Hooks Bridge must treat `check_policy → pro
 **Gate:**
 
 - `pnpm install --frozen-lockfile` — clean (no new deps).
-- `pnpm --filter @contextos/db run check:migration-lock` — ok, 2 blocks verified.
+- `pnpm --filter @coodra/contextos-db run check:migration-lock` — ok, 2 blocks verified.
 - `pnpm lint` — 0 errors, 1 pre-existing info (idempotency.ts:77:3).
 - `pnpm typecheck` — 5/5 green.
 - `pnpm test:unit` — 328/328 repo-wide (shared 75 + db 42 + mcp-server 211).
-- `pnpm --filter @contextos/mcp-server run test:integration` — 154/154.
+- `pnpm --filter @coodra/contextos-mcp-server run test:integration` — 154/154.
 
 **Commit:** `feat(mcp-server): S14 — tool check_policy (fail-open + async policy_decisions write + per-projectId cache upgrade) + §24.4 amendment`.
 
@@ -736,11 +736,11 @@ Empty results (index present, graph.json parses to empty arrays) → `{ ok: true
 **Gate:**
 
 - `pnpm install --frozen-lockfile` — clean (no new deps).
-- `pnpm --filter @contextos/db run check:migration-lock` — ok, 2 blocks verified.
+- `pnpm --filter @coodra/contextos-db run check:migration-lock` — ok, 2 blocks verified.
 - `pnpm lint` — 0 errors, 1 pre-existing info (idempotency.ts:77:3).
 - `pnpm typecheck` — 5/5 green.
 - `pnpm test:unit` — 348/348 repo-wide (shared 75 + db 42 + mcp-server 231).
-- `pnpm --filter @contextos/mcp-server run test:integration` — 164/164.
+- `pnpm --filter @coodra/contextos-mcp-server run test:integration` — 164/164.
 
 **Commit:** `feat(mcp-server): S15 — tool query_codebase_graph (two soft-failures + GraphifyClient.expandContextBySlug) + §24.4 amendment`.
 
@@ -818,17 +818,17 @@ Stdio transport tests unchanged — S16 didn't touch the stdio code path.
 **Gate:**
 
 - `pnpm install --frozen-lockfile` — 2 new deps (`hono` 4.12.15, `@hono/node-server` 2.0.0).
-- `pnpm --filter @contextos/db run check:migration-lock` — ok, 2 blocks verified.
+- `pnpm --filter @coodra/contextos-db run check:migration-lock` — ok, 2 blocks verified.
 - `pnpm lint` — 0 errors, 1 pre-existing info (idempotency.ts:77:3).
 - `pnpm typecheck` — 5/5 green.
 - `pnpm test:unit` — 348/348 repo-wide (shared 75 + db 42 + mcp-server 231).
-- `pnpm --filter @contextos/mcp-server run test:integration` — 173/173 (was 164; +9 from new HTTP tests).
+- `pnpm --filter @coodra/contextos-mcp-server run test:integration` — 173/173 (was 164; +9 from new HTTP tests).
 
 **Commit:** `feat(mcp-server): S16 — Streamable HTTP transport + auth chain + entrypoint --transport flag`.
 
 ### S17 — End-to-end tests (landed 2026-04-25)
 
-**Scope:** Module 02 closeout slice. Five e2e scenarios across `__tests__/e2e/<name>.test.ts` at the repo root (cross-workspace by design — they import from `apps/mcp-server/src/*`, `@contextos/db`, and `@contextos/shared` simultaneously). New deps: `testcontainers@11.14.0`, `ajv@8.20.0` + `ajv-formats@3.0.1`, `@modelcontextprotocol/sdk@1.29.0` (root devDep — already a workspace dep on mcp-server, lifted to root for the SDK Client), `drizzle-orm` (root). No schema migration. No new MCP tool.
+**Scope:** Module 02 closeout slice. Five e2e scenarios across `__tests__/e2e/<name>.test.ts` at the repo root (cross-workspace by design — they import from `apps/mcp-server/src/*`, `@coodra/contextos-db`, and `@coodra/contextos-shared` simultaneously). New deps: `testcontainers@11.14.0`, `ajv@8.20.0` + `ajv-formats@3.0.1`, `@modelcontextprotocol/sdk@1.29.0` (root devDep — already a workspace dep on mcp-server, lifted to root for the SDK Client), `drizzle-orm` (root). No schema migration. No new MCP tool.
 
 **vitest.e2e.config.ts** at repo root: `testTimeout: 60_000`, `hookTimeout: 120_000` (testcontainers cold-pull tolerance), `fileParallelism: false` (port reservations + container lifecycle), `pool: 'forks'`. New `pnpm test:e2e` script. New turbo task `test:e2e` with the full env passthrough allowlist.
 
@@ -860,13 +860,13 @@ Stdio transport tests unchanged — S16 didn't touch the stdio code path.
    - DB-side assertions verify each write actually hit the tables; FS check confirms the markdown materialisation.
 
 5. **`stdio-roundtrip.test.ts`** (3 tests). Spawns `apps/mcp-server/src/index.ts` as a subprocess via `pnpm exec tsx ... --transport stdio`, connects an SDK Client over `StdioClientTransport`. Asserts:
-   - `initialize` handshake completes; `serverInfo.name === '@contextos/mcp-server'`.
+   - `initialize` handshake completes; `serverInfo.name === '@coodra/contextos-mcp-server'`.
    - `tools/list` returns the same 9-tool set as the HTTP path.
    - `ping` round-trip preserves the echoed payload.
 
 **Bug surfaced + fixed in S17:** the HTTP transport's session id was minted as `http:${uuid}` (with a colon). `get_run_id` rejects sessionIds containing `':'` because its runId encoding is `run:{projectId}:{sessionId}:{uuid}`. The colon broke the encoding round-trip. Fixed by minting `http-${uuid}` and `stdio-${uuid}` instead. Same edit applied at `transports/http.ts` + `index.ts`. The integration tests didn't catch this because none of them chained `get_run_id` against a real per-call sessionId from the transport.
 
-**Cross-workspace test layout:** per `essentialsforclaude/06-testing.md` §6.7, e2e tests live at repo root (NOT under any workspace's `__tests__/`). They import directly from workspace source paths via the new root-level workspace devDeps (`@contextos/db`, `@contextos/shared`, `@contextos/mcp-server`). The boot helper at `__tests__/e2e/_helpers/boot.ts` mirrors `apps/mcp-server/src/index.ts`'s ContextDeps wiring exactly — every lib factory production calls is also called here.
+**Cross-workspace test layout:** per `essentialsforclaude/06-testing.md` §6.7, e2e tests live at repo root (NOT under any workspace's `__tests__/`). They import directly from workspace source paths via the new root-level workspace devDeps (`@coodra/contextos-db`, `@coodra/contextos-shared`, `@coodra/contextos-mcp-server`). The boot helper at `__tests__/e2e/_helpers/boot.ts` mirrors `apps/mcp-server/src/index.ts`'s ContextDeps wiring exactly — every lib factory production calls is also called here.
 
 **`BootHandle` exposes `dbHandle`** (additive to S17): the strongly-typed `DbHandle` is now a top-level field on the boot handle, so e2e tests can run direct DB assertions (Drizzle `select().from(schema...)` with full type safety) instead of casting through `deps.db` which is `unknown` at the ContextDeps boundary.
 
@@ -891,11 +891,11 @@ Stdio transport tests unchanged — S16 didn't touch the stdio code path.
 **Gate:**
 
 - `pnpm install --frozen-lockfile` — clean (5 new root devDeps).
-- `pnpm --filter @contextos/db run check:migration-lock` — ok, 2 blocks verified.
+- `pnpm --filter @coodra/contextos-db run check:migration-lock` — ok, 2 blocks verified.
 - `pnpm lint` — 0 errors, 1 pre-existing info (idempotency.ts:77:3).
 - `pnpm typecheck` — 5/5 green.
 - `pnpm test:unit` — 348/348 repo-wide.
-- `pnpm --filter @contextos/mcp-server run test:integration` — 173/173.
+- `pnpm --filter @coodra/contextos-mcp-server run test:integration` — 173/173.
 - `pnpm test:e2e` — **24/24 across 5 scenarios** (~12s wall-clock incl. testcontainers Postgres pull on a warm image, ~2.3s for the stdio subprocess scenario).
 
 **Commit:** `feat(repo): S17 — e2e test suite (5 scenarios, 24 tests, testcontainers + subprocess) + sessionId colon bug fix`.
@@ -914,8 +914,8 @@ Stdio transport tests unchanged — S16 didn't touch the stdio code path.
 
 Extend `.github/workflows/ci.yml`:
 
-- `verify` job: add `apps/mcp-server` to the matrix implicitly via the root `pnpm lint / typecheck / test:unit`. Add an explicit `pnpm --filter @contextos/db run check:migration-lock` step BEFORE lint.
-- `integration` job: on the same Postgres + Redis service containers already running, add `pnpm --filter @contextos/mcp-server test:integration`. Docker socket is available on `ubuntu-latest` by default, so `testcontainers` works without further config.
+- `verify` job: add `apps/mcp-server` to the matrix implicitly via the root `pnpm lint / typecheck / test:unit`. Add an explicit `pnpm --filter @coodra/contextos-db run check:migration-lock` step BEFORE lint.
+- `integration` job: on the same Postgres + Redis service containers already running, add `pnpm --filter @coodra/contextos-mcp-server test:integration`. Docker socket is available on `ubuntu-latest` by default, so `testcontainers` works without further config.
 
 **Commit:** `ci(mcp-server): extend workflow for apps/mcp-server + migration lock check`.
 
@@ -925,11 +925,11 @@ Run locally:
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm --filter @contextos/db run check:migration-lock
+pnpm --filter @coodra/contextos-db run check:migration-lock
 pnpm lint
 pnpm typecheck
 pnpm test:unit
-pnpm --filter @contextos/mcp-server test:integration   # requires Docker running
+pnpm --filter @coodra/contextos-mcp-server test:integration   # requires Docker running
 ```
 
 All six must pass. Coverage report confirms `apps/mcp-server ≥ 80% line coverage`. Any failure → fix commit on this branch, never a workaround.
@@ -938,7 +938,7 @@ All six must pass. Coverage report confirms `apps/mcp-server ≥ 80% line covera
 
 Update `.mcp.json` per Q-02-7 — point at workspace-relative `apps/mcp-server/dist/index.js`, update the inline `_comment` to note the CLI install helper is deferred to Module 07+.
 
-Extend `docs/DEVELOPMENT.md` with an **MCP server** section: how to run `pnpm --filter @contextos/mcp-server dev`, how to point a Claude Code / Windsurf instance at the running server, how to hit `GET /healthz`, troubleshooting notes for sqlite-vec load failure.
+Extend `docs/DEVELOPMENT.md` with an **MCP server** section: how to run `pnpm --filter @coodra/contextos-mcp-server dev`, how to point a Claude Code / Windsurf instance at the running server, how to hit `GET /healthz`, troubleshooting notes for sqlite-vec load failure.
 
 Write `docs/context-packs/2026-04-22-module-02-mcp-server.md` from `docs/context-packs/template.md`. Must document: the 8 tools shipped, the two partial-capability fallbacks (with reactivation plan for Modules 05/17), every decision recorded during the module, every file touched, test results, and the pending Clerk live-validation flag.
 

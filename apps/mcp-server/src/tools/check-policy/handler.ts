@@ -1,7 +1,7 @@
-import type { PolicyDecisionPayloadV1, RunIdResolution } from '@contextos/cli/lib/outbox';
-import { type DbHandle, postgresSchema, scheduleAuditWriteWithSync, sqliteSchema } from '@contextos/db';
-import { buildPolicyDecisionIdempotencyKey } from '@contextos/policy';
-import { createLogger } from '@contextos/shared';
+import type { PolicyDecisionPayloadV1, RunIdResolution } from '@coodra/contextos-cli/lib/outbox';
+import { type DbHandle, postgresSchema, scheduleAuditWriteWithSync, sqliteSchema } from '@coodra/contextos-db';
+import { buildPolicyDecisionIdempotencyKey } from '@coodra/contextos-policy';
+import { createLogger } from '@coodra/contextos-shared';
 import { eq } from 'drizzle-orm';
 import type { ToolContext } from '../../framework/tool-context.js';
 import type { CheckPolicyInput, CheckPolicyOutput } from './schema.js';

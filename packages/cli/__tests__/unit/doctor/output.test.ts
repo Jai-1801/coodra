@@ -25,7 +25,7 @@ const sampleReport: DoctorReport = {
 describe('formatHuman', () => {
   it('includes header, per-check lines, remediations, and summary', () => {
     const out = formatHuman(sampleReport);
-    expect(out).toContain('@contextos/cli 0.0.0-test');
+    expect(out).toContain('@coodra/contextos-cli 0.0.0-test');
     expect(out).toContain('/tmp/contextos');
     expect(out).toContain('1. Node');
     expect(out).toContain('2. Bridge');

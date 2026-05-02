@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { runKeySegmentSchema } from '../idempotency.js';
 
 /**
- * `@contextos/shared/hooks/event` — the canonical normalized hook
+ * `@coodra/contextos-shared/hooks/event` — the canonical normalized hook
  * shape per `system-architecture.md` §3.4. Every per-agent adapter in
  * `adapters/` produces one of these. Every downstream handler in
  * `apps/hooks-bridge/src/handlers/` consumes one of these.

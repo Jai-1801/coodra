@@ -1,7 +1,7 @@
-import { type DbHandle, GLOBAL_PROJECT_ID, lookupRunId } from '@contextos/db';
-import type { PolicyClient, PolicyInput } from '@contextos/policy';
-import { createLogger } from '@contextos/shared';
-import type { HookEvent } from '@contextos/shared/hooks';
+import { type DbHandle, GLOBAL_PROJECT_ID, lookupRunId } from '@coodra/contextos-db';
+import type { PolicyClient, PolicyInput } from '@coodra/contextos-policy';
+import { createLogger } from '@coodra/contextos-shared';
+import type { HookEvent } from '@coodra/contextos-shared/hooks';
 
 import type { HookDispatchResult } from '../app.js';
 import type { ProjectSlugResolver } from '../lib/resolve-project-slug.js';
@@ -20,7 +20,7 @@ import type { RunRecorder } from '../lib/run-recorder.js';
  *     reason.
  *
  *   - Latency budget: p95 < 50ms in solo mode. The cache + breaker in
- *     `@contextos/policy::createPolicyClient` is the load-bearing
+ *     `@coodra/contextos-policy::createPolicyClient` is the load-bearing
  *     piece; this handler does not add another layer.
  *
  *   - Audit-write to `policy_decisions` is async (`setImmediate`) and

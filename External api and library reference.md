@@ -50,7 +50,7 @@ PRAGMA temp_store = MEMORY;
 **Install:**
 
 ```bash
-pnpm --filter @contextos/db add sqlite-vec@0.1.9 --save-exact
+pnpm --filter @coodra/contextos-db add sqlite-vec@0.1.9 --save-exact
 ```
 
 **Node.js load pattern** (what `createSqliteDb` does, guarded by the strict-vs-WARN contract below):
@@ -109,9 +109,9 @@ const rows = db
 
 **Gotchas & caveats**
 
-- **Dimension changes require recreation.** `FLOAT[N]` is baked into the vtab schema; changing `EMBEDDING_DIM` (from `@contextos/shared/constants`) means a migration + full re-embed. The `packages/shared/src/constants.ts` docblock carries the five-step checklist.
+- **Dimension changes require recreation.** `FLOAT[N]` is baked into the vtab schema; changing `EMBEDDING_DIM` (from `@coodra/contextos-shared/constants`) means a migration + full re-embed. The `packages/shared/src/constants.ts` docblock carries the five-step checklist.
 - **Shadow tables.** Creating a `vec0` virtual table also materialises 4–5 companion tables (`<name>_chunks`, `<name>_rowids`, `<name>_vector_chunks00`, `<name>_info`). The unit test in `packages/db/__tests__/unit/client.test.ts` filters them via `substr(name, 1, 18) <> 'context_packs_vec_'` so assertions target the 10-object logical schema.
-- **Migration lock.** The `CREATE VIRTUAL TABLE` block is hand-written and sha256-locked via `packages/db/migrations.lock.json`. Drizzle-Kit regenerating `0001` would wipe it; CI and the `.githooks/pre-commit` hook run `pnpm --filter @contextos/db check:migration-lock` to catch that drift before it reaches main.
+- **Migration lock.** The `CREATE VIRTUAL TABLE` block is hand-written and sha256-locked via `packages/db/migrations.lock.json`. Drizzle-Kit regenerating `0001` would wipe it; CI and the `.githooks/pre-commit` hook run `pnpm --filter @coodra/contextos-db check:migration-lock` to catch that drift before it reaches main.
 - **ANN vs brute-force.** `vec0` is an O(n·d) scan engine in 0.1.x; HNSW/IVF support is not in 0.1.9. Solo-mode SQLite search is therefore brute-force, which is acceptable for the dataset sizes solo workflows produce. Team mode uses the Postgres HNSW index.
 - **Loadable-extension privilege.** `loadExtension(path)` requires SQLite to have extension loading enabled. `better-sqlite3` enables it for the lifetime of the connection it's called on; no pragma needed.
 
@@ -746,7 +746,7 @@ The architecture’s MCP server implements both stdio and HTTP transports simult
 **Install:**
 
 ```bash
-pnpm --filter @contextos/mcp-server add @modelcontextprotocol/sdk@1.29.0 --save-exact
+pnpm --filter @coodra/contextos-mcp-server add @modelcontextprotocol/sdk@1.29.0 --save-exact
 ```
 
 **Docs:** <https://github.com/modelcontextprotocol/typescript-sdk> · <https://modelcontextprotocol.io/specification/2025-03-26>
@@ -776,13 +776,13 @@ await server.connect(new StdioServerTransport());
 
 #### Zod v4 compatibility
 
-`@modelcontextprotocol/sdk@1.29.0` supports Zod v4. Our workspace uses Zod v4 uniformly (both `@contextos/shared` and `@contextos/mcp-server`), which lets us drop the third-party `zod-to-json-schema` helper in favour of Zod v4's built-in `z.toJSONSchema(schema, { target: 'draft-2020-12' })` — see `apps/mcp-server/src/framework/manifest-from-zod.ts`.
+`@modelcontextprotocol/sdk@1.29.0` supports Zod v4. Our workspace uses Zod v4 uniformly (both `@coodra/contextos-shared` and `@coodra/contextos-mcp-server`), which lets us drop the third-party `zod-to-json-schema` helper in favour of Zod v4's built-in `z.toJSONSchema(schema, { target: 'draft-2020-12' })` — see `apps/mcp-server/src/framework/manifest-from-zod.ts`.
 
 #### Stdio transport + logger contract (load-bearing)
 
 The stdio transport uses **stdout** exclusively for JSON-RPC frames. A single stray byte on stdout — a `console.log` from our code, a pino line from any transitive dependency — corrupts the transport. The ContextOS mcp-server enforces this invariant in three places:
 
-1. `apps/mcp-server/src/bootstrap/ensure-stderr-logging.ts` — side-effect module imported **first** in `src/index.ts`. Sets `CONTEXTOS_LOG_DESTINATION=stderr` before `@contextos/shared`'s logger module evaluates.
+1. `apps/mcp-server/src/bootstrap/ensure-stderr-logging.ts` — side-effect module imported **first** in `src/index.ts`. Sets `CONTEXTOS_LOG_DESTINATION=stderr` before `@coodra/contextos-shared`'s logger module evaluates.
 2. `packages/shared/src/logger.ts` — reads `CONTEXTOS_LOG_DESTINATION` at module load; `'stderr'` routes pino to fd 2 via `pino.destination({ fd: 2, sync: true })`. Unknown values throw at boot rather than silently defaulting.
 3. `apps/mcp-server/__tests__/unit/transports/stdio-stdout-purity.test.ts` — spawns the real entrypoint, sends an `initialize` frame, and asserts every byte on stdout is a valid JSON-RPC frame and every line on stderr is a parseable pino JSON object.
 
@@ -1144,17 +1144,17 @@ export async function callBackend() {
 
 ## Validation, Schemas & Resilience
 
-### `@contextos/policy` (workspace package — landed Module 03 S3)
+### `@coodra/contextos-policy` (workspace package — landed Module 03 S3)
 
 **Version:** workspace-internal (no external pin). Lives at `packages/policy/`.
 **Role:** the cache-first policy evaluator + audit-write helper, shared by `apps/mcp-server` (via the `check_policy` tool + the registry's pre/post auto-wrap) and `apps/hooks-bridge` (via the pre-tool-use hook handler). Also owns the discriminated `PolicyClient` / `PolicyInput` / `PolicyResult` / `PolicyDenyError` types.
 
-**Why a new package (not `@contextos/shared/policy`):** `@contextos/db` already depends on `@contextos/shared`. Putting policy in shared would force shared to depend on `@contextos/db` (for `DbHandle` + the schema tables policy queries), creating a workspace cycle. A separate package that depends on both `shared` and `db` resolves the cycle cleanly. The original Module 03 plan (spec.md) said "policy lives in shared" — that wording is corrected in S3's commit; it's the only structural deviation.
+**Why a new package (not `@coodra/contextos-shared/policy`):** `@coodra/contextos-db` already depends on `@coodra/contextos-shared`. Putting policy in shared would force shared to depend on `@coodra/contextos-db` (for `DbHandle` + the schema tables policy queries), creating a workspace cycle. A separate package that depends on both `shared` and `db` resolves the cycle cleanly. The original Module 03 plan (spec.md) said "policy lives in shared" — that wording is corrected in S3's commit; it's the only structural deviation.
 
 **Dep set:**
 
-- `@contextos/shared` (logger + `IdempotencyKey` value-shape).
-- `@contextos/db` (DbHandle + schema tables for SELECT policies/policy_rules + INSERT policy_decisions).
+- `@coodra/contextos-shared` (logger + `IdempotencyKey` value-shape).
+- `@coodra/contextos-db` (DbHandle + schema tables for SELECT policies/policy_rules + INSERT policy_decisions).
 - `cockatiel@3.2.1` exact (timeout + breaker fuse).
 - `drizzle-orm@^0.45.2` (query builder, matches db's pin).
 - `picomatch@4.0.2` exact (path-glob matching at cache-load time).
@@ -1243,11 +1243,11 @@ export const ENRICHMENT_JSON_SCHEMA = zodToJsonSchema(EnrichmentSchema, 'Enrichm
 
 ### cockatiel (circuit breakers & retries)
 
-**Version:** 3.2.1 (pinned **exact**; first installed in `apps/mcp-server/package.json` on 2026-04-23 during Module 02 S7b. Module 03 S3 (2026-04-25) moved the policy module — and with it the cockatiel breaker — to the new `@contextos/policy` workspace package; the dep migrated with the code. mcp-server now pulls cockatiel transitively through `@contextos/policy`. Hooks-bridge does the same — no separate breaker instance lives in the hooks-bridge tree. [npmjs](https://www.npmjs.com/package/cockatiel)
+**Version:** 3.2.1 (pinned **exact**; first installed in `apps/mcp-server/package.json` on 2026-04-23 during Module 02 S7b. Module 03 S3 (2026-04-25) moved the policy module — and with it the cockatiel breaker — to the new `@coodra/contextos-policy` workspace package; the dep migrated with the code. mcp-server now pulls cockatiel transitively through `@coodra/contextos-policy`. Hooks-bridge does the same — no separate breaker instance lives in the hooks-bridge tree. [npmjs](https://www.npmjs.com/package/cockatiel)
 **Install (exact pin):**
 
 ```bash
-pnpm --filter @contextos/policy add cockatiel@3.2.1 --save-exact
+pnpm --filter @coodra/contextos-policy add cockatiel@3.2.1 --save-exact
 ```
 
 **Docs:** <https://www.npmjs.com/package/cockatiel>
@@ -1292,11 +1292,11 @@ async function evaluateWithBreaker<T>(fn: () => Promise<T>): Promise<T> {
 
 ### @clerk/backend (JWT verification, Node server)
 
-**Version:** 3.3.0 (pinned **exact**; first installed in `apps/mcp-server/package.json` on 2026-04-23 during Module 02 S7b. Module 03 S3 (2026-04-25) moved the auth module — and with it the dep — to `packages/shared/src/auth/`; the dep migrated with the code. mcp-server and hooks-bridge both pull `@clerk/backend` transitively through `@contextos/shared`. [npmjs](https://www.npmjs.com/package/@clerk/backend)
+**Version:** 3.3.0 (pinned **exact**; first installed in `apps/mcp-server/package.json` on 2026-04-23 during Module 02 S7b. Module 03 S3 (2026-04-25) moved the auth module — and with it the dep — to `packages/shared/src/auth/`; the dep migrated with the code. mcp-server and hooks-bridge both pull `@clerk/backend` transitively through `@coodra/contextos-shared`. [npmjs](https://www.npmjs.com/package/@clerk/backend)
 **Install (exact pin):**
 
 ```bash
-pnpm --filter @contextos/shared add @clerk/backend@3.3.0 --save-exact
+pnpm --filter @coodra/contextos-shared add @clerk/backend@3.3.0 --save-exact
 ```
 
 **Docs:** <https://clerk.com/docs/references/backend/overview>
@@ -1335,14 +1335,14 @@ const identity = {
 
 ### picomatch (glob matcher for policy-rule path matching)
 
-**Version:** 4.0.2 (pinned **exact**; first installed in `apps/mcp-server/package.json` on 2026-04-23 during Module 02 S7b. Module 03 S3 (2026-04-25) moved the policy module to `@contextos/policy`; the policy-side picomatch dep moved with it. mcp-server keeps a separate direct dep on picomatch because `tools/get-feature-pack/handler.ts` uses it independently — that's a different consumer, unrelated to the policy-rule path matcher. [npmjs](https://www.npmjs.com/package/picomatch)
+**Version:** 4.0.2 (pinned **exact**; first installed in `apps/mcp-server/package.json` on 2026-04-23 during Module 02 S7b. Module 03 S3 (2026-04-25) moved the policy module to `@coodra/contextos-policy`; the policy-side picomatch dep moved with it. mcp-server keeps a separate direct dep on picomatch because `tools/get-feature-pack/handler.ts` uses it independently — that's a different consumer, unrelated to the policy-rule path matcher. [npmjs](https://www.npmjs.com/package/picomatch)
 **Install (exact pin):**
 
 ```bash
-pnpm --filter @contextos/policy add picomatch@4.0.2 --save-exact
-pnpm --filter @contextos/policy add -D @types/picomatch@4.0.2 --save-exact
+pnpm --filter @coodra/contextos-policy add picomatch@4.0.2 --save-exact
+pnpm --filter @coodra/contextos-policy add -D @types/picomatch@4.0.2 --save-exact
 # mcp-server keeps its own (separate use site for feature-pack glob filtering):
-pnpm --filter @contextos/mcp-server add picomatch@4.0.2 --save-exact
+pnpm --filter @coodra/contextos-mcp-server add picomatch@4.0.2 --save-exact
 ```
 
 **Docs:** <https://github.com/micromatch/picomatch>
@@ -1408,7 +1408,7 @@ logger.info({ sessionId, runId, orgId }, 'PreToolUse decision allow');
 
 - For pretty logs in dev, you can pipe through `pino-pretty`; do **not** use pretty transports in production hot path due to performance cost. [libraries](https://libraries.io/npm/pino-api-logger)
 - **Pino 10 is ESM-only.** Consumers must use `import pino from 'pino'` from an ESM context; `require('pino')` is no longer supported. ContextOS's `tsconfig.base.json` sets `module: NodeNext`, which matches Pino 10's expectations. Transitive consumers that still ship CJS will need to be updated or pinned.
-- **`CONTEXTOS_LOG_DESTINATION` env contract** (added 2026-04-23, S5): services that own stdout as a protocol channel — today only `@contextos/mcp-server` under the MCP stdio transport — set this env to `stderr` before any import of `@contextos/shared`. `packages/shared/src/logger.ts` reads it at module load and routes pino to fd 2 via `pino.destination({ fd: 2, sync: true })`. Accepted values: unset / `stdout` / `stderr`; anything else throws at boot. See the `@modelcontextprotocol/sdk` entry under Protocols & Transports for the full enforcement story.
+- **`CONTEXTOS_LOG_DESTINATION` env contract** (added 2026-04-23, S5): services that own stdout as a protocol channel — today only `@coodra/contextos-mcp-server` under the MCP stdio transport — set this env to `stderr` before any import of `@coodra/contextos-shared`. `packages/shared/src/logger.ts` reads it at module load and routes pino to fd 2 via `pino.destination({ fd: 2, sync: true })`. Accepted values: unset / `stdout` / `stderr`; anything else throws at boot. See the `@modelcontextprotocol/sdk` entry under Protocols & Transports for the full enforcement story.
 
 ***
 
@@ -2393,7 +2393,7 @@ CODEOWNERS is a plain-text file whose precedence within the repo is:
 2. `CODEOWNERS` at the root
 3. `docs/CODEOWNERS`
 
-GitHub uses the first one it finds. The parser in `@contextos/shared/codeowners.ts` should check all three.
+GitHub uses the first one it finds. The parser in `@coodra/contextos-shared/codeowners.ts` should check all three.
 
 #### Syntax (the complete grammar)
 

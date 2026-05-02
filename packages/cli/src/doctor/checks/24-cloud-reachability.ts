@@ -1,7 +1,7 @@
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { createPostgresDb } from '@contextos/db';
+import { createPostgresDb } from '@coodra/contextos-db';
 
 import type { Check } from '../types.js';
 

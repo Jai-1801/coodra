@@ -24,7 +24,7 @@ import {
  * dedupe on readonly keys.
  *
  * §24.3 description anatomy (five-part recipe + 40–80 word band) is
- * enforced by `@contextos/shared/test-utils::assertManifestDescriptionValid`.
+ * enforced by `@coodra/contextos-shared/test-utils::assertManifestDescriptionValid`.
  */
 
 const queryCodebaseGraphIdempotencyKey: IdempotencyKeyBuilder<QueryCodebaseGraphInput> = (input, _ctx) => {

@@ -7,7 +7,7 @@ import { createLogger } from '../logger.js';
 import type { AuthClient, AuthEnv, Identity } from './types.js';
 
 /**
- * `@contextos/shared/auth` — three-layer auth chain shared by every
+ * `@coodra/contextos-shared/auth` — three-layer auth chain shared by every
  * ContextOS HTTP transport (Module 02 mcp-server, Module 03 hooks-
  * bridge, future Module 04 web). The three layers are evaluated in
  * the order locked by `system-architecture.md` §19 and Module 02

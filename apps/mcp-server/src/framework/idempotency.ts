@@ -1,4 +1,4 @@
-import type { IdempotencyKey } from '@contextos/shared';
+import type { IdempotencyKey } from '@coodra/contextos-shared';
 
 /**
  * Per-tool idempotency-key builder contract.
@@ -71,13 +71,13 @@ export interface IdempotencyContext {
 export type IdempotencyKeyBuilder<Input> = (input: Input, ctx: IdempotencyContext) => IdempotencyKey;
 
 // `IdempotencyKey` (the discriminated value-shape) moved to
-// `@contextos/shared/idempotency` in Module 03 S3 so the cross-package
-// `PolicyInput` (in `@contextos/policy`) can reference it without
+// `@coodra/contextos-shared/idempotency` in Module 03 S3 so the cross-package
+// `PolicyInput` (in `@coodra/contextos-policy`) can reference it without
 // depending on this mcp-server-specific framework. The framework-level
 // `IdempotencyKeyBuilder<Input>` + `IdempotencyContext` +
 // `assertIdempotencyKeyBuilder` helpers stay here — those are tool-
 // registration concerns, not wire-shape concerns. New consumers
-// import from `@contextos/shared`.
+// import from `@coodra/contextos-shared`.
 export type { IdempotencyKey };
 
 /**

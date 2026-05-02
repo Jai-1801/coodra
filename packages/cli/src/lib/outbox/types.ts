@@ -1,7 +1,7 @@
 /**
  * Module 03.1 — public types for the durable audit outbox worker.
  *
- * The worker is in `@contextos/cli` (this package) because both the
+ * The worker is in `@coodra/contextos-cli` (this package) because both the
  * `apps/hooks-bridge` and `apps/mcp-server` daemons import it: code
  * shared between two apps lives in a `packages/*` package, and the
  * CLI package already houses daemon abstractions, so adding a new

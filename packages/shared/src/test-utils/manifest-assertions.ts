@@ -12,9 +12,9 @@
  *
  * Consumed from:
  *   - `apps/mcp-server/__tests__/unit/tools/*.test.ts`
- *   - any future `@contextos/tools-*` package's manifest tests
+ *   - any future `@coodra/contextos-tools-*` package's manifest tests
  *
- * Kept in `@contextos/shared/test-utils` (subpath export) rather than
+ * Kept in `@coodra/contextos-shared/test-utils` (subpath export) rather than
  * inlined in the mcp-server because:
  *   1. §24.3 is a protocol rule, not a server-implementation detail.
  *   2. Future tool packages shipped outside `apps/mcp-server/` need the

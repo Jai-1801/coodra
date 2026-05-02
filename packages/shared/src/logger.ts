@@ -10,7 +10,7 @@ import { type DestinationStream, type Logger, type LoggerOptions, pino, destinat
  * via `logger.child({ runId, ... })` at call sites.
  *
  * In development, pipe the process output through `pino-pretty`:
- *   `pnpm --filter @contextos/<service> dev | pnpm exec pino-pretty`.
+ *   `pnpm --filter @coodra/contextos-<service> dev | pnpm exec pino-pretty`.
  * We deliberately do not wire `pino-pretty` as a runtime transport: the
  * transport worker thread is a dev-time ergonomic, not a production
  * dependency, and reaching for it silently in production would hide
@@ -19,13 +19,13 @@ import { type DestinationStream, type Logger, type LoggerOptions, pino, destinat
  * ## Log destination (`CONTEXTOS_LOG_DESTINATION`)
  *
  * The base pino instance writes to stdout by default. Services that own
- * stdout as a protocol channel — today: `@contextos/mcp-server` under the
+ * stdout as a protocol channel — today: `@coodra/contextos-mcp-server` under the
  * MCP stdio transport, where JSON-RPC frames occupy stdout exclusively
  * and a single stray byte corrupts the transport — must set
  * `CONTEXTOS_LOG_DESTINATION=stderr` before any module that imports this
  * file is loaded. We intentionally make the flip env-driven rather than
  * code-driven so that it survives transitive imports: every package that
- * reaches `createLogger()` via `@contextos/db` or another dependency
+ * reaches `createLogger()` via `@coodra/contextos-db` or another dependency
  * resolves to the same destination.
  *
  * Accepted values (case-insensitive):
@@ -68,7 +68,7 @@ function resolveDestination(envDest: string | undefined): DestinationStream | un
   if (normalized === undefined || normalized === '' || normalized === 'stdout') return undefined;
   if (normalized === 'stderr') return pinoDestination({ fd: 2, sync: true });
   throw new TypeError(
-    `@contextos/shared/logger: CONTEXTOS_LOG_DESTINATION must be 'stdout' or 'stderr' (got: '${envDest}')`,
+    `@coodra/contextos-shared/logger: CONTEXTOS_LOG_DESTINATION must be 'stdout' or 'stderr' (got: '${envDest}')`,
   );
 }
 

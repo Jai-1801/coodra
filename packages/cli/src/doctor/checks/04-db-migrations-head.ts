@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs';
 import { access } from 'node:fs/promises';
-import { MIGRATIONS_FOLDER } from '@contextos/db';
+import { MIGRATIONS_FOLDER } from '@coodra/contextos-db';
 import { openLocalDb } from '../../lib/open-local-db.js';
 import type { Check } from '../types.js';
 

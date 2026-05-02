@@ -31,7 +31,7 @@ afterAll(() => {
   if (cwd) rmSync(cwd, { recursive: true, force: true });
 });
 
-describe('@contextos/db::ensureProject', () => {
+describe('@coodra/contextos-db::ensureProject', () => {
   it('inserts a row on a fresh slug and returns created:true', async () => {
     if (handle.kind !== 'sqlite') throw new Error('expected sqlite');
     const result = await ensureProject(handle, { slug: 'fresh-slug' });

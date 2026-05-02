@@ -54,7 +54,7 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
   program
     .name('contextos')
     .description('ContextOS CLI — install, configure, run, and diagnose ContextOS on your machine.')
-    .version(VERSION, '-v, --version', 'Print the @contextos/cli version and exit.')
+    .version(VERSION, '-v, --version', 'Print the @coodra/contextos-cli version and exit.')
     .helpOption('-h, --help', 'Show help for a command.')
     .showHelpAfterError(false);
 

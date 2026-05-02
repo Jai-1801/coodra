@@ -1,17 +1,17 @@
-import { createLogger } from '@contextos/shared';
+import { createLogger } from '@coodra/contextos-shared';
 import {
   type AuthEnv,
   type Identity,
   SOLO_IDENTITY,
   verifyClerkJwt,
   verifyLocalHookSecret,
-} from '@contextos/shared/auth';
+} from '@coodra/contextos-shared/auth';
 import type { Context, MiddlewareHandler } from 'hono';
 
 /**
  * `apps/hooks-bridge/src/lib/auth-middleware.ts` — Hono middleware
  * implementing the three-layer auth chain from
- * `system-architecture.md` §19, sourced from `@contextos/shared/auth`.
+ * `system-architecture.md` §19, sourced from `@coodra/contextos-shared/auth`.
  *
  * Order locked by Module 02 decisions-log 2026-04-22 Q-02-1:
  *   (1) solo-bypass    — CLERK_SECRET_KEY === 'sk_test_replace_me'

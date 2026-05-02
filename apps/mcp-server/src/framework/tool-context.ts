@@ -1,6 +1,6 @@
-import type { PolicyClient } from '@contextos/policy';
-import type { Logger } from '@contextos/shared';
-import type { AuthClient, Identity } from '@contextos/shared/auth';
+import type { PolicyClient } from '@coodra/contextos-policy';
+import type { Logger } from '@coodra/contextos-shared';
+import type { AuthClient, Identity } from '@coodra/contextos-shared/auth';
 
 import type { IdempotencyKey } from './idempotency.js';
 
@@ -56,7 +56,7 @@ import type { IdempotencyKey } from './idempotency.js';
 export interface DbClient {
   /**
    * The Drizzle instance, already bound to the mode-specific driver
-   * (@contextos/db's SQLite + better-sqlite3 or Postgres + postgres.js).
+   * (@coodra/contextos-db's SQLite + better-sqlite3 or Postgres + postgres.js).
    * Typed as `unknown` here to avoid baking the driver choice into the
    * ToolContext interface; `lib/db.ts` re-exports a typed version for
    * lib-internal consumers that need it.
@@ -66,8 +66,8 @@ export interface DbClient {
   close(): Promise<void>;
 }
 
-// `Identity`, `AuthClient` moved to `@contextos/shared/auth` and
-// `PolicyClient` moved to `@contextos/policy` in Module 03 S3 so
+// `Identity`, `AuthClient` moved to `@coodra/contextos-shared/auth` and
+// `PolicyClient` moved to `@coodra/contextos-policy` in Module 03 S3 so
 // `apps/hooks-bridge` can use the same shapes without depending on
 // `apps/mcp-server`. Re-exported here so existing imports
 // (`import type { Identity } from '../framework/tool-context.js'`)

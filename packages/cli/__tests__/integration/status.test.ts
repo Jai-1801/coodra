@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ensureGlobalProject, migrateSqlite } from '@contextos/db';
+import { ensureGlobalProject, migrateSqlite } from '@coodra/contextos-db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runStatusCommand } from '../../src/commands/status.js';
 import { openLocalDb } from '../../src/lib/open-local-db.js';

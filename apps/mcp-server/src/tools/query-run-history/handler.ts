@@ -1,5 +1,5 @@
-import { type DbHandle, postgresSchema, sqliteSchema } from '@contextos/db';
-import { createLogger } from '@contextos/shared';
+import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-db';
+import { createLogger } from '@coodra/contextos-shared';
 import { and, desc, eq } from 'drizzle-orm';
 import type { ToolContext } from '../../framework/tool-context.js';
 import type { QueryRunHistoryInput, QueryRunHistoryOutput, RunHistoryEntry } from './schema.js';

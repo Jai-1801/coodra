@@ -1,4 +1,4 @@
-import { createLogger } from '@contextos/shared';
+import { createLogger } from '@coodra/contextos-shared';
 
 import type { DbHandle } from './client.js';
 import {

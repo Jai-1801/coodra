@@ -54,7 +54,7 @@ jobs:
         # table) surfaces before any other signal. Produces a diffable
         # failure naming file, marker, expected sha256, and remediation
         # command (see packages/db/scripts/check-migration-lock.mjs).
-        run: pnpm --filter @contextos/db run check:migration-lock
+        run: pnpm --filter @coodra/contextos-db run check:migration-lock
 
       - name: Lint
         run: pnpm lint
@@ -126,7 +126,7 @@ jobs:
       - name: Approve build scripts
         run: pnpm rebuild
 
-      - name: Build @contextos/* in dependency order
+      - name: Build @coodra/contextos-* in dependency order
         # `shared` first (db + policy depend on it transitively); `db`
         # next (its dist/migrate.js is consumed by both apps' auto-migrate
         # at boot); `policy` next (apps consume it); `mcp-server` and
@@ -135,11 +135,11 @@ jobs:
         # `node dist/index.js` fails with ENOENT and the SDK Client / HTTP
         # client times out with "Connection closed".
         run: |
-          pnpm --filter @contextos/shared build
-          pnpm --filter @contextos/db build
-          pnpm --filter @contextos/policy build
-          pnpm --filter @contextos/mcp-server build
-          pnpm --filter @contextos/hooks-bridge build
+          pnpm --filter @coodra/contextos-shared build
+          pnpm --filter @coodra/contextos-db build
+          pnpm --filter @coodra/contextos-policy build
+          pnpm --filter @coodra/contextos-mcp-server build
+          pnpm --filter @coodra/contextos-hooks-bridge build
 
       - name: Integration tests (Postgres migrations + hooks-bridge auth chain + mcp-server boot)
         run: pnpm test:integration
@@ -190,7 +190,7 @@ jobs:
       - name: Approve build scripts
         run: pnpm rebuild
 
-      - name: Build @contextos/* in dependency order (required by e2e imports)
+      - name: Build @coodra/contextos-* in dependency order (required by e2e imports)
         # All packages have `main: ./dist/index.js` and `exports`
         # pointing into dist. The e2e tests import them as
         # workspace:* deps; without the build, vitest can't resolve
@@ -198,11 +198,11 @@ jobs:
         # a subprocess for the full-session lifecycle test, so include
         # its dist here too — keeps each slice self-contained.
         run: |
-          pnpm --filter @contextos/shared build
-          pnpm --filter @contextos/db build
-          pnpm --filter @contextos/policy build
-          pnpm --filter @contextos/mcp-server build
-          pnpm --filter @contextos/hooks-bridge build
+          pnpm --filter @coodra/contextos-shared build
+          pnpm --filter @coodra/contextos-db build
+          pnpm --filter @coodra/contextos-policy build
+          pnpm --filter @coodra/contextos-mcp-server build
+          pnpm --filter @coodra/contextos-hooks-bridge build
 
       # `testcontainers` needs a Docker daemon. GitHub-hosted ubuntu
       # runners ship Docker pre-installed; just verify it before the

@@ -1,6 +1,6 @@
-import type { OutboxDispatchHandler, OutboxDispatchOutcome, OutboxJob, SyncLookup } from '@contextos/cli/lib/outbox';
-import { type DbHandle, type PostgresHandle, postgresSchema, type SqliteHandle, sqliteSchema } from '@contextos/db';
-import { createLogger, type Logger } from '@contextos/shared';
+import type { OutboxDispatchHandler, OutboxDispatchOutcome, OutboxJob, SyncLookup } from '@coodra/contextos-cli/lib/outbox';
+import { type DbHandle, type PostgresHandle, postgresSchema, type SqliteHandle, sqliteSchema } from '@coodra/contextos-db';
+import { createLogger, type Logger } from '@coodra/contextos-shared';
 import { and, eq } from 'drizzle-orm';
 
 /**

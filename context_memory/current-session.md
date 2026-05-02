@@ -45,11 +45,11 @@ Side-task constraints honoured:
 ```bash
 pnpm exec turbo run typecheck lint test:unit                                        # all green
 DATABASE_URL='postgres://contextos:contextos_dev_password@localhost:5432/contextos' \
-  pnpm --filter @contextos/cli test:integration                                     # 6/6 (cloud-migrate)
-pnpm --filter @contextos/db test:integration                                        # 45/45
-pnpm --filter @contextos/hooks-bridge test:integration                              # 38/38
-pnpm --filter @contextos/mcp-server test:integration                                # 179/179
-DATABASE_URL='postgres://...' pnpm --filter @contextos/sync-daemon test:integration # 5/5
+  pnpm --filter @coodra/contextos-cli test:integration                                     # 6/6 (cloud-migrate)
+pnpm --filter @coodra/contextos-db test:integration                                        # 45/45
+pnpm --filter @coodra/contextos-hooks-bridge test:integration                              # 38/38
+pnpm --filter @coodra/contextos-mcp-server test:integration                                # 179/179
+DATABASE_URL='postgres://...' pnpm --filter @coodra/contextos-sync-daemon test:integration # 5/5
 pnpm test:e2e                                                                       # 32 passed (1 pre-existing skip)
 CONTEXTOS_MODE=solo pnpm exec tsx __tests__/manual/verify-outbox-crash-safety.ts   # ALL PASS (M03.1 untouched)
 pnpm exec tsx __tests__/manual/verify-f5-live.ts                                    # PASS

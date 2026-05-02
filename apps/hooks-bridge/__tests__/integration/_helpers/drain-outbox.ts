@@ -1,5 +1,5 @@
-import { OutboxWorker } from '@contextos/cli/lib/outbox';
-import { type DbHandle, sqliteSchema } from '@contextos/db';
+import { OutboxWorker } from '@coodra/contextos-cli/lib/outbox';
+import { type DbHandle, sqliteSchema } from '@coodra/contextos-db';
 import { eq } from 'drizzle-orm';
 
 import { createBridgeDispatchHandler } from '../../../src/lib/outbox-dispatch.js';
