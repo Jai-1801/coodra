@@ -1,27 +1,31 @@
-import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  buildContextosHookSpec,
-  mergeClaudeSettings,
-} from '../../src/lib/init/claude-settings-merge.js';
+import { buildContextosHookSpec, mergeClaudeSettings } from '../../src/lib/init/claude-settings-merge.js';
 
 /**
- * Locks the dec_83ba10c1 (2026-05-02) hook merger contract:
+ * Locks the hook-merger contract across Phase-3 dec_83ba10c1
+ * and Phase-4 Fix F (both 2026-05-02):
  *
- *   1. Greenfield write — when ~/.claude/settings.json is absent we
- *      create a baseline file with all four ContextOS hook entries.
- *   2. Idempotent merge — running the merger twice with identical
- *      inputs is a no-op (`action: 'unchanged'`) the second time.
- *   3. User entries preserved — pre-existing user-authored hook
- *      entries (matcher !== '__contextos__') survive every merge.
- *   4. Backup on first divergent write — when an existing settings.json
- *      already has hooks AND the merger writes new content, the
- *      original is copied to a `.contextos-backup-<ts>` file.
- *   5. Force flag — `--force` overwrites even when entries already
- *      match the baseline.
- *   6. Dry run — no disk writes happen with `dryRun: true`.
+ *   1. Greenfield write — absent settings.json → baseline file with
+ *      all four ContextOS hook entries.
+ *   2. Idempotent merge — twice with identical inputs is a no-op.
+ *   3. User entries preserved — entries with no bridge URL survive.
+ *   4. Backup on first divergent write.
+ *   5. Force flag — overwrites even when entries already match.
+ *   6. Dry run — no disk writes.
+ *   7. **Phase 4 Fix F: per-event matchers** — PreToolUse and
+ *      PostToolUse get `Write|Edit|MultiEdit|NotebookEdit|Bash`;
+ *      SessionStart and Stop omit `matcher` entirely.
+ *   8. **Phase 4 Fix F: URL-based ownership** — entries are
+ *      identified by hook URL pointing at the bridge, not by the
+ *      old `matcher === '__contextos__'` sentinel. User entries
+ *      with `matcher: 'Write'` or any other tool-name regex are
+ *      preserved as long as they don't POST to the ContextOS bridge.
+ *   9. **Phase 4 Fix F: legacy migration** — pre-Fix-F entries
+ *      (matcher='__contextos__' + bridge URL) are recognised and
+ *      replaced with the new shape on next merge.
  */
 describe('mergeClaudeSettings — write contract', () => {
   let home: string;
@@ -59,7 +63,7 @@ describe('mergeClaudeSettings — write contract', () => {
     expect(body.hooks.SessionStart).toHaveLength(1);
   });
 
-  it('greenfield: writes a baseline ~/.claude/settings.json with all four ContextOS hook entries', async () => {
+  it('Phase 4 Fix F greenfield: tool events get the file-mutating-tool regex; non-tool events omit matcher', async () => {
     const settingsPath = join(home, 'settings.json');
     const result = await mergeClaudeSettings({
       settingsPath,
@@ -75,15 +79,29 @@ describe('mergeClaudeSettings — write contract', () => {
     expect(body.hooks.PostToolUse).toHaveLength(1);
     expect(body.hooks.Stop).toHaveLength(1);
 
-    const sessionStart = body.hooks.SessionStart[0];
-    expect(sessionStart.matcher).toBe('__contextos__');
-    expect(sessionStart.hooks).toHaveLength(1);
-    const spec = sessionStart.hooks[0];
-    expect(spec.type).toBe('http');
-    expect(spec.url).toBe('http://127.0.0.1:3101/v1/hooks/claude-code');
-    expect(spec.headers).toEqual({ 'X-Local-Hook-Secret': '$LOCAL_HOOK_SECRET' });
-    expect(spec.allowedEnvVars).toEqual(['LOCAL_HOOK_SECRET']);
-    expect(spec.timeout).toBe(10);
+    // Tool events: matcher is the tool-name regex covering every tool the
+    // default policy governs. Without this Claude Code's hook would never
+    // fire for Write / Edit / MultiEdit / NotebookEdit / Bash.
+    expect(body.hooks.PreToolUse[0].matcher).toBe('Write|Edit|MultiEdit|NotebookEdit|Bash');
+    expect(body.hooks.PostToolUse[0].matcher).toBe('Write|Edit|MultiEdit|NotebookEdit|Bash');
+
+    // Non-tool events: matcher is OMITTED — Claude Code's hook spec
+    // doesn't use matcher for SessionStart/Stop, and the legacy
+    // sentinel value made these events functionally inert.
+    expect(body.hooks.SessionStart[0].matcher).toBeUndefined();
+    expect(body.hooks.Stop[0].matcher).toBeUndefined();
+
+    // Hook spec shape unchanged across all four events.
+    for (const eventName of ['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop'] as const) {
+      const entry = body.hooks[eventName][0];
+      expect(entry.hooks).toHaveLength(1);
+      const spec = entry.hooks[0];
+      expect(spec.type).toBe('http');
+      expect(spec.url).toBe('http://127.0.0.1:3101/v1/hooks/claude-code');
+      expect(spec.headers).toEqual({ 'X-Local-Hook-Secret': '$LOCAL_HOOK_SECRET' });
+      expect(spec.allowedEnvVars).toEqual(['LOCAL_HOOK_SECRET']);
+      expect(spec.timeout).toBe(10);
+    }
   });
 
   it('idempotent re-run is unchanged', async () => {
@@ -94,12 +112,15 @@ describe('mergeClaudeSettings — write contract', () => {
     expect(second.outcome.action).toBe('unchanged');
   });
 
-  it('preserves user-authored hook entries (matcher != __contextos__)', async () => {
+  it('Phase 4 Fix F: preserves user-authored hook entries identified by NOT having the bridge URL', async () => {
     const settingsPath = join(home, 'settings.json');
     const userOwned = {
       hooks: {
         PreToolUse: [
           {
+            // User entry happens to use the SAME tool-name regex Fix F
+            // emits — that's fine because it's identified by the
+            // command-not-bridge-URL property below, not by matcher.
             matcher: 'Write',
             hooks: [{ type: 'command', command: 'echo wrote-something' }],
           },
@@ -125,13 +146,77 @@ describe('mergeClaudeSettings — write contract', () => {
 
     const body = JSON.parse(await readFile(settingsPath, 'utf8'));
     expect(body.theme).toBe('dark');
-    // The user's PreToolUse + SessionStart entries survived.
+    // The user's PreToolUse + SessionStart entries survived alongside the
+    // newly-appended ContextOS entry.
     expect(body.hooks.PreToolUse).toHaveLength(2);
     expect(body.hooks.SessionStart).toHaveLength(2);
-    const userPreToolUse = (body.hooks.PreToolUse as Array<{ matcher?: string }>).find(
-      (e) => e.matcher === 'Write',
-    );
+    const userPreToolUse = (
+      body.hooks.PreToolUse as Array<{ matcher?: string; hooks: Array<{ type: string; url?: string }> }>
+    ).find((e) => e.hooks?.[0]?.type === 'command');
     expect(userPreToolUse).toBeDefined();
+    expect(userPreToolUse?.matcher).toBe('Write');
+    // ContextOS entry is the one with the bridge URL.
+    const ctxPreToolUse = (body.hooks.PreToolUse as Array<{ matcher?: string; hooks: Array<{ url?: string }> }>).find(
+      (e) => e.hooks?.[0]?.url?.includes('/v1/hooks/claude-code'),
+    );
+    expect(ctxPreToolUse?.matcher).toBe('Write|Edit|MultiEdit|NotebookEdit|Bash');
+  });
+
+  it('Phase 4 Fix F: legacy entry (matcher=__contextos__ + bridge URL) is migrated to the new shape', async () => {
+    const settingsPath = join(home, 'settings.json');
+    // Pre-Fix-F shape: matcher='__contextos__' on every event, including
+    // PreToolUse where the literal sentinel never matched any tool.
+    const legacy = {
+      hooks: {
+        SessionStart: [
+          {
+            matcher: '__contextos__',
+            hooks: [
+              {
+                type: 'http',
+                url: 'http://127.0.0.1:3101/v1/hooks/claude-code',
+                headers: { 'X-Local-Hook-Secret': '$LOCAL_HOOK_SECRET' },
+                allowedEnvVars: ['LOCAL_HOOK_SECRET'],
+                timeout: 10,
+              },
+            ],
+          },
+        ],
+        PreToolUse: [
+          {
+            matcher: '__contextos__',
+            hooks: [
+              {
+                type: 'http',
+                url: 'http://127.0.0.1:3101/v1/hooks/claude-code',
+                headers: { 'X-Local-Hook-Secret': '$LOCAL_HOOK_SECRET' },
+                allowedEnvVars: ['LOCAL_HOOK_SECRET'],
+                timeout: 10,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    await writeFile(settingsPath, JSON.stringify(legacy, null, 2), 'utf8');
+
+    const result = await mergeClaudeSettings({
+      settingsPath,
+      bridgePort: 3101,
+      force: false,
+      dryRun: false,
+    });
+    expect(result.outcome.action).toBe('merged');
+
+    const body = JSON.parse(await readFile(settingsPath, 'utf8'));
+    // Exactly one ContextOS entry per event after migration — the legacy
+    // entry was identified by URL and replaced, not duplicated.
+    expect(body.hooks.SessionStart).toHaveLength(1);
+    expect(body.hooks.PreToolUse).toHaveLength(1);
+    // The PreToolUse matcher is now the real tool-name regex.
+    expect(body.hooks.PreToolUse[0].matcher).toBe('Write|Edit|MultiEdit|NotebookEdit|Bash');
+    // The SessionStart matcher is now omitted entirely.
+    expect(body.hooks.SessionStart[0].matcher).toBeUndefined();
   });
 
   it('backs up the original on first divergent write', async () => {
@@ -147,13 +232,16 @@ describe('mergeClaudeSettings — write contract', () => {
     expect(backupBody.theme).toBe('dark');
   });
 
-  it('force flag overwrites a custom contextos-matcher entry to baseline', async () => {
+  it('force flag overwrites a custom-URL entry that is NOT contextos-owned (different URL → user-owned, only --force replaces it)', async () => {
     const settingsPath = join(home, 'settings.json');
+    // A user has a custom HTTP hook pointing at THEIR server (NOT the
+    // bridge). Without --force, it's preserved as a user entry. With
+    // --force, baseline is re-asserted (the user entry stays — it's
+    // user-owned by URL — and a contextos entry is added).
     const custom = {
       hooks: {
         SessionStart: [
           {
-            matcher: '__contextos__',
             hooks: [{ type: 'http', url: 'http://9.9.9.9:9999/wrong', headers: {}, allowedEnvVars: [], timeout: 1 }],
           },
         ],
@@ -170,8 +258,18 @@ describe('mergeClaudeSettings — write contract', () => {
     expect(result.outcome.action).toBe('forced');
 
     const body = JSON.parse(await readFile(settingsPath, 'utf8'));
-    const ours = body.hooks.SessionStart[0];
-    expect(ours.hooks[0].url).toBe('http://127.0.0.1:3101/v1/hooks/claude-code');
+    // The user's non-bridge URL entry is preserved (URL-based ownership
+    // means anything not pointing at the bridge is "theirs").
+    expect(body.hooks.SessionStart).toHaveLength(2);
+    const userEntry = (body.hooks.SessionStart as Array<{ hooks: Array<{ url: string }> }>).find(
+      (e) => e.hooks[0]?.url === 'http://9.9.9.9:9999/wrong',
+    );
+    expect(userEntry).toBeDefined();
+    // The ContextOS entry is the bridge-URL one.
+    const ctxEntry = (body.hooks.SessionStart as Array<{ hooks: Array<{ url: string }> }>).find((e) =>
+      e.hooks[0]?.url.includes('/v1/hooks/claude-code'),
+    );
+    expect(ctxEntry).toBeDefined();
   });
 
   it('dry-run does not write to disk', async () => {

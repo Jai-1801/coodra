@@ -237,9 +237,16 @@ describe('runInitCommand — integration', () => {
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     expect(settings.hooks.PostToolUse).toHaveLength(1);
     expect(settings.hooks.Stop).toHaveLength(1);
+    // Phase 4 Fix F: tool events get the file-mutating-tool regex; non-tool
+    // events omit `matcher` entirely. Pre-Fix-F all four had matcher='__contextos__'
+    // which never matched any real Claude Code tool, so PreToolUse hooks
+    // were functionally inert.
     const sessionStart = settings.hooks.SessionStart[0];
-    expect(sessionStart.matcher).toBe('__contextos__');
+    expect(sessionStart.matcher).toBeUndefined();
     expect(sessionStart.hooks[0].url).toBe('http://127.0.0.1:3101/v1/hooks/claude-code');
+    const preToolUse = settings.hooks.PreToolUse[0];
+    expect(preToolUse.matcher).toBe('Write|Edit|MultiEdit|NotebookEdit|Bash');
+    expect(preToolUse.hooks[0].url).toBe('http://127.0.0.1:3101/v1/hooks/claude-code');
   });
 
   it('fails with EXIT_USER_RECOVERABLE when no project root marker is found', async () => {

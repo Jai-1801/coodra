@@ -4,59 +4,99 @@ import { dirname, join } from 'node:path';
 import type { WriteOutcome } from './types.js';
 
 /**
- * `lib/init/claude-settings-merge.ts` — writes the four ContextOS
- * hook entries into `~/.claude/settings.json` so Claude Code POSTs
+ * `lib/init/claude-settings-merge.ts` — writes the ContextOS hook
+ * entries into `~/.claude/settings.json` so Claude Code POSTs
  * SessionStart, PreToolUse, PostToolUse, and Stop events to the
  * local hooks-bridge.
  *
- * Decision dec_83ba10c1 (2026-05-02). Pre-decision, init wrote
- * `.mcp.json` at the project root (the MCP server registration) but
- * never touched `settings.json` (the hooks registration). Result:
- * the bridge had nothing to ingest because Claude Code did not know
- * to call it. With this writer, init wires hooks AND mcp in one
- * invocation; the user restarts Claude Code once and gets autonomous
- * Feature Pack injection at SessionStart, real policy enforcement on
- * PreToolUse, audit on PostToolUse, and Context Pack auto-save on
- * Stop — all without touching any other config.
+ * History:
  *
- * Hook shape (per Claude Code's settings.json schema):
+ * - **dec_83ba10c1 (2026-05-02 — Phase 3)**: introduced the merger.
+ *   Pre-decision, init wrote `.mcp.json` (the MCP server registration)
+ *   but never touched `settings.json` (the hooks registration), so the
+ *   bridge had nothing to ingest. With this writer, init wires hooks
+ *   AND mcp in one invocation; the user restarts Claude Code once and
+ *   gets autonomous Feature Pack injection at SessionStart, real
+ *   policy enforcement on PreToolUse, audit on PostToolUse, and
+ *   Context Pack auto-save on Stop.
+ *
+ * - **Phase 4 Fix F (2026-05-02 — caught during demo rehearsal)**:
+ *   Phase 3 wrote `matcher: '__contextos__'` for every event entry.
+ *   Per Claude Code's hook spec, `matcher` on PreToolUse/PostToolUse
+ *   is a regex tested against the TOOL NAME — `'__contextos__'`
+ *   doesn't match any real tool, so the hook would never fire for
+ *   Claude Code (it kept firing for Cursor / Windsurf because their
+ *   adapters POST directly without going through the matcher). Two
+ *   things change in Fix F:
+ *
+ *     1. Per-event matchers. PreToolUse / PostToolUse get the regex
+ *        `Write|Edit|MultiEdit|NotebookEdit|Bash` so every tool the
+ *        default policy governs reaches the bridge. SessionStart /
+ *        Stop omit `matcher` entirely (Claude Code defaults to
+ *        "fire for all" — and matcher is documented for tool events
+ *        only).
+ *
+ *     2. URL-based ownership detection. Pre-Fix-F the merger
+ *        identified ContextOS-owned entries by `matcher === '__contextos__'`.
+ *        With per-event matchers carrying real tool-name regexes, that
+ *        sentinel is gone. Instead, an entry is "ContextOS-owned" iff
+ *        any hook in `entry.hooks[]` has a URL starting with the
+ *        configured bridge endpoint. Robust against future matcher
+ *        changes; user entries (which never POST to our bridge URL)
+ *        stay preserved.
+ *
+ *     3. Legacy migration. An existing entry with `matcher === '__contextos__'`
+ *        AND a hook URL matching the bridge is recognised as a
+ *        pre-Fix-F ContextOS entry and replaced with the new shape on
+ *        next merge. The original is backed up first.
+ *
+ * Hook shape after Fix F:
  *
  *   {
  *     "hooks": {
- *       "SessionStart": [
- *         {
- *           "matcher": "__contextos__",
- *           "hooks": [
- *             {
- *               "type": "http",
- *               "url": "http://127.0.0.1:<bridge-port>/v1/hooks/claude-code",
- *               "headers": { "X-Local-Hook-Secret": "$LOCAL_HOOK_SECRET" },
- *               "allowedEnvVars": ["LOCAL_HOOK_SECRET"],
- *               "timeout": 10
- *             }
- *           ]
- *         }
- *       ],
- *       "PreToolUse": [...same shape...],
- *       "PostToolUse": [...],
- *       "Stop": [...]
+ *       "SessionStart": [{
+ *         "hooks": [{ "type": "http", "url": "...", "headers": {...}, ... }]
+ *       }],
+ *       "PreToolUse": [{
+ *         "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+ *         "hooks": [{ "type": "http", "url": "...", "headers": {...}, ... }]
+ *       }],
+ *       "PostToolUse": [{
+ *         "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+ *         "hooks": [{ "type": "http", "url": "...", "headers": {...}, ... }]
+ *       }],
+ *       "Stop": [{
+ *         "hooks": [{ "type": "http", "url": "...", "headers": {...}, ... }]
+ *       }]
  *     }
  *   }
- *
- * Idempotency: every ContextOS entry uses the matcher
- * `__contextos__`. The merger finds entries whose matcher matches
- * that sentinel and replaces them, leaving every other user-authored
- * entry untouched. Re-running `contextos init` is a true no-op when
- * the existing entries already match the baseline.
  *
  * Backup: on the FIRST write to a non-empty existing file we copy
  * the original to `<settings.json>.contextos-backup-<timestamp>` so
  * the user can recover if something goes wrong.
  */
 
-const CONTEXTOS_MATCHER = '__contextos__' as const;
+/**
+ * Phase 4 Fix F matcher for tool events. Covers every tool the
+ * default policy from `@coodra/contextos-db::ensureDefaultPolicy` governs:
+ * Write/Edit/MultiEdit/NotebookEdit (deny dangerous paths) + Bash
+ * (ask). When new tool names need governance, expand this regex AND
+ * the rule list in `ensure-default-policy.ts` together.
+ */
+const TOOL_EVENT_MATCHER = 'Write|Edit|MultiEdit|NotebookEdit|Bash' as const;
+
+/**
+ * Pre-Fix-F sentinel matcher value. Used only for legacy detection
+ * during merge — new writes never use it. Keep this constant for the
+ * lifetime of one or two minor releases so users upgrading from
+ * pre-Fix-F installs get their entries migrated automatically.
+ */
+const LEGACY_CONTEXTOS_MATCHER = '__contextos__' as const;
+
 const CLAUDE_HOOK_EVENTS = ['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop'] as const;
 type ClaudeHookEvent = (typeof CLAUDE_HOOK_EVENTS)[number];
+
+const TOOL_EVENTS: ReadonlySet<ClaudeHookEvent> = new Set(['PreToolUse', 'PostToolUse']);
 
 export interface ClaudeSettingsMergeOptions {
   /** Override `~/.claude/settings.json` location for tests. */
@@ -67,7 +107,7 @@ export interface ClaudeSettingsMergeOptions {
   readonly bridgeHost?: string;
   /** Per-request timeout in seconds. Default 10. */
   readonly timeoutSec?: number;
-  /** Pass `--force` through from init: overwrites any drift even when no contextos-matcher entry exists. */
+  /** Pass `--force` through from init: overwrites any drift even when no contextos-owned entry exists. */
   readonly force: boolean;
   /** When true, compute the merge but do not write to disk. */
   readonly dryRun: boolean;
@@ -106,17 +146,69 @@ export function buildContextosHookSpec(options: ClaudeSettingsMergeOptions): Cla
   };
 }
 
-export function buildContextosEntry(spec: ClaudeHttpHookSpec): ClaudeHookEntry {
-  return { matcher: CONTEXTOS_MATCHER, hooks: [spec] };
+/**
+ * Build the desired entry for one event. Tool events get the Phase-4-Fix-F
+ * tool-name regex; non-tool events omit `matcher` entirely (Claude Code
+ * defaults to "fire for all" when matcher is absent, and matcher is only
+ * documented for PreToolUse/PostToolUse anyway).
+ */
+export function buildContextosEntryForEvent(eventName: ClaudeHookEvent, spec: ClaudeHttpHookSpec): ClaudeHookEntry {
+  if (TOOL_EVENTS.has(eventName)) {
+    return { matcher: TOOL_EVENT_MATCHER, hooks: [spec] };
+  }
+  return { hooks: [spec] };
 }
 
 /**
- * Returns true when `entry`'s matcher is the ContextOS sentinel AND
- * the entry's first hook is byte-equal to `desired`. False matches
- * trigger a replace; true matches stay untouched (no-op).
+ * Backwards-compat alias. The Phase 3 surface used this to build a
+ * single entry shape for all events; Fix F replaces it with the
+ * per-event factory above. Kept for any external import that might
+ * reference it.
+ *
+ * @deprecated Use `buildContextosEntryForEvent` so the matcher matches
+ *             the per-event Claude Code spec.
  */
-function entryMatchesBaseline(entry: ClaudeHookEntry, desired: ClaudeHttpHookSpec): boolean {
-  if (entry.matcher !== CONTEXTOS_MATCHER) return false;
+export function buildContextosEntry(spec: ClaudeHttpHookSpec): ClaudeHookEntry {
+  return { matcher: TOOL_EVENT_MATCHER, hooks: [spec] };
+}
+
+/**
+ * URL-based ownership detection (Phase 4 Fix F). An entry is
+ * "ContextOS-owned" iff any of its hooks has a URL pointing at the
+ * configured bridge endpoint. Replaces the pre-Fix-F matcher-sentinel
+ * check.
+ *
+ * The match is a path-prefix on the URL (host+port+`/v1/hooks/claude-code`)
+ * so any hook spec we ever shipped — pre-Fix-F or post-Fix-F, with
+ * or without query strings, with or without trailing path segments —
+ * is recognised.
+ */
+function isContextosOwnedEntry(entry: ClaudeHookEntry, bridgeUrlPrefix: string): boolean {
+  if (!Array.isArray(entry.hooks)) return false;
+  return entry.hooks.some(
+    (h) => h && typeof h === 'object' && typeof h.url === 'string' && h.url.startsWith(bridgeUrlPrefix),
+  );
+}
+
+/**
+ * Returns true when `entry` exactly matches the desired Fix-F shape
+ * for this event — meaning: matcher value is correct (regex for tool
+ * events, absent for non-tool events) AND the single hook spec is
+ * byte-equal to `desired`.
+ */
+function entryMatchesBaseline(
+  entry: ClaudeHookEntry,
+  eventName: ClaudeHookEvent,
+  desired: ClaudeHttpHookSpec,
+): boolean {
+  if (TOOL_EVENTS.has(eventName)) {
+    if (entry.matcher !== TOOL_EVENT_MATCHER) return false;
+  } else {
+    // For non-tool events the desired entry has no matcher field. An
+    // existing entry with any matcher (including the legacy sentinel)
+    // does not match baseline — re-write it.
+    if (entry.matcher !== undefined) return false;
+  }
   if (!Array.isArray(entry.hooks) || entry.hooks.length !== 1) return false;
   const got = entry.hooks[0];
   if (got === undefined) return false;
@@ -136,30 +228,58 @@ function canonicalize(value: unknown): unknown {
 }
 
 /**
- * Replace any ContextOS-owned entry in `existing` with `desired`.
- * Append `desired` if no contextos-owned entry was found.
+ * Merge per-event: replace any ContextOS-owned entries (URL match)
+ * with `desired`; append `desired` if no contextos-owned entry was
+ * found. Preserves user entries (which never carry the bridge URL).
  *
  * Returns `{ entries, changed }` — `changed` is true when the result
- * differs from `existing` under canonical-JSON comparison. Tests use
- * the `changed` flag to assert idempotence.
+ * differs from `existing` under canonical-JSON comparison.
  */
 function mergeEventEntries(
+  eventName: ClaudeHookEvent,
   existing: ClaudeHookEntry[] | undefined,
   desiredSpec: ClaudeHttpHookSpec,
+  bridgeUrlPrefix: string,
 ): { entries: ClaudeHookEntry[]; changed: boolean } {
-  const desired = buildContextosEntry(desiredSpec);
-  const entries: ClaudeHookEntry[] = Array.isArray(existing) ? existing.slice() : [];
-  const idx = entries.findIndex((e) => e?.matcher === CONTEXTOS_MATCHER);
-  if (idx === -1) {
-    entries.push(desired);
-    return { entries, changed: true };
+  const desired = buildContextosEntryForEvent(eventName, desiredSpec);
+  const existingArr: ClaudeHookEntry[] = Array.isArray(existing) ? existing.slice() : [];
+
+  // Locate every contextos-owned entry (URL match) — there should
+  // normally be exactly one, but legacy installs and force-write
+  // accidents can leave duplicates. Drop them all and re-insert one.
+  const ownedIndices: number[] = [];
+  for (let i = 0; i < existingArr.length; i++) {
+    const e = existingArr[i];
+    if (e !== undefined && isContextosOwnedEntry(e, bridgeUrlPrefix)) ownedIndices.push(i);
   }
-  const before = entries[idx] ?? desired;
-  if (entryMatchesBaseline(before, desiredSpec)) {
-    return { entries, changed: false };
+
+  if (ownedIndices.length === 0) {
+    return { entries: [...existingArr, desired], changed: true };
   }
-  entries[idx] = desired;
-  return { entries, changed: true };
+
+  // Single owned entry already present and matches baseline → no-op.
+  if (ownedIndices.length === 1) {
+    const idx0 = ownedIndices[0];
+    if (idx0 !== undefined) {
+      const before = existingArr[idx0];
+      if (before !== undefined && entryMatchesBaseline(before, eventName, desiredSpec)) {
+        return { entries: existingArr, changed: false };
+      }
+    }
+  }
+
+  // Either there are duplicates OR the single owned entry diverges from
+  // baseline. Strip every owned entry, append the canonical one.
+  const ownedSet = new Set(ownedIndices);
+  const next: ClaudeHookEntry[] = [];
+  for (let i = 0; i < existingArr.length; i++) {
+    if (!ownedSet.has(i)) {
+      const item = existingArr[i];
+      if (item !== undefined) next.push(item);
+    }
+  }
+  next.push(desired);
+  return { entries: next, changed: true };
 }
 
 export interface MergeClaudeSettingsResult {
@@ -170,13 +290,15 @@ export interface MergeClaudeSettingsResult {
 }
 
 /**
- * Idempotent merge of ContextOS's four hook entries into
+ * Idempotent merge of ContextOS's hook entries into
  * `~/.claude/settings.json`. Creates the parent directory + file if
  * absent. Backs up the original on first divergent write.
  */
 export async function mergeClaudeSettings(options: ClaudeSettingsMergeOptions): Promise<MergeClaudeSettingsResult> {
   const path = options.settingsPath ?? defaultClaudeSettingsPath();
   const desiredSpec = buildContextosHookSpec(options);
+  const host = options.bridgeHost ?? '127.0.0.1';
+  const bridgeUrlPrefix = `http://${host}:${options.bridgePort}/v1/hooks/claude-code`;
 
   let raw: string | null = null;
   try {
@@ -205,7 +327,12 @@ export async function mergeClaudeSettings(options: ClaudeSettingsMergeOptions): 
   let anyChanged = false;
   const updates: Partial<Record<ClaudeHookEvent, ClaudeHookEntry[]>> = {};
   for (const eventName of CLAUDE_HOOK_EVENTS) {
-    const merged = mergeEventEntries(hooksBlock[eventName] as ClaudeHookEntry[] | undefined, desiredSpec);
+    const merged = mergeEventEntries(
+      eventName,
+      hooksBlock[eventName] as ClaudeHookEntry[] | undefined,
+      desiredSpec,
+      bridgeUrlPrefix,
+    );
     updates[eventName] = merged.entries;
     if (merged.changed) anyChanged = true;
   }
@@ -213,8 +340,23 @@ export async function mergeClaudeSettings(options: ClaudeSettingsMergeOptions): 
   if (!anyChanged && !options.force) {
     return {
       path,
-      outcome: { path, action: 'unchanged', notes: 'all four ContextOS hook entries already match baseline' },
+      outcome: { path, action: 'unchanged', notes: 'all ContextOS hook entries already match Phase 4 Fix F baseline' },
     };
+  }
+
+  // When --force is set on an already-current install, regenerate
+  // every entry to canonical baseline (drops any duplicate owned
+  // entries, restores matchers if locally edited).
+  if (!anyChanged && options.force) {
+    for (const eventName of CLAUDE_HOOK_EVENTS) {
+      const desired = buildContextosEntryForEvent(eventName, desiredSpec);
+      updates[eventName] = [
+        ...((hooksBlock[eventName] as ClaudeHookEntry[] | undefined) ?? []).filter(
+          (e) => !isContextosOwnedEntry(e, bridgeUrlPrefix),
+        ),
+        desired,
+      ];
+    }
   }
 
   const next: ClaudeSettings = {
@@ -267,10 +409,13 @@ export async function mergeClaudeSettings(options: ClaudeSettingsMergeOptions): 
       action: raw === null ? 'wrote' : options.force ? 'forced' : 'merged',
       notes:
         raw === null
-          ? 'created baseline ~/.claude/settings.json with ContextOS hook entries'
+          ? 'created baseline ~/.claude/settings.json with ContextOS hook entries (Phase 4 Fix F matcher)'
           : options.force
-            ? 'overwrote ContextOS hook entries with baseline'
-            : 'updated ContextOS hook entries (existing user hooks preserved)',
+            ? 'overwrote ContextOS hook entries with Phase 4 Fix F baseline'
+            : 'updated ContextOS hook entries (existing user hooks preserved; legacy __contextos__ matcher migrated)',
     },
   };
 }
+
+// Internal exports for tests.
+export { LEGACY_CONTEXTOS_MATCHER, TOOL_EVENT_MATCHER };
