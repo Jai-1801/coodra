@@ -26,10 +26,23 @@ const isSolo = (process.env.CONTEXTOS_MODE ?? 'solo') === 'solo';
 
 export default isSolo
   ? soloMiddleware
-  : clerkMiddleware(async (auth, req) => {
-      if (isPublic(req)) return;
-      await auth.protect();
-    });
+  : clerkMiddleware(
+      async (auth, req) => {
+        if (isPublic(req)) return;
+        // Clerk's default behaviour for unauthenticated requests is to
+        // throw notFound() (which renders our /not-found page) — that's
+        // not the right UX for a protected route. Manually redirect
+        // unauthenticated requests to /auth/sign-in so the user lands
+        // on Clerk's hosted form.
+        const session = await auth();
+        if (session.userId === null || session.userId === undefined) {
+          const signInUrl = new URL('/auth/sign-in', req.url);
+          signInUrl.searchParams.set('redirect_url', req.nextUrl.pathname + req.nextUrl.search);
+          return NextResponse.redirect(signInUrl);
+        }
+      },
+      { signInUrl: '/auth/sign-in' },
+    );
 
 function soloMiddleware(req: NextRequest): NextResponse | undefined {
   if (isSoloOnly404(req)) {

@@ -1,6 +1,8 @@
+import { OrganizationSwitcher, UserButton } from '@clerk/nextjs';
 import Link from 'next/link';
 
 import type { Actor } from '@/lib/auth';
+import { clerkAppearance } from '@/lib/clerk-appearance';
 import { SoloModeBadge } from './SoloModeBadge';
 
 /**
@@ -50,7 +52,21 @@ export function HeaderNav({ actor }: HeaderNavProps) {
         ))}
       </nav>
 
-      <div className="flex items-center gap-4">{actor.mode === 'solo' ? <SoloModeBadge /> : null}</div>
+      <div className="flex items-center gap-4">
+        {actor.mode === 'solo' ? (
+          <SoloModeBadge />
+        ) : (
+          <>
+            <OrganizationSwitcher
+              appearance={clerkAppearance}
+              hidePersonal
+              afterCreateOrganizationUrl="/"
+              afterSelectOrganizationUrl="/"
+            />
+            <UserButton appearance={clerkAppearance} userProfileUrl="/settings/account" />
+          </>
+        )}
+      </div>
     </header>
   );
 }
