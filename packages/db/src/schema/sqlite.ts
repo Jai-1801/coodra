@@ -160,7 +160,18 @@ export const policyRules = sqliteTable(
     reason: text('reason').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
   },
-  (t) => [index('policy_rules_policy_priority_idx').on(t.policyId, t.priority)],
+  (t) => [
+    index('policy_rules_policy_priority_idx').on(t.policyId, t.priority),
+    // Slice 7 (2026-05-03 audit §14.2): backstops ensureDefaultPolicy's
+    // application-layer idempotency. Pre-Slice-7 the table had no UNIQUE
+    // constraint, so any raw INSERT (presentation/setup.sh's pre-Fix-F
+    // hand-rolled block, future admin commands, debugging sessions) could
+    // introduce duplicate rows. Slice 6 deletes the setup.sh inserter;
+    // Slice 7 makes the schema enforce what ensureDefaultPolicy already
+    // checks via WHERE NOT EXISTS so the invariant survives even when
+    // the application layer is bypassed.
+    uniqueIndex('policy_rules_dedup_uk').on(t.policyId, t.priority, t.matchEventType, t.matchToolName, t.matchPathGlob),
+  ],
 );
 
 export const policyDecisions = sqliteTable(

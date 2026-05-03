@@ -149,7 +149,14 @@ export const policyRules = pgTable(
     reason: text('reason').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
-  (t) => [index('policy_rules_policy_priority_idx').on(t.policyId, t.priority)],
+  (t) => [
+    index('policy_rules_policy_priority_idx').on(t.policyId, t.priority),
+    // Slice 7 (2026-05-03 audit §14.2): mirror of the SQLite UNIQUE
+    // constraint. Backstops ensureDefaultPolicy's application-layer
+    // idempotency check so future raw-SQL adventurism cannot reintroduce
+    // duplicates. See sqlite.ts comment for full rationale.
+    uniqueIndex('policy_rules_dedup_uk').on(t.policyId, t.priority, t.matchEventType, t.matchToolName, t.matchPathGlob),
+  ],
 );
 
 export const policyDecisions = pgTable(

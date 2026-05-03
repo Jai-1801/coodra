@@ -20,6 +20,7 @@ export {
   insertRun,
   insertRunEvent,
 } from './destinations.js';
+export { type EnsureDefaultPolicyResult, ensureDefaultPolicy } from './ensure-default-policy.js';
 export { ensureGlobalProject, GLOBAL_PROJECT_ID, GLOBAL_PROJECT_SLUG } from './ensure-global-project.js';
 export {
   type EnsureProjectArgs,
@@ -27,7 +28,6 @@ export {
   ensureProject,
   SOLO_ORG_ID,
 } from './ensure-project.js';
-export { type EnsureDefaultPolicyResult, ensureDefaultPolicy } from './ensure-default-policy.js';
 export { lookupRunId } from './lookup-run.js';
 export {
   ensurePgVector,

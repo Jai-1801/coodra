@@ -257,3 +257,62 @@ describe('@coodra/contextos-db::ensureDefaultPolicy', () => {
     expect(last?.priority).toBe(95);
   });
 });
+
+/**
+ * Slice 7 (2026-05-03 audit §14.2) — UNIQUE constraint backstop.
+ * Verifies that the schema's UNIQUE INDEX on
+ *   (policy_id, priority, match_event_type, match_tool_name, match_path_glob)
+ * actually fires when a duplicate INSERT bypasses ensureDefaultPolicy's
+ * application-layer WHERE NOT EXISTS guard. Pre-Slice-7 the duplicate
+ * would silently succeed (the audit observed 9 priority-1 rows in the
+ * demo DB where 3 was the design intent).
+ */
+describe('Slice 7 — policy_rules UNIQUE constraint enforces', () => {
+  it('a second raw INSERT with the same key tuple aborts with a constraint violation', async () => {
+    const project = await ensureProject(handle, { slug: 'slice7-uk-test', orgId: 'org_dev_local' });
+    const result = await ensureDefaultPolicy(handle, project.id);
+    if (handle.kind !== 'sqlite') throw new Error('expected sqlite handle for raw INSERT');
+
+    // Pick the first rule from the seeded set via raw SQL (drizzle's
+    // .where(eq(...)) with the joined Date type was producing a
+    // "Too few parameters" binding error in this specific test
+    // context; raw prepare is unambiguous and matches what
+    // ensure-default-policy.ts itself uses).
+    const target = handle.raw
+      .prepare(
+        'SELECT priority, match_event_type AS matchEventType, match_tool_name AS matchToolName, match_path_glob AS matchPathGlob FROM policy_rules WHERE policy_id = ? LIMIT 1',
+      )
+      .get(result.policyId) as
+      | { priority: number; matchEventType: string; matchToolName: string; matchPathGlob: string | null }
+      | undefined;
+    expect(target).toBeDefined();
+    if (!target) return;
+
+    // Raw INSERT bypassing ensureDefaultPolicy's WHERE NOT EXISTS. The
+    // UNIQUE INDEX on (policy_id, priority, match_event_type,
+    // match_tool_name, match_path_glob) MUST reject this. Pre-Slice-7
+    // it would have silently succeeded and produced a duplicate row.
+    let thrown: unknown;
+    try {
+      handle.raw
+        .prepare(
+          `INSERT INTO policy_rules (id, policy_id, priority, match_event_type, match_tool_name, match_path_glob, decision, reason, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))`,
+        )
+        .run(
+          'duplicate-row-id',
+          result.policyId,
+          target.priority,
+          target.matchEventType,
+          target.matchToolName,
+          target.matchPathGlob,
+          'deny',
+          'duplicate attempt — should be rejected',
+        );
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeDefined();
+    expect((thrown as Error).message).toMatch(/UNIQUE|policy_rules_dedup_uk/);
+  });
+});

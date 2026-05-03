@@ -43,6 +43,13 @@
       "when": 1777405200000,
       "tag": "0005_silent_thanos",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777805841619,
+      "tag": "0006_lush_switch",
+      "breakpoints": true
     }
   ]
 }

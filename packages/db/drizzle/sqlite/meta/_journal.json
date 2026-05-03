@@ -43,6 +43,13 @@
       "when": 1777405200000,
       "tag": "0005_lonely_thanos",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1777805798275,
+      "tag": "0006_clumsy_banshee",
+      "breakpoints": true
     }
   ]
 }
