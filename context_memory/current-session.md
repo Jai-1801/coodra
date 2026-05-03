@@ -96,3 +96,8 @@ S1 closeout (this commit): `kill_switches` table + migration `0007_*` + 5 helper
 - [HH:mm] S4 — wired `logs <service>` into program.ts (now 11 top-level commands)
 - [HH:mm] S4 — wrote 7 log-reader unit fixtures, 7 logs-command unit fixtures, 1 integration roundtrip (100-line file → last 10 via --lines 10)
 - [HH:mm] S4 — refreshed help-output snapshot to include `logs` entry; lint clean, 170/170 CLI unit + 1/1 S4 integration green
+- [HH:mm] S4 committed (`ebab44a`): logs <service> command with reverse-seek tail + JSON-time --since filter
+- [HH:mm] S5 — wrote `packages/cli/src/commands/db-migrate.ts` (idempotent migrate; daemons-running refusal via pid-status; --dry-run reports pendingBefore via on-disk-files vs __drizzle_migrations row count diff; --with-daemons-running escape hatch; loads sqlite-vec extension because migration 0001 creates the vec0 virtual table)
+- [HH:mm] S5 — wired `db migrate` under a new `db` subcommand parent in program.ts (12 top-level commands now: cloud-migrate, db, doctor, init, logs, pause, resume, start, status, stop, team)
+- [HH:mm] S5 — wrote 5 integration fixtures (clean DB applies all, re-run is no-op, alive daemon → exit 1, --dry-run no mutation, --with-daemons-running bypasses)
+- [HH:mm] S5 — refreshed help-output snapshot, lint clean, 170/170 CLI unit + 5/5 S5 integration green

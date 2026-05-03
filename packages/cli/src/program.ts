@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { type CloudMigrateIO, type CloudMigrateOptions, runCloudMigrateCommand } from './commands/cloud-migrate.js';
+import { type DbMigrateIO, type DbMigrateOptions, runDbMigrateCommand } from './commands/db-migrate.js';
 import { type DoctorIO, type DoctorOptions, runDoctorCommand } from './commands/doctor.js';
 import { type InitIO, type InitOptions, runInitCommand } from './commands/init.js';
 import { type LogsIO, type LogsOptions, runLogsCommand } from './commands/logs.js';
@@ -44,6 +45,8 @@ interface BuildProgramOptions {
   readonly runResume?: (options: ResumeOptions, io?: ResumeIO) => Promise<unknown>;
   readonly logsIO?: LogsIO;
   readonly runLogs?: (service: string, options: LogsOptions, io?: LogsIO) => Promise<unknown>;
+  readonly dbMigrateIO?: DbMigrateIO;
+  readonly runDbMigrate?: (options: DbMigrateOptions, io?: DbMigrateIO) => Promise<unknown>;
 }
 
 /**
@@ -139,6 +142,23 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     .option('--json', 'Emit a structured JSON report.')
     .action(async (opts: CloudMigrateOptions) => {
       await cloudMigrateRunner(opts, options.cloudMigrateIO);
+    });
+
+  // Module 08b S5 — `db migrate` standalone surface.
+  const db = program.command('db').description('Database administration: migrate the local SQLite primary store.');
+  const dbMigrateRunner = options.runDbMigrate ?? runDbMigrateCommand;
+  db.command('migrate')
+    .description(
+      'Apply pending Drizzle migrations to ~/.contextos/data.db. Idempotent. Refuses if any daemon is alive (use --with-daemons-running to override).',
+    )
+    .option('--dry-run', 'Report pending count without applying.')
+    .option(
+      '--with-daemons-running',
+      'Skip the alive-daemon refusal (advanced; data corruption risk if daemons hold open writers).',
+    )
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (opts: DbMigrateOptions) => {
+      await dbMigrateRunner(opts, options.dbMigrateIO);
     });
 
   // Module 08b S4 — log tail/read.
