@@ -7,7 +7,7 @@ import pc from 'picocolors';
 import { EXIT_ENVIRONMENT_PROBLEM, EXIT_OK, EXIT_USER_ACTION_REQUIRED, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosHome, resolveContextosLogsDir, resolveContextosPidsDir } from '../lib/contextos-home.js';
 import { detectIDE, detectLanguages, detectProjectRoot } from '../lib/detect.js';
-import { mergeClaudeSettings } from '../lib/init/claude-settings-merge.js';
+import { defaultClaudeSettingsPath, mergeClaudeSettings } from '../lib/init/claude-settings-merge.js';
 import { writeContextosJson } from '../lib/init/contextos-json.js';
 import { type BaselineEnv, mergeEnvFile } from '../lib/init/env-merge.js';
 import { seedFeaturePack } from '../lib/init/feature-pack-seed.js';
@@ -224,7 +224,7 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
   // shipping every fresh install of ContextOS without hooks wired.
   try {
     const claudeMerge = await mergeClaudeSettings({
-      settingsPath: join(userHome, '.claude', 'settings.json'),
+      settingsPath: defaultClaudeSettingsPath(userHome),
       bridgePort: Number(baselineEnv.HOOKS_BRIDGE_PORT),
       force,
       dryRun,
