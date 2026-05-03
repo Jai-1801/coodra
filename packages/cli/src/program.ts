@@ -61,6 +61,13 @@ import {
   type TeamCommandIO,
   type TeamLoginOptions,
 } from './commands/team.js';
+import {
+  runTemplateInstallCommand,
+  runTemplateListCommand,
+  type TemplateInstallOptions,
+  type TemplateIO,
+  type TemplateListOptions,
+} from './commands/template.js';
 import { runUninstallCommand, type UninstallIO, type UninstallOptions } from './commands/uninstall.js';
 import { runUpgradeCommand, type UpgradeIO, type UpgradeOptions } from './commands/upgrade.js';
 import { VERSION } from './version.js';
@@ -133,6 +140,9 @@ interface BuildProgramOptions {
   readonly runPackShow?: (slug: string, options: PackShowOptions, io?: PackIO) => Promise<unknown>;
   readonly runPackRegenerate?: (slug: string, options: PackRegenerateOptions, io?: PackIO) => Promise<unknown>;
   readonly runPackDelete?: (slug: string, options: PackDeleteOptions, io?: PackIO) => Promise<unknown>;
+  readonly templateIO?: TemplateIO;
+  readonly runTemplateList?: (options: TemplateListOptions, io?: TemplateIO) => Promise<unknown>;
+  readonly runTemplateInstall?: (source: string, options: TemplateInstallOptions, io?: TemplateIO) => Promise<unknown>;
 }
 
 /**
@@ -391,6 +401,29 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     )
     .action(async (runId: string, opts: ExportOptions) => {
       await exportRunner(runId, opts, options.exportIO);
+    });
+
+  // Module 08b S17 — template admin (list, install).
+  const tmpl = program.command('template').description('Manage feature-pack templates (bundled + user-installed).');
+  const templateListRunner = options.runTemplateList ?? runTemplateListCommand;
+  tmpl
+    .command('list')
+    .description(
+      'List every available template (bundled + user-installed). User templates with the same name shadow bundled.',
+    )
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (opts: TemplateListOptions) => {
+      await templateListRunner(opts, options.templateIO);
+    });
+  const templateInstallRunner = options.runTemplateInstall ?? runTemplateInstallCommand;
+  tmpl
+    .command('install <source>')
+    .description('Copy a local template directory into ~/.contextos/templates/<name>/ for re-use across projects.')
+    .option('--name <override>', 'Install under a different name than the source template.json#name.')
+    .option('--force', 'Overwrite an existing user template at this name.')
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (source: string, opts: TemplateInstallOptions) => {
+      await templateInstallRunner(source, opts, options.templateIO);
     });
 
   // Module 08b S16 — pack admin (new, list, show, regenerate, delete).

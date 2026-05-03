@@ -1,0 +1,12 @@
+{
+  "name": "go-service",
+  "description": "Go HTTP service — net/http + slog + clean-architecture layout under cmd/ + internal/.",
+  "version": "1.0.0",
+  "languages": ["go"],
+  "detect": {
+    "files": [],
+    "packageJsonDeps": [],
+    "goModPresent": true
+  },
+  "autoSections": ["overview", "directory-structure", "scripts", "entry-points", "dependencies"]
+}
