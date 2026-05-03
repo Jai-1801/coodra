@@ -51,7 +51,7 @@ async function resolveProjectId(db: DbHandle, projectSlug: string): Promise<stri
   return rows[0]?.id ?? null;
 }
 
-type RunStatus = 'in_progress' | 'completed' | 'failed';
+type RunStatus = 'in_progress' | 'completed' | 'failed' | 'abandoned';
 
 interface RawRow {
   readonly runId: string;
@@ -117,7 +117,9 @@ async function selectRuns(
 
 function toEntry(row: RawRow): RunHistoryEntry {
   const status: RunStatus =
-    row.status === 'in_progress' || row.status === 'completed' || row.status === 'failed' ? row.status : 'in_progress';
+    row.status === 'in_progress' || row.status === 'completed' || row.status === 'failed' || row.status === 'abandoned'
+      ? row.status
+      : 'in_progress';
   return {
     runId: row.runId,
     startedAt: row.startedAt.toISOString(),

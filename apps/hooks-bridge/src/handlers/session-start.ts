@@ -3,6 +3,7 @@ import { createLogger } from '@coodra/contextos-shared';
 import type { HookEvent } from '@coodra/contextos-shared/hooks';
 
 import type { HookDispatchResult } from '../app.js';
+import { abandonStaleInProgressRuns } from '../lib/abandon-stale-runs.js';
 import { loadFeaturePackForSession } from '../lib/feature-pack-loader.js';
 import type { ProjectSlugResolver } from '../lib/resolve-project-slug.js';
 import type { RunRecorder } from '../lib/run-recorder.js';
@@ -55,6 +56,30 @@ export function createSessionStartHandler(deps: CreateSessionStartHandlerDeps): 
     }
     const { slug, projectId } = await deps.projectSlugResolver.resolve(event.cwd, deps.db);
     deps.runRecorder.recordSessionStart({ event, projectId, mode: deps.mode });
+
+    // Slice 8 (2026-05-03 audit §14.3): fire-and-forget orphan cleanup.
+    // Mark prior in_progress runs for the same project as 'abandoned'
+    // so query_run_history doesn't surface them as live work. Excludes
+    // the just-arrived session_id so we never clobber the run the
+    // outbox is about to insert. Errors are logged + swallowed in the
+    // helper — the SessionStart response should not block on cleanup.
+    if (typeof projectId === 'string' && projectId.length > 0) {
+      void abandonStaleInProgressRuns({
+        db: deps.db,
+        projectId,
+        excludeSessionId: event.sessionId,
+      }).catch((err) => {
+        sessionStartLogger.warn(
+          {
+            event: 'abandon_stale_runs_failed',
+            sessionId: event.sessionId,
+            projectId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'fire-and-forget orphan cleanup threw; SessionStart response unaffected',
+        );
+      });
+    }
 
     let additionalContext: string | undefined;
     const slugValue = typeof slug === 'string' && slug.length > 0 ? slug : null;

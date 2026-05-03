@@ -24,7 +24,12 @@ const DEFAULT_LIMIT = 10 as const;
 export const queryRunHistoryInputSchema = z
   .object({
     projectSlug: z.string().min(1, 'projectSlug is required').max(256),
-    status: z.enum(['in_progress', 'completed', 'failed']).optional(),
+    // Slice 8 (2026-05-03 audit §14.3): 'abandoned' is the new status
+    // bridge SessionStart sets on prior in_progress runs that never
+    // received a SessionEnd. Surfaced here so an agent can ask "show me
+    // the runs that were abandoned" if needed; default behaviour
+    // (status omitted) returns every status including 'abandoned'.
+    status: z.enum(['in_progress', 'completed', 'failed', 'abandoned']).optional(),
     limit: z
       .number()
       .int()
@@ -48,7 +53,7 @@ const runEntrySchema = z
     runId: z.string().min(1),
     startedAt: z.string().datetime().describe('ISO 8601 timestamp the run row was created.'),
     endedAt: z.string().datetime().nullable().describe('ISO 8601 end timestamp; null for in-progress runs.'),
-    status: z.enum(['in_progress', 'completed', 'failed']),
+    status: z.enum(['in_progress', 'completed', 'failed', 'abandoned']),
     title: z.string().nullable().describe('Context-pack title for the run, or null if no pack exists yet.'),
     issueRef: z.string().nullable().describe('JIRA issue key; null until the JIRA integration binds one.'),
     prRef: z.string().nullable().describe('GitHub PR ref; null until the GitHub integration binds one.'),
