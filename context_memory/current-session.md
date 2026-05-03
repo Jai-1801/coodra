@@ -110,3 +110,10 @@ S1 closeout (this commit): `kill_switches` table + migration `0007_*` + 5 helper
 - [HH:mm] S6 — bug fix during testing: `io.exit()` throw was being caught by my outer try/catch in runSqliteBackup masking success as a SQLite error — restructured to capture success state and exit AFTER the try
 - [HH:mm] S6 — wrote 6 integration fixtures (default sqlite backup, --include-logs tarball with member assertions, byte-identical roundtrip, alive-daemon refusal, magic-bytes rejection of fake .txt source, auto-backup-of-current preserves prior bytes)
 - [HH:mm] S6 — refreshed help-output snapshot, lint clean, 170/170 CLI unit + 6/6 S6 integration green
+- [HH:mm] S6 committed (`7e23443`): db backup + restore (with `tar` dep)
+- [HH:mm] S7 — added `semver ^7.6.3` + `@types/semver ^7.7.1` to packages/cli devDependencies
+- [HH:mm] S7 — wrote `packages/cli/src/lib/npm-view.ts` (5s execa wrapper + structured NpmViewError discriminated by code: spawn_failed | non_zero_exit | parse_failed)
+- [HH:mm] S7 — wrote `packages/cli/src/commands/upgrade.ts` (3-state orchestrator: newer_available exits 2 + prints install command, up_to_date exits 0 + runs migrate + restart, check_failed exits 1; --check-only skips migrate+restart; --no-restart skips restart only; never self-updates per Windows-binary-overwrite + symlink-mid-update concerns)
+- [HH:mm] S7 — wired upgrade into program.ts (13 top-level commands now: cloud-migrate, db, doctor, init, logs, pause, resume, start, status, stop, team, upgrade)
+- [HH:mm] S7 — wrote 6 unit fixtures (5 spec + 1 bonus for downgrade scenario)
+- [HH:mm] S7 — refreshed help-output snapshot, lint clean, 176/176 CLI unit green

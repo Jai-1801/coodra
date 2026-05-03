@@ -189,6 +189,9 @@ importers:
       '@types/node':
         specifier: ^22.15.0
         version: 22.19.17
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.7.1
       commander:
         specifier: ^13.1.0
         version: 13.1.0
@@ -210,6 +213,9 @@ importers:
       picocolors:
         specifier: ^1.1.1
         version: 1.1.1
+      semver:
+        specifier: ^7.6.3
+        version: 7.7.4
       tar:
         specifier: ^7.4.3
         version: 7.5.13
@@ -1147,6 +1153,9 @@ packages:
 
   '@types/picomatch@4.0.2':
     resolution: {integrity: sha512-qHHxQ+P9PysNEGbALT8f8YOSHW0KJu6l2xU8DYY0fu/EmGxXdVnuTLvFUvBgPJMSqXq29SYHveejeAha+4AYgA==}
+
+  '@types/semver@7.7.1':
+    resolution: {integrity: sha512-FmgJfu+MOcQ370SD0ev7EI8TlCAfKYU+B4m5T3yXc1CiRN94g/SZPtsCkk506aUDtlMnFZvasDwHHUcZUEaYuA==}
 
   '@types/ssh2-streams@0.1.13':
     resolution: {integrity: sha512-faHyY3brO9oLEA0QlcO8N2wT7R0+1sHWZvQ+y3rMLwdY1ZyS1z0W3t65j9PqT4HmQ6ALzNe7RZlNuCNE0wBSWA==}
@@ -3318,6 +3327,8 @@ snapshots:
       undici-types: 6.21.0
 
   '@types/picomatch@4.0.2': {}
+
+  '@types/semver@7.7.1': {}
 
   '@types/ssh2-streams@0.1.13':
     dependencies:

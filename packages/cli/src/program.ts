@@ -17,6 +17,7 @@ import {
   type TeamCommandIO,
   type TeamLoginOptions,
 } from './commands/team.js';
+import { runUpgradeCommand, type UpgradeIO, type UpgradeOptions } from './commands/upgrade.js';
 import { VERSION } from './version.js';
 
 interface BuildProgramOptions {
@@ -53,6 +54,8 @@ interface BuildProgramOptions {
   readonly runDbBackup?: (options: DbBackupOptions, io?: DbBackupIO) => Promise<unknown>;
   readonly dbRestoreIO?: DbRestoreIO;
   readonly runDbRestore?: (source: string, options: DbRestoreOptions, io?: DbRestoreIO) => Promise<unknown>;
+  readonly upgradeIO?: UpgradeIO;
+  readonly runUpgrade?: (options: UpgradeOptions, io?: UpgradeIO) => Promise<unknown>;
 }
 
 /**
@@ -191,6 +194,20 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     .option('--json', 'Emit a structured JSON report.')
     .action(async (source: string, opts: DbRestoreOptions) => {
       await dbRestoreRunner(source, opts, options.dbRestoreIO);
+    });
+
+  // Module 08b S7 — version-aware orchestration around npm install.
+  const upgradeRunner = options.runUpgrade ?? runUpgradeCommand;
+  program
+    .command('upgrade')
+    .description(
+      'Check for a newer @coodra/contextos-cli on npm. Does NOT self-update — prints the install command. After install, re-run to apply migrations + restart daemons.',
+    )
+    .option('--check-only', 'Print the version comparison and exit; never restart or migrate.')
+    .option('--no-restart', 'Skip the daemon restart after a same-version no-op upgrade.')
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (opts: UpgradeOptions) => {
+      await upgradeRunner(opts, options.upgradeIO);
     });
 
   // Module 08b S4 — log tail/read.

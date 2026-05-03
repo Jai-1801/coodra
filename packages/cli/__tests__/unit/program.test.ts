@@ -14,7 +14,7 @@ describe('buildProgram — full surface (post-S8)', () => {
     exitSpy.mockRestore();
   });
 
-  it('registers all 12 top-level subcommands (M08a 8 + M08b S3 pause/resume + S4 logs + S5 db)', () => {
+  it('registers all 13 top-level subcommands (M08a 8 + M08b S3-S7: pause/resume/logs/db/upgrade)', () => {
     const program = buildProgram();
     const top = program.commands.map((c) => c.name()).sort();
     expect(top).toEqual([
@@ -29,6 +29,7 @@ describe('buildProgram — full surface (post-S8)', () => {
       'status',
       'stop',
       'team',
+      'upgrade',
     ]);
 
     const team = program.commands.find((c) => c.name() === 'team');

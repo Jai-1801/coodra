@@ -39,6 +39,10 @@ describe('contextos --help (snapshot-locked surface)', () => {
                                   Module 04a OQ4.
         db                        Database administration: migrate / backup / restore
                                   the local SQLite primary store.
+        upgrade [options]         Check for a newer @coodra/contextos-cli on npm. Does
+                                  NOT self-update — prints the install command. After
+                                  install, re-run to apply migrations + restart
+                                  daemons.
         logs [options] <service>  Tail or print recent lines from
                                   ~/.contextos/logs/<service>.log. Pure file-read; no
                                   DB. Service ∈ {mcp-server, hooks-bridge,
