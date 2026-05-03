@@ -29,6 +29,15 @@ import {
   runProjectShowCommand,
 } from './commands/project.js';
 import { type ResumeIO, type ResumeOptions, runResumeCommand } from './commands/resume.js';
+import {
+  type RunCancelOptions,
+  type RunIO,
+  type RunListOptions,
+  type RunShowOptions,
+  runRunCancelCommand,
+  runRunListCommand,
+  runRunShowCommand,
+} from './commands/run.js';
 import { runStartCommand, type StartIO, type StartOptions } from './commands/start.js';
 import { runStatusCommand, type StatusIO, type StatusOptions } from './commands/status.js';
 import { runStopCommand, type StopIO, type StopOptions } from './commands/stop.js';
@@ -98,6 +107,10 @@ interface BuildProgramOptions {
   readonly runProjectList?: (options: ProjectListOptions, io?: ProjectIO) => Promise<unknown>;
   readonly runProjectShow?: (identifier: string, options: ProjectShowOptions, io?: ProjectIO) => Promise<unknown>;
   readonly runProjectReset?: (identifier: string, options: ProjectResetOptions, io?: ProjectIO) => Promise<unknown>;
+  readonly runIO?: RunIO;
+  readonly runRunList?: (options: RunListOptions, io?: RunIO) => Promise<unknown>;
+  readonly runRunShow?: (runId: string, options: RunShowOptions, io?: RunIO) => Promise<unknown>;
+  readonly runRunCancel?: (runId: string, options: RunCancelOptions, io?: RunIO) => Promise<unknown>;
 }
 
 /**
@@ -327,6 +340,39 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     .option('--json', 'Emit a structured JSON report.')
     .action(async (identifier: string, opts: ProjectResetOptions) => {
       await projectResetRunner(identifier, opts, options.projectIO);
+    });
+
+  // Module 08b S11 — run admin (list, show, cancel).
+  const run = program.command('run').description('Inspect + cancel rows in the `runs` table.');
+  const runListRunner = options.runRunList ?? runRunListCommand;
+  run
+    .command('list')
+    .description('List recent runs, optionally filtered by project / status / limit.')
+    .option('--project <slug>', 'Filter to one project slug.')
+    .option('--status <status>', 'Filter to one status (in_progress | completed | failed | abandoned | cancelled).')
+    .option('--limit <n>', 'Max rows to return (default 20; max 1000).')
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (opts: RunListOptions) => {
+      await runListRunner(opts, options.runIO);
+    });
+  const runShowRunner = options.runRunShow ?? runRunShowCommand;
+  run
+    .command('show <runId>')
+    .description('Print one run + every related row (events, policy_decisions, decisions, context pack).')
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (runId: string, opts: RunShowOptions) => {
+      await runShowRunner(runId, opts, options.runIO);
+    });
+  const runCancelRunner = options.runRunCancel ?? runRunCancelCommand;
+  run
+    .command('cancel <runId>')
+    .description(
+      'Mark a run as cancelled (status=cancelled, ended_at=now). Informational only — bridge keeps recording any post-cancel events. Refuses on already-terminal runs.',
+    )
+    .option('--force', 'Reserved for future use; currently has no effect.')
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (runId: string, opts: RunCancelOptions) => {
+      await runCancelRunner(runId, opts, options.runIO);
     });
 
   // Module 08b S8 — reverse `init` writes.

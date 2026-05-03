@@ -139,3 +139,9 @@ S1 closeout (this commit): `kill_switches` table + migration `0007_*` + 5 helper
 - [HH:mm] S10 — wired into program.ts (16 top-level commands)
 - [HH:mm] S10 — functest: list/show worked, refusals correct (no --force → exit 2; __global__ → exit 1), `reset --force` deleted 2 runs + 3 run_events with returned counts matching DB state
 - [HH:mm] S10 — refreshed snapshots, lint clean, 176/176 unit pass
+- [HH:mm] S10 committed (`0c0e11e`): project admin commands
+- [HH:mm] S11 — wrote `packages/db/src/runs-admin.ts` (3 helpers: `listRunsForProject` with status/limit filters; `getRunWithEverything` bundles run + events + policy_decisions + decisions + contextPack; `cancelRun` returns discriminated `{status: 'cancelled'|'not_found'|'already_terminal', run?}`)
+- [HH:mm] S11 — wrote `packages/cli/src/commands/run.ts` (3 subcommands; cancel maps `already_terminal` → exit 2 per OQ-6; show formats human-readable timeline grouped by table; --json emits structured object)
+- [HH:mm] S11 — wired into program.ts (17 top-level commands)
+- [HH:mm] S11 — functest: list with status filter, show full timeline (1 event + 1 policy_decision + 1 decision + null context_pack), cancel in_progress→cancelled with ended_at set, exit 2 on already-terminal completed run, exit 1 on unknown id
+- [HH:mm] S11 — refreshed snapshots, lint clean, 176/176 unit pass

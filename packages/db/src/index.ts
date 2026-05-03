@@ -66,6 +66,19 @@ export {
   resetProject,
 } from './projects.js';
 export {
+  type CancelRunResult,
+  cancelRun,
+  type ContextPackRow,
+  type DecisionRow,
+  getRunWithEverything,
+  type ListRunsFilter,
+  listRunsForProject,
+  type PolicyDecisionRow,
+  type RunEventRow,
+  type RunRow,
+  type RunWithEverything,
+} from './runs-admin.js';
+export {
   ensurePgVector,
   MIGRATIONS_FOLDER,
   migratePostgres,
