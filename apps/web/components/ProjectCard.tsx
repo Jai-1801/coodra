@@ -5,11 +5,12 @@ import { relativeTime } from '@/lib/format';
 
 /**
  * `apps/web/components/ProjectCard.tsx` — project tile for the `/`
- * picker hub (M04 Phase 2 S2b).
+ * picker hub (M04 Phase 2 S2b, restyled in Phase 2 UI).
  *
- * Whole card is a clickable Link to `/projects/[slug]`. Layout per
- * spec §7.3 sketch: name + status dot at top; 4 metrics in a strip;
- * last-activity + org footer.
+ * Whole card is a clickable Link to `/projects/[slug]`. Adds smooth
+ * hover transition (consistent with Tile / Card primitives) +
+ * cursor-pointer + the project name styled in mono normal-case for
+ * better legibility against the hover state.
  */
 
 export interface ProjectCardProps {
@@ -31,15 +32,13 @@ export function ProjectCard(props: ProjectCardProps) {
       href={`/projects/${encodeURIComponent(props.slug)}` as never}
       data-testid="project-card"
       data-slug={props.slug}
-      className="group flex flex-col border border-(--color-border-subtle) bg-(--color-bg-surface) hover:border-(--color-brand)"
+      className="group flex cursor-pointer flex-col border border-(--color-border-subtle) bg-(--color-bg-surface) transition-colors duration-200 hover:border-(--color-brand) hover:bg-(--color-bg-elevated)"
     >
       <div className="flex items-center gap-3 border-b border-(--color-border-subtle) px-6 py-4">
-        <h3 className="font-mono text-base font-medium uppercase tracking-wider text-(--color-text-primary)">
-          {props.slug}
-        </h3>
+        <h3 className="font-mono text-base font-medium text-(--color-text-primary)">{props.slug}</h3>
         <span className="ml-auto inline-flex items-center gap-2">
           <StatusDot kind={props.statusDot} />
-          <span className="font-display text-[10px] font-bold uppercase tracking-wider text-(--color-text-tertiary)">
+          <span className="font-display text-[10px] font-bold uppercase tracking-widest text-(--color-text-tertiary)">
             {props.statusDot}
           </span>
         </span>

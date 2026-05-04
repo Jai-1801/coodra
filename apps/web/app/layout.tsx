@@ -50,15 +50,24 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     >
       <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
         <body>
+          {/*
+           * Skip-to-main link (M04 Phase 2 UI a11y) — visible on
+           * keyboard focus only. Tabbing from the URL bar hits this
+           * first; activating jumps past HeaderNav + project layout's
+           * project bar + ProjectSubNav into the page <main>. The
+           * matching `id="main"` is set by either the workspace
+           * PageShell or the project layout, depending on route.
+           */}
+          <a href="#main" className="skip-to-main">
+            Skip to main content
+          </a>
           <HeaderNav actor={actor} />
           <Breadcrumb />
           {/* M04 Phase 2 S2c: padding moves into per-section layouts.
-              The /projects/[slug] nested layout adds its own container
-              (project bar + sub-nav + content). Top-level pages (`/`,
-              /init, /sync, /settings/*) wrap themselves in their own
-              max-w container as needed. This keeps the project layout
-              from being padded twice. */}
-          <main>{children}</main>
+              The /projects/[slug] nested layout owns its own
+              <main id="main">. Top-level pages (`/`, /init, /sync,
+              /settings/*) supply theirs via <PageShell variant="workspace">. */}
+          {children}
         </body>
       </html>
     </ClerkProvider>

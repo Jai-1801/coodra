@@ -1,7 +1,6 @@
-import Link from 'next/link';
-
 import { ProjectSubNav } from '@/components/ProjectSubNav';
 import { ProjectsSwitcher } from '@/components/ProjectsSwitcher';
+import { ArrowLeftIcon, LinkButton } from '@/components/ui';
 import { resolveProjectFromParams } from '@/lib/project-context';
 import { fetchPickerSnapshot } from '@/lib/queries/picker';
 
@@ -41,22 +40,27 @@ export default async function ProjectLayout({
   return (
     <div>
       <div className="border-b border-(--color-border-subtle) bg-(--color-bg-elevated)">
-        <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-6 px-8 py-3">
-          <div className="flex items-center gap-4">
-            <Link
-              href="/"
-              className="font-display text-[10px] font-bold uppercase tracking-widest text-(--color-text-secondary) hover:text-(--color-brand)"
-            >
-              ◂ All projects
-            </Link>
-            <span className="font-display text-[10px] uppercase text-(--color-text-tertiary)">/</span>
-            <span className="font-mono text-sm font-medium uppercase text-(--color-text-primary)">{project.slug}</span>
+        <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-6 px-(--space-page-x) py-3">
+          <div className="flex items-center gap-3">
+            <LinkButton href="/" variant="ghost" size="sm" leftIcon={<ArrowLeftIcon className="h-3 w-3" />}>
+              All projects
+            </LinkButton>
+            <span aria-hidden="true" className="text-(--color-text-tertiary)">
+              /
+            </span>
+            <span className="font-mono text-sm font-medium text-(--color-text-primary)">{project.slug}</span>
           </div>
           <ProjectsSwitcher currentSlug={project.slug} options={switcherOptions} />
         </div>
       </div>
       <ProjectSubNav projectSlug={project.slug} />
-      <div className="mx-auto max-w-[1200px] px-8 py-8">{children}</div>
+      <main
+        id="main"
+        tabIndex={-1}
+        className="mx-auto max-w-[1200px] px-(--space-page-x) py-(--space-section) outline-none"
+      >
+        {children}
+      </main>
     </div>
   );
 }

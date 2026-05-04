@@ -1,18 +1,13 @@
 import { existsSync, statSync } from 'node:fs';
 
-import Link from 'next/link';
-
+import { LinkButton, PageHeader, PageShell, Section, Table, TBody, TD, TH, THead, TR } from '@/components/ui';
 import { LOG_SERVICES, type LogService, logPathFor } from '@/lib/log-tail';
 import { resolveProjectFromParams } from '@/lib/project-context';
 
 /**
- * `/projects/[slug]/logs` — log service picker (M04 Phase 2 S11).
- *
- * Lists the three workspace log files (hooks-bridge, mcp-server,
- * sync-daemon) with size + last-modified info, and links to the
- * per-service tail surface at `/projects/[slug]/logs/[service]`.
+ * `/projects/[slug]/logs` — log service picker (M04 Phase 2 S11,
+ * restyled in Phase 2 UI).
  */
-
 export const dynamic = 'force-dynamic';
 
 export default async function LogsIndexPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -21,48 +16,48 @@ export default async function LogsIndexPage({ params }: { params: Promise<{ slug
   const rows = LOG_SERVICES.map((s) => describe(s));
 
   return (
-    <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-2">
-        <h1 className="font-display text-3xl font-black uppercase tracking-wide text-(--color-text-primary)">Logs</h1>
-        <p className="text-sm text-(--color-text-secondary)">
-          Workspace-grain log files (one per ContextOS service). Tailed live via Server-Sent Events.
-        </p>
-      </header>
+    <PageShell>
+      <PageHeader
+        eyebrow="Project · logs"
+        title="Logs"
+        subtitle="Workspace-grain log files (one per ContextOS service). Tailed live via Server-Sent Events."
+      />
 
-      <table className="w-full border border-(--color-border-subtle)">
-        <thead className="bg-(--color-bg-elevated)">
-          <tr>
-            <Th>Service</Th>
-            <Th>Path</Th>
-            <Th>Size</Th>
-            <Th>Last modified</Th>
-            <Th>Open</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.service} className="border-b border-(--color-border-subtle) hover:bg-(--color-bg-surface)">
-              <td className="px-3 py-3 font-mono text-sm text-(--color-text-primary)">{r.service}</td>
-              <td className="px-3 py-3 font-mono text-xs text-(--color-text-tertiary)">{r.path}</td>
-              <td className="px-3 py-3 font-mono text-xs text-(--color-text-secondary)">
-                {r.exists ? formatBytes(r.size) : '—'}
-              </td>
-              <td className="px-3 py-3 font-mono text-xs text-(--color-text-tertiary)">
-                {r.exists ? r.mtime.toISOString() : 'not present'}
-              </td>
-              <td className="px-3 py-3">
-                <Link
-                  href={`${baseHref}/${r.service}` as never}
-                  className="font-display text-xs font-bold uppercase tracking-wider text-(--color-brand) hover:text-(--color-brand-hover)"
-                >
-                  Tail ▸
-                </Link>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+      <Section title="Services">
+        <Table>
+          <THead>
+            <TR hoverable={false}>
+              <TH>Service</TH>
+              <TH>Path</TH>
+              <TH align="right">Size</TH>
+              <TH>Last modified</TH>
+              <TH align="right">Open</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {rows.map((r) => (
+              <TR key={r.service}>
+                <TD mono>{r.service}</TD>
+                <TD mono muted>
+                  {r.path}
+                </TD>
+                <TD align="right" mono muted>
+                  {r.exists ? formatBytes(r.size) : '—'}
+                </TD>
+                <TD mono muted>
+                  {r.exists ? r.mtime.toISOString() : 'not present'}
+                </TD>
+                <TD align="right">
+                  <LinkButton href={`${baseHref}/${r.service}`} variant="ghost" size="sm">
+                    Tail
+                  </LinkButton>
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      </Section>
+    </PageShell>
   );
 }
 
@@ -84,12 +79,4 @@ function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function Th({ children }: { readonly children: React.ReactNode }) {
-  return (
-    <th className="px-3 py-2 text-left font-display text-xs font-bold uppercase tracking-wider text-(--color-text-secondary)">
-      {children}
-    </th>
-  );
 }

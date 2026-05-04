@@ -62,7 +62,7 @@ export function ProjectSubNav({ projectSlug }: ProjectSubNavProps) {
             .join(' ');
           return (
             <li key={item.segment}>
-              <Link href={href as never} className={cls}>
+              <Link href={href as never} aria-current={isActive ? 'page' : undefined} className={cls}>
                 {item.label}
                 {isComing ? <span className="font-mono text-[9px] font-normal lowercase">soon</span> : null}
               </Link>

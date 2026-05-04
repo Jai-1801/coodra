@@ -1,24 +1,36 @@
-import Link from 'next/link';
-
 import { RunStatusChip } from '@/components/RunStatusChip';
+import {
+  Banner,
+  Button,
+  Card,
+  Checkbox,
+  DownloadIcon,
+  EmptyState,
+  FormRow,
+  Input,
+  LinkButton,
+  PageHeader,
+  PageShell,
+  Section,
+  Table,
+  TBody,
+  TD,
+  TH,
+  THead,
+  Tile,
+  TR,
+} from '@/components/ui';
 import { deleteProjectAction, renameProjectAction, resetProjectAction } from '@/lib/actions/projects';
 import { resolveProjectFromParams } from '@/lib/project-context';
 
 /**
  * `/projects/[slug]/settings` — project settings + admin actions
- * (M04 Phase 2 S2a IA migration). Was `/projects/[id]/page.tsx`
- * in Phase 1.
+ * (M04 Phase 2 S14, restyled in Phase 2 UI).
  *
- * Three anchored sections (Phase 2 will add rename / archive /
- * delete / export per spec §10 S14):
- *   - Overview — counts (runs total + status histogram)
- *   - Recent runs — last N runs linking to /projects/[slug]/runs/[id]
- *   - Reset — destructive form (type-to-confirm, --keep-policies default)
- *
- * The __global__ sentinel project shows the Reset section as a banner
- * explaining why it cannot be reset from the UI.
+ * Sections: Overview / Recent runs / Export / Rename / Reset / Delete.
+ * The __global__ sentinel hides Rename + Delete (also enforced server-
+ * side in the action).
  */
-
 export const dynamic = 'force-dynamic';
 
 interface SearchParams {
@@ -40,331 +52,274 @@ export default async function ProjectSettingsPage({
 }) {
   const project = await resolveProjectFromParams(params);
   const sp = await searchParams;
-
   const isSentinel = project.slug === GLOBAL_PROJECT_SLUG;
   const statusEntries = Object.entries(project.statusCounts).sort(([a], [b]) => a.localeCompare(b));
   const totalRuns = project.runCount;
 
   return (
-    <div className="flex flex-col gap-8">
-      <header className="flex flex-col gap-2">
-        <div className="flex items-baseline gap-4">
-          <h1 className="font-mono text-3xl font-medium text-(--color-text-primary)">{project.slug}</h1>
-          {isSentinel ? (
-            <span className="font-display text-xs font-bold uppercase tracking-wider text-(--color-text-tertiary)">
-              sentinel · F7
-            </span>
-          ) : null}
-        </div>
-        <dl className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
-          <Field label="ID" value={<span className="font-mono">{project.id}</span>} />
-          <Field label="Org" value={<span className="font-mono">{project.orgId}</span>} />
-          <Field label="Name" value={project.name} />
-          <Field
-            label="Created"
-            value={<span className="font-mono">{project.createdAt.toISOString().slice(0, 19).replace('T', ' ')}</span>}
-          />
-        </dl>
-      </header>
+    <PageShell>
+      <PageHeader
+        eyebrow="Project · settings"
+        title={project.slug}
+        subtitle={
+          isSentinel ? (
+            <>
+              <span className="font-mono">__global__</span> sentinel — F7 invariant. Rename + delete disabled.
+            </>
+          ) : (
+            <>
+              {totalRuns} run{totalRuns === 1 ? '' : 's'} · created{' '}
+              <span className="font-mono">{project.createdAt.toISOString().slice(0, 10)}</span>
+            </>
+          )
+        }
+      />
 
       <Banners {...sp} />
 
-      <Section title="Export">
-        <p className="text-sm text-(--color-text-secondary)">
-          Download every per-project audit row as JSONL — one object per line, tagged by{' '}
-          <span className="font-mono">type</span> (project / run / run_event / decision / policy_decision /
-          context_pack).
-        </p>
-        <a
-          href={`/projects/${encodeURIComponent(project.slug)}/settings/export`}
-          className="self-start bg-(--color-brand) px-6 py-2 font-display text-xs font-bold uppercase tracking-wider text-white hover:bg-(--color-brand-hover)"
-          download
-        >
-          Download JSONL
-        </a>
-      </Section>
-
-      {!isSentinel ? (
-        <Section title="Rename">
-          <form
-            action={renameProjectAction}
-            className="flex flex-col gap-3 border border-(--color-border-subtle) bg-(--color-bg-surface) p-6"
-          >
-            <input type="hidden" name="identifier" value={project.id} />
-            <p className="text-sm text-(--color-text-primary)">
-              Change the project's slug. The URL becomes <span className="font-mono">/projects/&lt;new-slug&gt;</span>.
-              Runs / events / context packs stay attached. Other devices that have the project opened will get a 404
-              until they refresh.
-            </p>
-            <label className="flex flex-col gap-1 text-xs">
-              <span className="font-display font-bold uppercase tracking-wider text-(--color-text-secondary)">
-                New slug
-              </span>
-              <input
-                type="text"
-                name="newSlug"
-                required
-                pattern="[a-z0-9_-]+"
-                placeholder="my-renamed-project"
-                className="border border-(--color-border-default) bg-(--color-bg-base) px-3 py-2 font-mono text-sm"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs">
-              <span className="font-display font-bold uppercase tracking-wider text-(--color-text-secondary)">
-                Type the new slug to confirm
-              </span>
-              <input
-                type="text"
-                name="confirmation"
-                required
-                autoComplete="off"
-                placeholder="(repeat the new slug)"
-                className="border border-(--color-border-default) bg-(--color-bg-base) px-3 py-2 font-mono text-sm"
-              />
-            </label>
-            <button
-              type="submit"
-              className="self-start bg-(--color-brand) px-6 py-2 font-display text-xs font-bold uppercase tracking-wider text-white hover:bg-(--color-brand-hover)"
-            >
-              Rename
-            </button>
-          </form>
-        </Section>
-      ) : null}
-
       <Section title="Overview">
         <div className="grid gap-4 md:grid-cols-3">
-          <Tile label="Total runs" value={totalRuns} status="info" />
+          <Tile label="Total runs" value={totalRuns} tone={totalRuns > 0 ? 'info' : 'neutral'} />
           {statusEntries.map(([status, count]) => (
-            <Tile key={status} label={status} value={count} status="neutral" statusChip={status} />
+            <Tile key={status} label={status} value={count} tone="neutral" hint="status histogram" />
           ))}
         </div>
       </Section>
 
+      <Section title="Project info">
+        <Card size="md">
+          <dl className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
+            <Field label="ID" value={<span className="break-all font-mono text-xs">{project.id}</span>} />
+            <Field label="Org" value={<span className="font-mono">{project.orgId}</span>} />
+            <Field label="Name" value={project.name} />
+            <Field
+              label="Created"
+              value={
+                <span className="font-mono">{project.createdAt.toISOString().slice(0, 19).replace('T', ' ')}</span>
+              }
+            />
+          </dl>
+        </Card>
+      </Section>
+
       <Section title={`Recent runs (${project.recentRuns.length})`}>
         {project.recentRuns.length === 0 ? (
-          <Empty hint="No runs in this project yet." />
+          <EmptyState title="No runs yet" body="No runs in this project yet." />
         ) : (
-          <table className="w-full border border-(--color-border-subtle)">
-            <thead className="bg-(--color-bg-elevated)">
-              <tr>
-                <Th>ID</Th>
-                <Th>Session</Th>
-                <Th>Agent</Th>
-                <Th>Status</Th>
-                <Th>Started</Th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <THead>
+              <TR hoverable={false}>
+                <TH>ID</TH>
+                <TH>Session</TH>
+                <TH>Agent</TH>
+                <TH>Status</TH>
+                <TH>Started</TH>
+              </TR>
+            </THead>
+            <TBody>
               {project.recentRuns.map((run) => (
-                <tr key={run.id} className="border-b border-(--color-border-subtle) hover:bg-(--color-bg-surface)">
-                  <td className="px-3 py-2">
-                    <Link
-                      href={`/projects/${encodeURIComponent(project.slug)}/runs/${encodeURIComponent(run.id)}` as never}
-                      className="font-mono text-xs font-medium text-(--color-text-code) hover:text-(--color-brand-hover)"
+                <TR key={run.id}>
+                  <TD mono>
+                    <a
+                      href={`/projects/${encodeURIComponent(project.slug)}/runs/${encodeURIComponent(run.id)}`}
+                      className="text-(--color-text-code) hover:text-(--color-brand-hover)"
                     >
                       {run.id}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs text-(--color-text-tertiary)">{run.sessionId}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{run.agentType}</td>
-                  <td className="px-3 py-2">
+                    </a>
+                  </TD>
+                  <TD mono muted>
+                    {run.sessionId}
+                  </TD>
+                  <TD mono>{run.agentType}</TD>
+                  <TD>
                     <RunStatusChip status={run.status} />
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs text-(--color-text-secondary)">
+                  </TD>
+                  <TD mono muted>
                     {run.startedAt.toISOString().slice(0, 19).replace('T', ' ')}
-                  </td>
-                </tr>
+                  </TD>
+                </TR>
               ))}
-            </tbody>
-          </table>
+            </TBody>
+          </Table>
         )}
       </Section>
 
+      <Section title="Export">
+        <Card size="md">
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-(--color-text-secondary)">
+              Download every per-project audit row as JSONL — one object per line, tagged by{' '}
+              <span className="font-mono">type</span> (project / run / run_event / decision / policy_decision /
+              context_pack).
+            </p>
+            <LinkButton
+              href={`/projects/${encodeURIComponent(project.slug)}/settings/export`}
+              variant="primary"
+              leftIcon={<DownloadIcon className="h-3 w-3" />}
+              download
+            >
+              Download JSONL
+            </LinkButton>
+          </div>
+        </Card>
+      </Section>
+
+      {!isSentinel ? (
+        <Section title="Rename">
+          <Card size="md">
+            <form action={renameProjectAction} className="flex flex-col gap-4">
+              <input type="hidden" name="identifier" value={project.id} />
+              <p className="text-sm text-(--color-text-primary)">
+                Change the project's slug. The URL becomes <span className="font-mono">/projects/&lt;new-slug&gt;</span>
+                . Runs / events / context packs stay attached. Other devices that have the project opened will get a 404
+                until they refresh.
+              </p>
+              <FormRow inputId="rename-newSlug" label="New slug" required>
+                <Input
+                  id="rename-newSlug"
+                  name="newSlug"
+                  required
+                  mono
+                  pattern="[a-z0-9_-]+"
+                  placeholder="my-renamed-project"
+                />
+              </FormRow>
+              <FormRow
+                inputId="rename-confirmation"
+                label="Type the new slug to confirm"
+                required
+                helper="Must match the slug above exactly."
+              >
+                <Input
+                  id="rename-confirmation"
+                  name="confirmation"
+                  required
+                  mono
+                  autoComplete="off"
+                  placeholder="(repeat the new slug)"
+                />
+              </FormRow>
+              <Button type="submit" variant="primary">
+                Rename project
+              </Button>
+            </form>
+          </Card>
+        </Section>
+      ) : null}
+
       <Section title="Reset project">
         {isSentinel ? (
-          <div className="border-l-4 border-(--color-status-warning) bg-(--color-status-warning)/10 px-4 py-3 text-sm">
+          <Banner kind="warning">
             The <span className="font-mono">__global__</span> sentinel project (F7 invariant) cannot be reset from this
-            UI. To clear <span className="font-mono">__global__</span> rows, run{' '}
-            <span className="font-mono">contextos project reset __global__ --force</span> after backing up data.db.
-          </div>
+            UI. Run <span className="font-mono">contextos project reset __global__ --force</span> after backing up
+            data.db.
+          </Banner>
         ) : (
-          <form
-            action={resetProjectAction}
-            className="border border-(--color-border-subtle) bg-(--color-bg-surface) p-6"
-          >
-            <input type="hidden" name="identifier" value={project.id} />
-            <p className="mb-4 text-sm text-(--color-text-primary)">
-              Resetting <span className="font-mono">{project.slug}</span> will delete every per-run audit row for this
-              project: runs, run_events, decisions, policy_decisions, context_packs.
-            </p>
-            <ul className="mb-4 ml-6 list-disc text-xs text-(--color-text-secondary)">
-              <li>Total runs to delete: {totalRuns}</li>
-              <li>Cascade order matches the CLI's `contextos project reset` (FK-aware)</li>
-              <li>Default: keeps policies + policy_rules + project-scoped kill_switches</li>
-            </ul>
-            <label className="mb-4 flex items-center gap-2 text-sm">
-              <input type="checkbox" name="alsoDeletePolicies" />
-              <span>Also delete policies + policy_rules + project-scoped kill_switches</span>
-            </label>
-            <label
-              htmlFor="reset-confirm"
-              className="mb-1 block font-display text-xs font-bold uppercase tracking-wider text-(--color-text-secondary)"
-            >
-              Type the project slug to confirm:
-            </label>
-            <input
-              id="reset-confirm"
-              type="text"
-              name="confirmation"
-              required
-              autoComplete="off"
-              placeholder={project.slug}
-              className="mb-4 w-full max-w-md border border-(--color-border-default) bg-(--color-bg-base) px-3 py-2 font-mono text-sm text-(--color-text-primary)"
-            />
-            <button
-              type="submit"
-              className="bg-(--color-status-error) px-6 py-2 font-display text-xs font-bold uppercase tracking-wider text-white hover:opacity-80"
-            >
-              Reset
-            </button>
-          </form>
+          <Card size="md">
+            <form action={resetProjectAction} className="flex flex-col gap-4">
+              <input type="hidden" name="identifier" value={project.id} />
+              <p className="text-sm text-(--color-text-primary)">
+                Resetting <span className="font-mono">{project.slug}</span> will delete every per-run audit row for this
+                project: runs, run_events, decisions, policy_decisions, context_packs.
+              </p>
+              <ul className="ml-6 list-disc text-xs text-(--color-text-secondary)">
+                <li>Total runs to delete: {totalRuns}</li>
+                <li>Cascade order matches the CLI's `contextos project reset` (FK-aware)</li>
+                <li>Default: keeps policies + policy_rules + project-scoped kill_switches</li>
+              </ul>
+              <label htmlFor="reset-alsoDeletePolicies" className="flex items-center gap-2 text-sm">
+                <Checkbox id="reset-alsoDeletePolicies" name="alsoDeletePolicies" />
+                <span>Also delete policies + policy_rules + project-scoped kill_switches</span>
+              </label>
+              <FormRow inputId="reset-confirm" label="Type the project slug to confirm" required>
+                <Input
+                  id="reset-confirm"
+                  name="confirmation"
+                  required
+                  mono
+                  autoComplete="off"
+                  placeholder={project.slug}
+                />
+              </FormRow>
+              <Button type="submit" variant="destructive">
+                Reset project
+              </Button>
+            </form>
+          </Card>
         )}
       </Section>
 
       {!isSentinel ? (
         <Section title="Delete project (irreversible)">
-          <form
-            action={deleteProjectAction}
-            className="flex flex-col gap-3 border border-(--color-status-error)/40 bg-(--color-bg-surface) p-6"
-          >
-            <input type="hidden" name="identifier" value={project.id} />
-            <p className="text-sm text-(--color-text-primary)">
-              Permanently delete <span className="font-mono">{project.slug}</span> AND every per-run audit row, policy,
-              policy_rule, kill_switch, and context pack scoped to this project. The projects row itself is also dropped
-              — slug becomes available for re-init. There is no undo.
-            </p>
-            <label className="flex flex-col gap-1 text-xs">
-              <span className="font-display font-bold uppercase tracking-wider text-(--color-text-secondary)">
-                Type <span className="font-mono normal-case tracking-normal">{project.slug}</span> to confirm
-              </span>
-              <input
-                type="text"
-                name="confirmation"
+          <Card size="md" tone="danger">
+            <form action={deleteProjectAction} className="flex flex-col gap-4">
+              <input type="hidden" name="identifier" value={project.id} />
+              <p className="text-sm text-(--color-text-primary)">
+                Permanently delete <span className="font-mono">{project.slug}</span> AND every per-run audit row,
+                policy, policy_rule, kill_switch, and context pack scoped to this project. The projects row itself is
+                also dropped — slug becomes available for re-init. There is no undo.
+              </p>
+              <FormRow
+                inputId="delete-confirm"
+                label="Type the project slug to confirm"
                 required
-                autoComplete="off"
-                placeholder={project.slug}
-                className="border border-(--color-status-error)/40 bg-(--color-bg-base) px-3 py-2 font-mono text-sm"
-              />
-            </label>
-            <button
-              type="submit"
-              className="self-start bg-(--color-status-error) px-6 py-2 font-display text-xs font-bold uppercase tracking-wider text-white hover:opacity-80"
-            >
-              Delete permanently
-            </button>
-          </form>
+                helper={
+                  <>
+                    <span className="font-mono">{project.slug}</span> exactly
+                  </>
+                }
+              >
+                <Input
+                  id="delete-confirm"
+                  name="confirmation"
+                  required
+                  mono
+                  autoComplete="off"
+                  placeholder={project.slug}
+                  invalid
+                />
+              </FormRow>
+              <Button type="submit" variant="destructive">
+                Delete permanently
+              </Button>
+            </form>
+          </Card>
         </Section>
       ) : null}
-
-      <div>
-        <Link
-          href="/"
-          className="font-display text-xs font-bold uppercase tracking-wider text-(--color-brand) hover:text-(--color-brand-hover)"
-        >
-          ◂ Back to all projects
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-function Banners(sp: SearchParams) {
-  return (
-    <div className="flex flex-col gap-2">
-      {sp.reset !== undefined ? (
-        <div className="border-l-4 border-(--color-status-success) bg-(--color-status-success)/10 px-4 py-3 text-sm">
-          ✓ Project reset. {sp.summary !== undefined ? <span className="font-mono text-xs">{sp.summary}</span> : null}
-        </div>
-      ) : null}
-      {sp.renamed !== undefined ? (
-        <div className="border-l-4 border-(--color-status-success) bg-(--color-status-success)/10 px-4 py-3 text-sm">
-          ✓ Renamed from <span className="font-mono">{sp.renamed}</span>.
-        </div>
-      ) : null}
-      {sp.error !== undefined ? (
-        <div className="border-l-4 border-(--color-status-error) bg-(--color-status-error)/10 px-4 py-3 text-sm">
-          ✕ <span className="font-mono">{sp.error}</span>
-          {sp.errorMessage !== undefined ? <span className="ml-2">{sp.errorMessage}</span> : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function Tile({
-  label,
-  value,
-  status,
-  statusChip,
-}: {
-  readonly label: string;
-  readonly value: number;
-  readonly status: 'info' | 'success' | 'warning' | 'error' | 'neutral';
-  readonly statusChip?: string;
-}) {
-  const colorClass: Record<typeof status, string> = {
-    info: 'text-(--color-status-info)',
-    success: 'text-(--color-status-success)',
-    warning: 'text-(--color-status-warning)',
-    error: 'text-(--color-status-error)',
-    neutral: 'text-(--color-text-primary)',
-  };
-  return (
-    <div className="border border-(--color-border-subtle) bg-(--color-bg-surface) p-6">
-      <div className="font-display text-xs font-bold uppercase tracking-wider text-(--color-text-secondary)">
-        {label}
-      </div>
-      <div className={`mt-2 font-display text-4xl font-black ${colorClass[status]}`}>{value}</div>
-      {statusChip !== undefined ? (
-        <div className="mt-1 font-mono text-xs text-(--color-text-tertiary)">{statusChip}</div>
-      ) : null}
-    </div>
+    </PageShell>
   );
 }
 
 function Field({ label, value }: { readonly label: string; readonly value: React.ReactNode }) {
   return (
-    <div className="flex gap-2">
-      <dt className="font-display text-xs font-bold uppercase tracking-wider text-(--color-text-secondary)">
-        {label}:
+    <div className="flex justify-between gap-3">
+      <dt className="font-display text-xs font-bold uppercase tracking-widest text-(--color-text-secondary)">
+        {label}
       </dt>
       <dd className="text-(--color-text-primary)">{value}</dd>
     </div>
   );
 }
 
-function Section({ title, children }: { readonly title: string; readonly children: React.ReactNode }) {
+function Banners(sp: SearchParams) {
+  if (sp.reset === undefined && sp.renamed === undefined && sp.error === undefined) return null;
   return (
-    <section className="flex flex-col gap-3">
-      <h2 className="font-display text-xl font-bold uppercase tracking-wide text-(--color-text-primary)">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function Empty({ hint }: { readonly hint: string }) {
-  return (
-    <div className="border border-(--color-border-subtle) bg-(--color-bg-surface) p-6 text-center text-sm text-(--color-text-tertiary)">
-      {hint}
+    <div className="flex flex-col gap-2">
+      {sp.reset !== undefined ? (
+        <Banner kind="success">
+          Project reset.{sp.summary !== undefined ? <span className="ml-2 font-mono text-xs">{sp.summary}</span> : null}
+        </Banner>
+      ) : null}
+      {sp.renamed !== undefined ? (
+        <Banner kind="success">
+          Renamed from <span className="font-mono">{sp.renamed}</span>.
+        </Banner>
+      ) : null}
+      {sp.error !== undefined ? (
+        <Banner kind="error" code={sp.error}>
+          {sp.errorMessage ?? '—'}
+        </Banner>
+      ) : null}
     </div>
-  );
-}
-
-function Th({ children }: { readonly children: React.ReactNode }) {
-  return (
-    <th className="px-3 py-2 text-left font-display text-xs font-bold uppercase tracking-wider text-(--color-text-secondary)">
-      {children}
-    </th>
   );
 }

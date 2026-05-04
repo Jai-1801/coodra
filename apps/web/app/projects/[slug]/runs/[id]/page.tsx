@@ -5,34 +5,34 @@ import { PolicyDecisionRow } from '@/components/PolicyDecisionRow';
 import { RelativeTime } from '@/components/RelativeTime';
 import { RunEventRow } from '@/components/RunEventRow';
 import { RunStatusChip } from '@/components/RunStatusChip';
+import {
+  Breadcrumbs,
+  Card,
+  type Crumb,
+  EmptyState,
+  PageHeader,
+  PageShell,
+  Section,
+  Table,
+  TBody,
+  TH,
+  THead,
+  TR,
+} from '@/components/ui';
 import { compactDuration } from '@/lib/format';
 import { resolveProjectFromParams } from '@/lib/project-context';
 import { getRun } from '@/lib/queries/runs';
 
 /**
  * `/projects/[slug]/runs/[id]` — server-rendered run detail per
- * `docs/feature-packs/04-web-app/wireframes/02-screens/run-detail.md`.
- *
- * M04 Phase 2 S2a IA migration: params now carry both `slug` (project)
- * and `id` (run). Run is 404'd if it doesn't belong to the URL-bound
- * project — prevents foreign-project run snooping via deep link.
- *
- * Tabs render via URL hash (`#events`, `#decisions`, `#audit`,
- * `#context-pack`). M04 uses anchor sections — every section renders
- * server-side; the hash is just deep-link state. A future client-only
- * tab strip can be added without changing this page.
+ * `docs/feature-packs/04-web-app/wireframes/02-screens/run-detail.md`,
+ * restyled in Phase 2 UI.
  */
-
 export const dynamic = 'force-dynamic';
 
 export default async function RunDetailPage({ params }: { params: Promise<{ slug: string; id: string }> }) {
   const project = await resolveProjectFromParams(params);
   const { id: rawId } = await params;
-  // Next.js's dynamic-route layer URL-encodes path segments before
-  // exposing them via params (so `run:abc` arrives as `run%3Aabc`).
-  // Run ids in our schema use the literal `:` from M03's run-key
-  // format. Decode here so getRun can do an exact match against
-  // `runs.id`.
   const id = decodeURIComponent(rawId);
   const result = await getRun(id);
   if (result === null) notFound();
@@ -41,16 +41,34 @@ export default async function RunDetailPage({ params }: { params: Promise<{ slug
   const startedMs = run.startedAt.getTime();
   const endedMs = run.endedAt?.getTime() ?? Date.now();
 
+  const baseHref = `/projects/${encodeURIComponent(project.slug)}`;
+  const trail: ReadonlyArray<Crumb> = [
+    { label: 'Projects', href: '/' },
+    { label: project.slug, href: baseHref, mono: true },
+    { label: 'Runs', href: `${baseHref}/runs` },
+    { label: run.id.length > 30 ? `${run.id.slice(0, 30)}…` : run.id, mono: true },
+  ];
+
   return (
-    <div className="flex flex-col gap-8">
-      <header className="flex flex-col gap-3">
-        <div className="flex items-baseline gap-4">
-          <h1 className="font-mono text-3xl font-medium text-(--color-text-primary)">{run.id}</h1>
-          <RunStatusChip status={run.status} />
-        </div>
+    <PageShell>
+      <Breadcrumbs trail={trail} />
+      <PageHeader
+        eyebrow="Run"
+        title={run.id.length > 60 ? `${run.id.slice(0, 60)}…` : run.id}
+        actions={<RunStatusChip status={run.status} />}
+        subtitle={
+          <>
+            {events.length} event{events.length === 1 ? '' : 's'} · {decisions.length} decision
+            {decisions.length === 1 ? '' : 's'} · {policyDecisions.length} policy decision
+            {policyDecisions.length === 1 ? '' : 's'} · {contextPack !== null ? '1 context pack' : 'no context pack'}.
+          </>
+        }
+      />
+
+      <Card size="sm">
         <dl className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
-          <Field label="Project" value={<span className="font-mono">{run.projectId}</span>} />
-          <Field label="Session" value={<span className="font-mono">{run.sessionId}</span>} />
+          <Field label="Project" value={<span className="break-all font-mono text-xs">{run.projectId}</span>} />
+          <Field label="Session" value={<span className="break-all font-mono text-xs">{run.sessionId}</span>} />
           <Field label="Agent" value={`${run.agentType} (${run.mode})`} />
           <Field label="Issue / PR" value={`${run.issueRef ?? '—'} / ${run.prRef ?? '—'}`} />
           <Field label="Started" value={<RelativeTime date={run.startedAt} mode="compact" />} />
@@ -68,19 +86,11 @@ export default async function RunDetailPage({ params }: { params: Promise<{ slug
             }
           />
         </dl>
-      </header>
+      </Card>
 
-      <Section id="overview" title={`Overview`}>
-        <p className="text-sm text-(--color-text-secondary)">
-          {events.length} tool-use event{events.length === 1 ? '' : 's'} · {decisions.length} decision
-          {decisions.length === 1 ? '' : 's'} · {policyDecisions.length} policy decision
-          {policyDecisions.length === 1 ? '' : 's'} · {contextPack !== null ? '1 context pack' : 'no context pack'}.
-        </p>
-      </Section>
-
-      <Section id="events" title={`Events (${events.length})`}>
+      <Section title={`Events (${events.length})`}>
         {events.length === 0 ? (
-          <Empty hint="No events recorded for this run." />
+          <EmptyState title="No events" body="No events recorded for this run." />
         ) : (
           <div className="border border-(--color-border-subtle)">
             {events.map((evt) => (
@@ -98,9 +108,9 @@ export default async function RunDetailPage({ params }: { params: Promise<{ slug
         )}
       </Section>
 
-      <Section id="decisions" title={`Decisions (${decisions.length})`}>
+      <Section title={`Decisions (${decisions.length})`}>
         {decisions.length === 0 ? (
-          <Empty hint="Agent recorded no decisions." />
+          <EmptyState title="No decisions" body="Agent recorded no decisions." />
         ) : (
           <div className="flex flex-col gap-4">
             {decisions.map((dec) => (
@@ -116,21 +126,21 @@ export default async function RunDetailPage({ params }: { params: Promise<{ slug
         )}
       </Section>
 
-      <Section id="audit" title={`Audit (${policyDecisions.length})`}>
+      <Section title={`Audit (${policyDecisions.length})`}>
         {policyDecisions.length === 0 ? (
-          <Empty hint="No policy decisions for this run." />
+          <EmptyState title="No policy decisions" body="Bridge did not evaluate any policy rules for this run." />
         ) : (
-          <table className="w-full border border-(--color-border-subtle)">
-            <thead className="bg-(--color-bg-elevated)">
-              <tr>
-                <Th>Time</Th>
-                <Th>Decision</Th>
-                <Th>Tool</Th>
-                <Th>Reason</Th>
-                <Th>Matched rule</Th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <THead>
+              <TR hoverable={false}>
+                <TH>Time</TH>
+                <TH>Decision</TH>
+                <TH>Tool</TH>
+                <TH>Reason</TH>
+                <TH>Matched rule</TH>
+              </TR>
+            </THead>
+            <TBody>
               {policyDecisions.map((row) => (
                 <PolicyDecisionRow
                   key={row.id}
@@ -141,70 +151,41 @@ export default async function RunDetailPage({ params }: { params: Promise<{ slug
                   createdAt={row.createdAt}
                 />
               ))}
-            </tbody>
-          </table>
+            </TBody>
+          </Table>
         )}
       </Section>
 
-      <Section id="context-pack" title="Context pack">
+      <Section title="Context pack">
         {contextPack === null ? (
-          <Empty hint="No context pack saved for this run." />
+          <EmptyState title="No context pack" body="The agent did not save a context pack for this run." />
         ) : (
-          <article className="border border-(--color-border-subtle) bg-(--color-bg-surface) p-6">
-            <h3 className="font-display text-lg font-bold text-(--color-text-primary)">{contextPack.title}</h3>
-            <div className="mt-1 text-xs text-(--color-text-tertiary)">
-              <RelativeTime date={contextPack.createdAt} mode="compact" />
-            </div>
-            <pre className="mt-4 overflow-x-auto whitespace-pre-wrap font-mono text-xs text-(--color-text-primary)">
-              {contextPack.contentExcerpt}
-            </pre>
-          </article>
+          <Card size="md">
+            <article className="flex flex-col gap-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <h3 className="font-display text-lg font-bold text-(--color-text-primary)">{contextPack.title}</h3>
+                <span className="text-xs text-(--color-text-tertiary)">
+                  <RelativeTime date={contextPack.createdAt} mode="compact" />
+                </span>
+              </div>
+              <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs text-(--color-text-primary)">
+                {contextPack.contentExcerpt}
+              </pre>
+            </article>
+          </Card>
         )}
       </Section>
-    </div>
+    </PageShell>
   );
 }
 
 function Field({ label, value }: { readonly label: string; readonly value: React.ReactNode }) {
   return (
-    <div className="flex gap-2">
-      <dt className="font-display text-xs font-bold uppercase tracking-wider text-(--color-text-secondary)">
-        {label}:
+    <div className="flex justify-between gap-3">
+      <dt className="font-display text-xs font-bold uppercase tracking-widest text-(--color-text-secondary)">
+        {label}
       </dt>
       <dd className="text-(--color-text-primary)">{value}</dd>
     </div>
-  );
-}
-
-function Section({
-  id,
-  title,
-  children,
-}: {
-  readonly id: string;
-  readonly title: string;
-  readonly children: React.ReactNode;
-}) {
-  return (
-    <section id={id} className="flex flex-col gap-3 scroll-mt-32">
-      <h2 className="font-display text-xl font-bold uppercase tracking-wide text-(--color-text-primary)">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function Empty({ hint }: { readonly hint: string }) {
-  return (
-    <div className="border border-(--color-border-subtle) bg-(--color-bg-surface) p-6 text-center text-sm text-(--color-text-tertiary)">
-      {hint}
-    </div>
-  );
-}
-
-function Th({ children }: { readonly children: React.ReactNode }) {
-  return (
-    <th className="px-3 py-2 text-left font-display text-xs font-bold uppercase tracking-wider text-(--color-text-secondary)">
-      {children}
-    </th>
   );
 }

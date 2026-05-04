@@ -1,26 +1,38 @@
 import { dirname } from 'node:path';
 
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { StatusChip } from '@/components/StatusChip';
+import {
+  AlertTriangleIcon,
+  Banner,
+  Breadcrumbs,
+  Button,
+  Card,
+  Checkbox,
+  ChevronDownIcon,
+  type Crumb,
+  FormRow,
+  Input,
+  LinkButton,
+  PageHeader,
+  PageShell,
+  Section,
+  Select,
+} from '@/components/ui';
 import { deletePackAction, installTemplateAction, regeneratePackAction } from '@/lib/actions/packs';
 import { resolveProjectFromParams } from '@/lib/project-context';
 import { getPack } from '@/lib/queries/packs';
 
 /**
- * `/projects/[slug]/packs/[packSlug]` — server-rendered pack detail.
+ * `/projects/[slug]/packs/[packSlug]` — server-rendered pack detail
+ * (S4 + S5, restyled in Phase 2 UI).
  *
- * S4: markdown renderer for spec.md / implementation.md / techstack.md.
- * S5: action bar (Regenerate / Delete / Install template) wired to
- *     the Server Actions in `apps/web/lib/actions/packs.ts`.
- *
- * Per OQ-7 lock (S5 default): Delete matches the real CLI semantics —
- * `rm(dir, recursive)` + `feature_packs.is_active = false`. Both
- * happen on confirmed delete. Re-lock checkpoint passed.
- *
- * Force-dynamic so newly-edited files appear without a rebuild.
+ * Header carries 4 actions in a single bar: Edit, Activity,
+ * Regenerate (yes/no confirm in <details>), Install template (typed
+ * confirm), Delete (typed confirm). Body renders all 3 markdown files
+ * via the brand-styled MarkdownRenderer.
  */
 export const dynamic = 'force-dynamic';
 
@@ -55,41 +67,64 @@ export default async function PackDetailPage({
   const packSlug = decodeURIComponent(rawPackSlug);
   const pack = getPack(packSlug);
   if (pack === null) notFound();
-  // Project ownership check: pack must be slug-owned or parent-owned by this project.
   if (pack.slug !== project.slug && pack.parentSlug !== project.slug) notFound();
   const sp = await searchParams;
-  // Resolve cwd from pack.dir: pack.dir = `<cwd>/docs/feature-packs/<slug>`,
-  // so cwd is two levels up. Server Actions need the absolute cwd to
-  // pass through to runPackRegenerate / runPackDelete.
   const cwd = dirname(dirname(pack.dir));
+  const baseHref = `/projects/${encodeURIComponent(project.slug)}`;
+  const packHref = `${baseHref}/packs/${encodeURIComponent(pack.slug)}`;
+  const trail: ReadonlyArray<Crumb> = [
+    { label: 'Projects', href: '/' },
+    { label: project.slug, href: baseHref, mono: true },
+    { label: 'Packs', href: `${baseHref}/packs` },
+    { label: pack.slug, mono: true },
+  ];
 
   return (
-    <div className="flex flex-col gap-8">
-      <header className="flex flex-col gap-3">
-        <div className="flex items-baseline justify-between gap-4">
-          <div className="flex items-baseline gap-3">
-            <h1 className="font-mono text-3xl font-medium text-(--color-text-primary)">{pack.slug}</h1>
-            <StatusChip status={pack.isActive ? 'success' : 'neutral'}>
-              {pack.isActive ? 'active' : 'inactive'}
-            </StatusChip>
-          </div>
-          <ActionBar projectSlug={project.slug} packSlug={pack.slug} cwd={cwd} />
-        </div>
-        <dl className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
-          <Field label="Directory" value={<span className="font-mono text-xs">{pack.dir}</span>} />
+    <PageShell>
+      <Breadcrumbs trail={trail} />
+      <PageHeader
+        eyebrow="Feature pack"
+        title={pack.slug}
+        actions={
+          <>
+            <LinkButton href={`${packHref}/edit?file=spec.md`} variant="secondary" size="sm">
+              Edit
+            </LinkButton>
+            <LinkButton href={`${packHref}/runs`} variant="secondary" size="sm">
+              Activity
+            </LinkButton>
+            <RegenerateMenu projectSlug={project.slug} packSlug={pack.slug} cwd={cwd} />
+            <InstallTemplateMenu projectSlug={project.slug} packSlug={pack.slug} cwd={cwd} />
+            <DeleteMenu projectSlug={project.slug} packSlug={pack.slug} cwd={cwd} />
+          </>
+        }
+      />
+
+      <Card size="sm">
+        <dl className="grid grid-cols-1 gap-2 text-sm md:grid-cols-3">
+          <Field
+            label="Active"
+            value={
+              <StatusChip status={pack.isActive ? 'success' : 'neutral'}>
+                {pack.isActive ? 'active' : 'inactive'}
+              </StatusChip>
+            }
+          />
           <Field label="Parent" value={<span className="font-mono">{pack.parentSlug ?? '—'}</span>} />
           <Field
             label="Files"
             value={
-              <span className="font-mono">
+              <span className="inline-flex items-center gap-2 font-mono">
                 {pack.fileCount}/4
-                {pack.fileCount < 4 ? <span className="ml-1 text-(--color-status-warning)">⚠</span> : null}
+                {pack.fileCount < 4 ? <AlertTriangleIcon className="h-3 w-3 text-(--color-status-warning)" /> : null}
               </span>
             }
           />
+          <Field label="Directory" value={<span className="break-all font-mono text-xs">{pack.dir}</span>} />
         </dl>
-        <Banners {...sp} packSlug={pack.slug} />
-      </header>
+      </Card>
+
+      <Banners {...sp} packSlug={pack.slug} />
 
       <Section title="spec.md">
         <MarkdownBody body={pack.spec} />
@@ -104,37 +139,18 @@ export default async function PackDetailPage({
       </Section>
 
       <Section title="meta.json">
-        {/* meta.json stays as-is — it's structured JSON, not markdown. */}
         <FileBody body={pack.metaRaw} mono />
       </Section>
-
-      <div>
-        <Link
-          href={`/projects/${encodeURIComponent(project.slug)}/packs` as never}
-          className="font-display text-xs font-bold uppercase tracking-wider text-(--color-brand) hover:text-(--color-brand-hover)"
-        >
-          ◂ Back to packs
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-function Section({ title, children }: { readonly title: string; readonly children: React.ReactNode }) {
-  return (
-    <section className="flex flex-col gap-3">
-      <h2 className="font-display text-xl font-bold uppercase tracking-wide text-(--color-text-primary)">{title}</h2>
-      {children}
-    </section>
+    </PageShell>
   );
 }
 
 function FileBody({ body, mono }: { readonly body: string | null; readonly mono?: boolean }) {
   if (body === null) {
     return (
-      <div className="border border-(--color-border-subtle) bg-(--color-bg-surface) p-6 text-center text-sm text-(--color-text-tertiary)">
-        File not present.
-      </div>
+      <Card size="md">
+        <p className="text-center text-sm text-(--color-text-tertiary)">File not present.</p>
+      </Card>
     );
   }
   return (
@@ -150,31 +166,26 @@ function FileBody({ body, mono }: { readonly body: string | null; readonly mono?
   );
 }
 
-/**
- * Markdown wrapper used for spec.md / implementation.md / techstack.md.
- * Renders the body via the brand-styled MarkdownRenderer. Empty/missing
- * files fall through to the plain "File not present." card.
- */
 function MarkdownBody({ body }: { readonly body: string | null }) {
   if (body === null) {
     return (
-      <div className="border border-(--color-border-subtle) bg-(--color-bg-surface) p-6 text-center text-sm text-(--color-text-tertiary)">
-        File not present.
-      </div>
+      <Card size="md">
+        <p className="text-center text-sm text-(--color-text-tertiary)">File not present.</p>
+      </Card>
     );
   }
   return (
-    <article className="border border-(--color-border-subtle) bg-(--color-bg-surface) p-6">
+    <Card size="md">
       <MarkdownRenderer body={body} />
-    </article>
+    </Card>
   );
 }
 
 function Field({ label, value }: { readonly label: string; readonly value: React.ReactNode }) {
   return (
-    <div className="flex gap-2">
-      <dt className="font-display text-xs font-bold uppercase tracking-wider text-(--color-text-secondary)">
-        {label}:
+    <div className="flex items-baseline gap-2">
+      <dt className="font-display text-xs font-bold uppercase tracking-widest text-(--color-text-secondary)">
+        {label}
       </dt>
       <dd className="text-(--color-text-primary)">{value}</dd>
     </div>
@@ -182,42 +193,40 @@ function Field({ label, value }: { readonly label: string; readonly value: React
 }
 
 // ---------------------------------------------------------------------------
-// Action bar (S5)
+// Action menus (S5 mutations)
 // ---------------------------------------------------------------------------
 
-function ActionBar({
-  projectSlug,
-  packSlug,
-  cwd,
+function ActionMenuShell({
+  label,
+  variant = 'secondary',
+  children,
 }: {
-  readonly projectSlug: string;
-  readonly packSlug: string;
-  readonly cwd: string;
+  readonly label: string;
+  readonly variant?: 'secondary' | 'destructive';
+  readonly children: React.ReactNode;
 }) {
+  const summaryClass =
+    variant === 'destructive'
+      ? 'inline-flex h-7 cursor-pointer items-center gap-1.5 border border-(--color-status-error)/40 bg-(--color-bg-base) px-3 font-display text-[10px] font-bold uppercase tracking-widest text-(--color-status-error) transition-colors duration-200 hover:bg-(--color-status-error)/10'
+      : 'inline-flex h-7 cursor-pointer items-center gap-1.5 border border-(--color-border-default) bg-(--color-bg-base) px-3 font-display text-[10px] font-bold uppercase tracking-widest text-(--color-text-primary) transition-colors duration-200 hover:border-(--color-brand) hover:text-(--color-brand)';
   return (
-    <div className="flex items-center gap-2">
-      <Link
-        href={
-          `/projects/${encodeURIComponent(projectSlug)}/packs/${encodeURIComponent(packSlug)}/edit?file=spec.md` as never
-        }
-        className="border border-(--color-border-default) bg-(--color-bg-base) px-4 py-2 font-display text-xs font-bold uppercase tracking-wider text-(--color-text-primary) hover:border-(--color-brand) hover:text-(--color-brand)"
+    <details className="group relative">
+      <summary className={`list-none ${summaryClass}`}>
+        <span>{label}</span>
+        <ChevronDownIcon className="h-3 w-3 transition-transform duration-200 group-open:rotate-180" />
+      </summary>
+      <div
+        className={`absolute right-0 z-10 mt-1 w-96 border bg-(--color-bg-surface) p-4 shadow-md ${
+          variant === 'destructive' ? 'border-(--color-status-error)/40' : 'border-(--color-border-default)'
+        }`}
       >
-        Edit
-      </Link>
-      <Link
-        href={`/projects/${encodeURIComponent(projectSlug)}/packs/${encodeURIComponent(packSlug)}/runs` as never}
-        className="border border-(--color-border-default) bg-(--color-bg-base) px-4 py-2 font-display text-xs font-bold uppercase tracking-wider text-(--color-text-primary) hover:border-(--color-brand) hover:text-(--color-brand)"
-      >
-        Activity
-      </Link>
-      <RegenerateButton projectSlug={projectSlug} packSlug={packSlug} cwd={cwd} />
-      <InstallTemplateButton projectSlug={projectSlug} packSlug={packSlug} cwd={cwd} />
-      <DeleteButton projectSlug={projectSlug} packSlug={packSlug} cwd={cwd} />
-    </div>
+        {children}
+      </div>
+    </details>
   );
 }
 
-function RegenerateButton({
+function RegenerateMenu({
   projectSlug,
   packSlug,
   cwd,
@@ -227,14 +236,8 @@ function RegenerateButton({
   readonly cwd: string;
 }) {
   return (
-    <details className="group relative">
-      <summary className="cursor-pointer list-none border border-(--color-border-default) bg-(--color-bg-base) px-4 py-2 font-display text-xs font-bold uppercase tracking-wider text-(--color-text-primary) hover:border-(--color-brand) hover:text-(--color-brand)">
-        Regenerate ▾
-      </summary>
-      <form
-        action={regeneratePackAction}
-        className="absolute right-0 z-10 mt-1 flex w-80 flex-col gap-3 border border-(--color-border-default) bg-(--color-bg-surface) p-4 shadow-md"
-      >
+    <ActionMenuShell label="Regenerate">
+      <form action={regeneratePackAction} className="flex flex-col gap-3">
         <input type="hidden" name="projectSlug" value={projectSlug} />
         <input type="hidden" name="packSlug" value={packSlug} />
         <input type="hidden" name="cwd" value={cwd} />
@@ -242,22 +245,19 @@ function RegenerateButton({
           Re-renders auto-managed sections from the template. User-edited content outside auto-marker blocks is
           preserved.
         </p>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="confirm" value="yes" required />
+        <label htmlFor={`regen-confirm-${packSlug}`} className="flex items-center gap-2 text-sm">
+          <Checkbox id={`regen-confirm-${packSlug}`} name="confirm" value="yes" required />
           <span>Yes, regenerate this pack</span>
         </label>
-        <button
-          type="submit"
-          className="bg-(--color-brand) px-4 py-2 font-display text-xs font-bold uppercase tracking-wider text-white hover:bg-(--color-brand-hover)"
-        >
+        <Button type="submit" variant="primary" size="sm">
           Regenerate
-        </button>
+        </Button>
       </form>
-    </details>
+    </ActionMenuShell>
   );
 }
 
-function InstallTemplateButton({
+function InstallTemplateMenu({
   projectSlug,
   packSlug,
   cwd,
@@ -267,14 +267,8 @@ function InstallTemplateButton({
   readonly cwd: string;
 }) {
   return (
-    <details className="group relative">
-      <summary className="cursor-pointer list-none border border-(--color-border-default) bg-(--color-bg-base) px-4 py-2 font-display text-xs font-bold uppercase tracking-wider text-(--color-text-primary) hover:border-(--color-brand) hover:text-(--color-brand)">
-        Install template ▾
-      </summary>
-      <form
-        action={installTemplateAction}
-        className="absolute right-0 z-10 mt-1 flex w-96 flex-col gap-3 border border-(--color-border-default) bg-(--color-bg-surface) p-4 shadow-md"
-      >
+    <ActionMenuShell label="Install template">
+      <form action={installTemplateAction} className="flex flex-col gap-3">
         <input type="hidden" name="projectSlug" value={projectSlug} />
         <input type="hidden" name="packSlug" value={packSlug} />
         <input type="hidden" name="cwd" value={cwd} />
@@ -282,48 +276,43 @@ function InstallTemplateButton({
           Overlays a bundled template onto this pack. Auto-managed sections are replaced; unmanaged user content is
           preserved by the seed merger.
         </p>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-display text-xs font-bold uppercase tracking-wider text-(--color-text-secondary)">
-            Template
-          </span>
-          <select
-            name="templateName"
-            required
-            defaultValue="generic"
-            className="border border-(--color-border-default) bg-(--color-bg-base) px-2 py-1.5 font-mono text-sm"
-          >
+        <FormRow inputId={`install-template-${packSlug}`} label="Template" required>
+          <Select id={`install-template-${packSlug}`} name="templateName" defaultValue="generic" mono required>
             {BUNDLED_TEMPLATES.map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>
             ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-display text-xs font-bold uppercase tracking-wider text-(--color-text-secondary)">
-            Type <span className="font-mono normal-case tracking-normal">install &lt;template&gt;</span> to confirm
-          </span>
-          <input
-            type="text"
+          </Select>
+        </FormRow>
+        <FormRow
+          inputId={`install-confirm-${packSlug}`}
+          label="Type to confirm"
+          required
+          helper={
+            <>
+              <span className="font-mono">install &lt;template-name&gt;</span> exactly
+            </>
+          }
+        >
+          <Input
+            id={`install-confirm-${packSlug}`}
             name="confirmation"
             required
+            mono
             placeholder="install <template-name>"
             autoComplete="off"
-            className="border border-(--color-border-default) bg-(--color-bg-base) px-2 py-1.5 font-mono text-sm"
           />
-        </label>
-        <button
-          type="submit"
-          className="bg-(--color-brand) px-4 py-2 font-display text-xs font-bold uppercase tracking-wider text-white hover:bg-(--color-brand-hover)"
-        >
+        </FormRow>
+        <Button type="submit" variant="primary" size="sm">
           Install
-        </button>
+        </Button>
       </form>
-    </details>
+    </ActionMenuShell>
   );
 }
 
-function DeleteButton({
+function DeleteMenu({
   projectSlug,
   packSlug,
   cwd,
@@ -333,14 +322,8 @@ function DeleteButton({
   readonly cwd: string;
 }) {
   return (
-    <details className="group relative">
-      <summary className="cursor-pointer list-none border border-(--color-status-error)/40 bg-(--color-bg-base) px-4 py-2 font-display text-xs font-bold uppercase tracking-wider text-(--color-status-error) hover:bg-(--color-status-error)/10">
-        Delete ▾
-      </summary>
-      <form
-        action={deletePackAction}
-        className="absolute right-0 z-10 mt-1 flex w-96 flex-col gap-3 border border-(--color-status-error)/40 bg-(--color-bg-surface) p-4 shadow-md"
-      >
+    <ActionMenuShell label="Delete" variant="destructive">
+      <form action={deletePackAction} className="flex flex-col gap-3">
         <input type="hidden" name="projectSlug" value={projectSlug} />
         <input type="hidden" name="packSlug" value={packSlug} />
         <input type="hidden" name="cwd" value={cwd} />
@@ -348,27 +331,31 @@ function DeleteButton({
           Per CLI semantics: removes <span className="font-mono">{`docs/feature-packs/${packSlug}/`}</span> from disk
           AND flips <span className="font-mono">feature_packs.is_active = false</span>. Row preserved per ADR-007.
         </p>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-display text-xs font-bold uppercase tracking-wider text-(--color-text-secondary)">
-            Type <span className="font-mono normal-case tracking-normal">delete {packSlug}</span> to confirm
-          </span>
-          <input
-            type="text"
+        <FormRow
+          inputId={`delete-confirm-${packSlug}`}
+          label="Type to confirm"
+          required
+          helper={
+            <>
+              <span className="font-mono">delete {packSlug}</span> exactly
+            </>
+          }
+        >
+          <Input
+            id={`delete-confirm-${packSlug}`}
             name="confirmation"
             required
+            mono
             placeholder={`delete ${packSlug}`}
             autoComplete="off"
-            className="border border-(--color-border-default) bg-(--color-bg-base) px-2 py-1.5 font-mono text-sm"
+            invalid
           />
-        </label>
-        <button
-          type="submit"
-          className="bg-(--color-status-error) px-4 py-2 font-display text-xs font-bold uppercase tracking-wider text-white hover:opacity-80"
-        >
+        </FormRow>
+        <Button type="submit" variant="destructive" size="sm">
           Delete
-        </button>
+        </Button>
       </form>
-    </details>
+    </ActionMenuShell>
   );
 }
 
@@ -377,50 +364,40 @@ function DeleteButton({
 // ---------------------------------------------------------------------------
 
 function Banners(sp: SearchParams & { readonly packSlug: string }) {
+  if (
+    sp.regenerated === undefined &&
+    sp.deleted === undefined &&
+    sp.installed === undefined &&
+    sp.edited === undefined &&
+    sp.error === undefined
+  ) {
+    return null;
+  }
   return (
     <div className="flex flex-col gap-2">
       {sp.regenerated !== undefined ? (
-        <Banner kind="success">✓ Regenerated. Auto-managed sections refreshed.</Banner>
+        <Banner kind="success">Regenerated. Auto-managed sections refreshed.</Banner>
       ) : null}
       {sp.installed !== undefined ? (
         <Banner kind="success">
-          ✓ Installed template <span className="font-mono">{sp.installed}</span>.
+          Installed template <span className="font-mono">{sp.installed}</span>.
         </Banner>
       ) : null}
       {sp.edited !== undefined ? (
         <Banner kind="success">
-          ✓ Saved <span className="font-mono">{sp.edited}</span>. Auto-marker contract preserved.
+          Saved <span className="font-mono">{sp.edited}</span>. Auto-marker contract preserved.
         </Banner>
       ) : null}
       {sp.deleted !== undefined ? (
-        // Reachable only via direct URL fiddling (the action redirects
-        // to /packs after a successful delete, where this banner
-        // doesn't render). Kept defensive.
         <Banner kind="info">
           Pack <span className="font-mono">{sp.deleted}</span> deleted.
         </Banner>
       ) : null}
       {sp.error !== undefined ? (
-        <Banner kind="error">
-          ✕ {sp.error}
-          {sp.errorMessage !== undefined ? <span className="ml-2">{sp.errorMessage}</span> : null}
+        <Banner kind="error" code={sp.error}>
+          {sp.errorMessage ?? '—'}
         </Banner>
       ) : null}
     </div>
   );
-}
-
-function Banner({
-  kind,
-  children,
-}: {
-  readonly kind: 'success' | 'info' | 'error';
-  readonly children: React.ReactNode;
-}) {
-  const colors: Record<'success' | 'info' | 'error', string> = {
-    success: 'border-(--color-status-success) bg-(--color-status-success)/10',
-    info: 'border-(--color-status-info) bg-(--color-status-info)/10',
-    error: 'border-(--color-status-error) bg-(--color-status-error)/10',
-  };
-  return <div className={`border-l-4 ${colors[kind]} px-4 py-2 text-sm`}>{children}</div>;
 }

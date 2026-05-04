@@ -1,6 +1,5 @@
-import Link from 'next/link';
-
 import { ProjectCard } from '@/components/ProjectCard';
+import { EmptyState, LinkButton, PageHeader, PageShell, PlusIcon } from '@/components/ui';
 import { fetchPickerSnapshot } from '@/lib/queries/picker';
 
 /**
@@ -10,12 +9,8 @@ import { fetchPickerSnapshot } from '@/lib/queries/picker';
  * Renders every registered project (excluding the `__global__`
  * sentinel) as a clickable `<ProjectCard>`. Each card shows per-
  * project tile counts + a status dot + last-activity timestamp.
- *
- * From here the operator picks a project; every operational surface
- * lives under `/projects/[slug]/...` per the hub-and-spoke IA.
- *
- * "+ Create project" CTA links to `/init` (S3 implements the wizard;
- * for now a placeholder redirect lives there).
+ * Composed from the shared primitives library so the workspace
+ * gutter / vertical rhythm matches /sync, /init, /settings/*.
  */
 
 export const dynamic = 'force-dynamic';
@@ -23,25 +18,39 @@ export const dynamic = 'force-dynamic';
 export default async function ProjectPickerPage() {
   const snapshot = await fetchPickerSnapshot();
   return (
-    <div className="mx-auto flex max-w-[1200px] flex-col gap-12 px-8 py-12">
-      <header className="flex flex-col gap-3">
-        <div className="flex items-baseline justify-between gap-4">
-          <h1 className="font-display text-[56px] leading-[64px] font-black uppercase tracking-wide">Projects</h1>
-          <Link
-            href="/init"
-            className="bg-(--color-brand) px-6 py-3 font-display text-xs font-bold uppercase tracking-wider text-white hover:bg-(--color-brand-hover)"
-          >
-            + New project
-          </Link>
-        </div>
-        <p className="text-sm text-(--color-text-secondary)">
-          {snapshot.projects.length} project{snapshot.projects.length === 1 ? '' : 's'} ·{' '}
-          <span className="font-mono uppercase">{snapshot.mode}</span> mode · sorted by last activity.
-        </p>
-      </header>
+    <PageShell variant="workspace">
+      <PageHeader
+        title="Projects"
+        subtitle={
+          <>
+            {snapshot.projects.length} project{snapshot.projects.length === 1 ? '' : 's'} ·{' '}
+            <span className="font-mono uppercase">{snapshot.mode}</span> mode · sorted by last activity.
+          </>
+        }
+        actions={
+          <LinkButton href="/init" variant="primary" leftIcon={<PlusIcon className="h-3 w-3" />}>
+            New project
+          </LinkButton>
+        }
+      />
 
       {snapshot.projects.length === 0 ? (
-        <EmptyState />
+        <EmptyState
+          size="lg"
+          title="No projects yet"
+          body={
+            <>
+              ContextOS organises everything around projects. Create one from the web wizard, or run{' '}
+              <span className="font-mono">contextos init --project-slug X --no-graphify --ide claude</span> in a project
+              root.
+            </>
+          }
+          action={
+            <LinkButton href="/init" variant="primary" leftIcon={<PlusIcon className="h-3 w-3" />}>
+              Create project
+            </LinkButton>
+          }
+        />
       ) : (
         <section className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
           {snapshot.projects.map((p) => (
@@ -63,29 +72,6 @@ export default async function ProjectPickerPage() {
       <footer className="text-center text-xs text-(--color-text-tertiary)">
         Last refreshed {new Date(snapshot.fetchedAt).toLocaleTimeString()}
       </footer>
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="border border-(--color-border-subtle) bg-(--color-bg-surface) p-16 text-center">
-      <div className="mx-auto mb-6 inline-flex h-16 w-16 items-center justify-center border-2 border-(--color-brand) text-3xl text-(--color-brand)">
-        ◫
-      </div>
-      <h2 className="font-display text-xl font-bold uppercase tracking-wider text-(--color-text-primary)">
-        No projects yet
-      </h2>
-      <p className="mx-auto mt-3 max-w-md text-sm text-(--color-text-secondary)">
-        ContextOS organises everything around projects. Create one from the web wizard, or run{' '}
-        <span className="font-mono">contextos init --project-slug X --no-graphify --ide claude</span> in a project root.
-      </p>
-      <Link
-        href="/init"
-        className="mt-6 inline-block bg-(--color-brand) px-6 py-3 font-display text-xs font-bold uppercase tracking-wider text-white hover:bg-(--color-brand-hover)"
-      >
-        + Create project
-      </Link>
-    </div>
+    </PageShell>
   );
 }
