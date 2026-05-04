@@ -1,7 +1,7 @@
 import Link from 'next/link';
 
 import { RunStatusChip } from '@/components/RunStatusChip';
-import { resetProjectAction } from '@/lib/actions/projects';
+import { deleteProjectAction, renameProjectAction, resetProjectAction } from '@/lib/actions/projects';
 import { resolveProjectFromParams } from '@/lib/project-context';
 
 /**
@@ -23,6 +23,10 @@ export const dynamic = 'force-dynamic';
 
 interface SearchParams {
   readonly error?: string;
+  readonly errorMessage?: string;
+  readonly reset?: string;
+  readonly summary?: string;
+  readonly renamed?: string;
 }
 
 const GLOBAL_PROJECT_SLUG = '__global__';
@@ -63,10 +67,69 @@ export default async function ProjectSettingsPage({
         </dl>
       </header>
 
-      {sp.error !== undefined ? (
-        <div className="border-l-4 border-(--color-status-error) bg-(--color-status-error)/10 px-4 py-3 text-sm">
-          ✕ {sp.error}
-        </div>
+      <Banners {...sp} />
+
+      <Section title="Export">
+        <p className="text-sm text-(--color-text-secondary)">
+          Download every per-project audit row as JSONL — one object per line, tagged by{' '}
+          <span className="font-mono">type</span> (project / run / run_event / decision / policy_decision /
+          context_pack).
+        </p>
+        <a
+          href={`/projects/${encodeURIComponent(project.slug)}/settings/export`}
+          className="self-start bg-(--color-brand) px-6 py-2 font-display text-xs font-bold uppercase tracking-wider text-white hover:bg-(--color-brand-hover)"
+          download
+        >
+          Download JSONL
+        </a>
+      </Section>
+
+      {!isSentinel ? (
+        <Section title="Rename">
+          <form
+            action={renameProjectAction}
+            className="flex flex-col gap-3 border border-(--color-border-subtle) bg-(--color-bg-surface) p-6"
+          >
+            <input type="hidden" name="identifier" value={project.id} />
+            <p className="text-sm text-(--color-text-primary)">
+              Change the project's slug. The URL becomes <span className="font-mono">/projects/&lt;new-slug&gt;</span>.
+              Runs / events / context packs stay attached. Other devices that have the project opened will get a 404
+              until they refresh.
+            </p>
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="font-display font-bold uppercase tracking-wider text-(--color-text-secondary)">
+                New slug
+              </span>
+              <input
+                type="text"
+                name="newSlug"
+                required
+                pattern="[a-z0-9_-]+"
+                placeholder="my-renamed-project"
+                className="border border-(--color-border-default) bg-(--color-bg-base) px-3 py-2 font-mono text-sm"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="font-display font-bold uppercase tracking-wider text-(--color-text-secondary)">
+                Type the new slug to confirm
+              </span>
+              <input
+                type="text"
+                name="confirmation"
+                required
+                autoComplete="off"
+                placeholder="(repeat the new slug)"
+                className="border border-(--color-border-default) bg-(--color-bg-base) px-3 py-2 font-mono text-sm"
+              />
+            </label>
+            <button
+              type="submit"
+              className="self-start bg-(--color-brand) px-6 py-2 font-display text-xs font-bold uppercase tracking-wider text-white hover:bg-(--color-brand-hover)"
+            >
+              Rename
+            </button>
+          </form>
+        </Section>
       ) : null}
 
       <Section title="Overview">
@@ -169,6 +232,41 @@ export default async function ProjectSettingsPage({
         )}
       </Section>
 
+      {!isSentinel ? (
+        <Section title="Delete project (irreversible)">
+          <form
+            action={deleteProjectAction}
+            className="flex flex-col gap-3 border border-(--color-status-error)/40 bg-(--color-bg-surface) p-6"
+          >
+            <input type="hidden" name="identifier" value={project.id} />
+            <p className="text-sm text-(--color-text-primary)">
+              Permanently delete <span className="font-mono">{project.slug}</span> AND every per-run audit row, policy,
+              policy_rule, kill_switch, and context pack scoped to this project. The projects row itself is also dropped
+              — slug becomes available for re-init. There is no undo.
+            </p>
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="font-display font-bold uppercase tracking-wider text-(--color-text-secondary)">
+                Type <span className="font-mono normal-case tracking-normal">{project.slug}</span> to confirm
+              </span>
+              <input
+                type="text"
+                name="confirmation"
+                required
+                autoComplete="off"
+                placeholder={project.slug}
+                className="border border-(--color-status-error)/40 bg-(--color-bg-base) px-3 py-2 font-mono text-sm"
+              />
+            </label>
+            <button
+              type="submit"
+              className="self-start bg-(--color-status-error) px-6 py-2 font-display text-xs font-bold uppercase tracking-wider text-white hover:opacity-80"
+            >
+              Delete permanently
+            </button>
+          </form>
+        </Section>
+      ) : null}
+
       <div>
         <Link
           href="/"
@@ -177,6 +275,29 @@ export default async function ProjectSettingsPage({
           ◂ Back to all projects
         </Link>
       </div>
+    </div>
+  );
+}
+
+function Banners(sp: SearchParams) {
+  return (
+    <div className="flex flex-col gap-2">
+      {sp.reset !== undefined ? (
+        <div className="border-l-4 border-(--color-status-success) bg-(--color-status-success)/10 px-4 py-3 text-sm">
+          ✓ Project reset. {sp.summary !== undefined ? <span className="font-mono text-xs">{sp.summary}</span> : null}
+        </div>
+      ) : null}
+      {sp.renamed !== undefined ? (
+        <div className="border-l-4 border-(--color-status-success) bg-(--color-status-success)/10 px-4 py-3 text-sm">
+          ✓ Renamed from <span className="font-mono">{sp.renamed}</span>.
+        </div>
+      ) : null}
+      {sp.error !== undefined ? (
+        <div className="border-l-4 border-(--color-status-error) bg-(--color-status-error)/10 px-4 py-3 text-sm">
+          ✕ <span className="font-mono">{sp.error}</span>
+          {sp.errorMessage !== undefined ? <span className="ml-2">{sp.errorMessage}</span> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

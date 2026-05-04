@@ -380,3 +380,183 @@ export async function resetProject(
 
 void isNull;
 void ne;
+
+// ---------------------------------------------------------------------------
+// renameProject (M04 Phase 2 S14)
+// ---------------------------------------------------------------------------
+
+export interface RenameProjectArgs {
+  readonly projectId: string;
+  readonly newSlug: string;
+}
+
+export type RenameProjectResult =
+  | { readonly status: 'renamed'; readonly projectId: string; readonly oldSlug: string; readonly newSlug: string }
+  | { readonly status: 'not_found' }
+  | { readonly status: 'sentinel_locked' }
+  | { readonly status: 'slug_taken'; readonly newSlug: string };
+
+const SLUG_RE_LIB = /^[a-z0-9_-]+$/;
+
+export async function renameProject(db: DbHandle, args: RenameProjectArgs): Promise<RenameProjectResult> {
+  if (args.projectId === GLOBAL_PROJECT_ID) return { status: 'sentinel_locked' };
+  const newSlug = args.newSlug.trim();
+  if (!SLUG_RE_LIB.test(newSlug)) {
+    return { status: 'slug_taken', newSlug };
+  }
+  if (db.kind === 'sqlite') {
+    const t = sqliteSchema.projects;
+    const rows = await db.db.select().from(t).where(eq(t.id, args.projectId)).limit(1);
+    const cur = rows[0];
+    if (cur === undefined) return { status: 'not_found' };
+    const oldSlug = cur.slug;
+    if (oldSlug === newSlug) {
+      return { status: 'renamed', projectId: args.projectId, oldSlug, newSlug };
+    }
+    const taken = await db.db.select({ id: t.id }).from(t).where(eq(t.slug, newSlug)).limit(1);
+    if (taken[0] !== undefined && taken[0].id !== args.projectId) {
+      return { status: 'slug_taken', newSlug };
+    }
+    await db.db.update(t).set({ slug: newSlug, name: newSlug, updatedAt: new Date() }).where(eq(t.id, args.projectId));
+    return { status: 'renamed', projectId: args.projectId, oldSlug, newSlug };
+  }
+  const t = postgresSchema.projects;
+  const rows = await db.db.select().from(t).where(eq(t.id, args.projectId)).limit(1);
+  const cur = rows[0];
+  if (cur === undefined) return { status: 'not_found' };
+  const oldSlug = cur.slug;
+  if (oldSlug === newSlug) {
+    return { status: 'renamed', projectId: args.projectId, oldSlug, newSlug };
+  }
+  const taken = await db.db.select({ id: t.id }).from(t).where(eq(t.slug, newSlug)).limit(1);
+  if (taken[0] !== undefined && taken[0].id !== args.projectId) {
+    return { status: 'slug_taken', newSlug };
+  }
+  await db.db.update(t).set({ slug: newSlug, name: newSlug, updatedAt: new Date() }).where(eq(t.id, args.projectId));
+  return { status: 'renamed', projectId: args.projectId, oldSlug, newSlug };
+}
+
+// ---------------------------------------------------------------------------
+// deleteProject (M04 Phase 2 S14)
+// ---------------------------------------------------------------------------
+
+export interface DeleteProjectResult {
+  readonly status: 'deleted' | 'not_found' | 'sentinel_locked';
+  readonly projectId: string;
+  /** Counts from the cascading reset that runs first. */
+  readonly cascade?: ResetProjectResult;
+}
+
+export async function deleteProject(db: DbHandle, projectId: string): Promise<DeleteProjectResult> {
+  if (projectId === GLOBAL_PROJECT_ID) return { status: 'sentinel_locked', projectId };
+  // First wipe everything per-project (including policies + kill switches).
+  let cascade: ResetProjectResult;
+  try {
+    cascade = await resetProject(db, projectId, { keepPolicies: false });
+  } catch {
+    return { status: 'not_found', projectId };
+  }
+  if (db.kind === 'sqlite') {
+    const t = sqliteSchema.projects;
+    const r = (await db.db.delete(t).where(eq(t.id, projectId))) as { changes?: number };
+    if ((r.changes ?? 0) === 0) return { status: 'not_found', projectId, cascade };
+    return { status: 'deleted', projectId, cascade };
+  }
+  const t = postgresSchema.projects;
+  const r = await db.db.delete(t).where(eq(t.id, projectId)).returning({ id: t.id });
+  if (r.length === 0) return { status: 'not_found', projectId, cascade };
+  return { status: 'deleted', projectId, cascade };
+}
+
+// ---------------------------------------------------------------------------
+// readProjectExport (M04 Phase 2 S14) — JSONL stream payload
+// ---------------------------------------------------------------------------
+
+export interface ProjectExportRow {
+  readonly type: 'project' | 'run' | 'run_event' | 'decision' | 'policy_decision' | 'context_pack';
+  readonly data: unknown;
+}
+
+/**
+ * Streams every per-project audit row as a single ordered list,
+ * tagged by type. Caller serializes each entry as one JSON object per
+ * line ("JSONL"). Keeps per-row memory bounded (chunked SELECTs not
+ * yet — projects are typically small).
+ */
+export async function readProjectExport(db: DbHandle, projectId: string): Promise<ProjectExportRow[]> {
+  if (db.kind === 'sqlite') {
+    const s = sqliteSchema;
+    const proj = await db.db.select().from(s.projects).where(eq(s.projects.id, projectId)).limit(1);
+    const project = proj[0];
+    if (project === undefined) return [];
+    const runs = await db.db.select().from(s.runs).where(eq(s.runs.projectId, projectId)).orderBy(asc(s.runs.startedAt));
+    const runIds = runs.map((r) => r.id);
+    let runEvents: unknown[] = [];
+    let decisions: unknown[] = [];
+    if (runIds.length > 0) {
+      const ph = runIds.map(() => '?').join(',');
+      runEvents = (
+        db.raw.prepare(`SELECT * FROM run_events WHERE run_id IN (${ph}) ORDER BY created_at ASC`).all(...runIds) as unknown[]
+      );
+      decisions = (
+        db.raw.prepare(`SELECT * FROM decisions WHERE run_id IN (${ph}) ORDER BY created_at ASC`).all(...runIds) as unknown[]
+      );
+    }
+    const policyDecisions = await db.db
+      .select()
+      .from(s.policyDecisions)
+      .where(eq(s.policyDecisions.projectId, projectId))
+      .orderBy(asc(s.policyDecisions.createdAt));
+    const contextPacks = await db.db
+      .select()
+      .from(s.contextPacks)
+      .where(eq(s.contextPacks.projectId, projectId))
+      .orderBy(asc(s.contextPacks.createdAt));
+    return [
+      { type: 'project', data: project },
+      ...runs.map((r) => ({ type: 'run' as const, data: r })),
+      ...runEvents.map((d) => ({ type: 'run_event' as const, data: d })),
+      ...decisions.map((d) => ({ type: 'decision' as const, data: d })),
+      ...policyDecisions.map((d) => ({ type: 'policy_decision' as const, data: d })),
+      ...contextPacks.map((d) => ({ type: 'context_pack' as const, data: d })),
+    ];
+  }
+  const p = postgresSchema;
+  const proj = await db.db.select().from(p.projects).where(eq(p.projects.id, projectId)).limit(1);
+  const project = proj[0];
+  if (project === undefined) return [];
+  const runs = await db.db.select().from(p.runs).where(eq(p.runs.projectId, projectId)).orderBy(asc(p.runs.startedAt));
+  const runIds = runs.map((r) => r.id);
+  let runEvents: unknown[] = [];
+  let decisions: unknown[] = [];
+  if (runIds.length > 0) {
+    runEvents = await db.db
+      .select()
+      .from(p.runEvents)
+      .where(or(...runIds.map((id) => eq(p.runEvents.runId, id))))
+      .orderBy(asc(p.runEvents.createdAt));
+    decisions = await db.db
+      .select()
+      .from(p.decisions)
+      .where(or(...runIds.map((id) => eq(p.decisions.runId, id))))
+      .orderBy(asc(p.decisions.createdAt));
+  }
+  const policyDecisions = await db.db
+    .select()
+    .from(p.policyDecisions)
+    .where(eq(p.policyDecisions.projectId, projectId))
+    .orderBy(asc(p.policyDecisions.createdAt));
+  const contextPacks = await db.db
+    .select()
+    .from(p.contextPacks)
+    .where(eq(p.contextPacks.projectId, projectId))
+    .orderBy(asc(p.contextPacks.createdAt));
+  return [
+    { type: 'project', data: project },
+    ...runs.map((r) => ({ type: 'run' as const, data: r })),
+    ...runEvents.map((d) => ({ type: 'run_event' as const, data: d })),
+    ...decisions.map((d) => ({ type: 'decision' as const, data: d })),
+    ...policyDecisions.map((d) => ({ type: 'policy_decision' as const, data: d })),
+    ...contextPacks.map((d) => ({ type: 'context_pack' as const, data: d })),
+  ];
+}

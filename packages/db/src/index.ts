@@ -65,10 +65,17 @@ export {
   setPolicyActive,
 } from './policies.js';
 export {
+  type DeleteProjectResult,
+  deleteProject,
   getProjectByIdentifier,
   listProjects,
   type ProjectDetailRow,
+  type ProjectExportRow,
   type ProjectListRow,
+  readProjectExport,
+  type RenameProjectArgs,
+  type RenameProjectResult,
+  renameProject,
   type ResetProjectOptions,
   type ResetProjectResult,
   resetProject,

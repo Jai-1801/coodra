@@ -1,10 +1,16 @@
 import {
+  type DeleteProjectResult,
+  deleteProject as deleteProjectDb,
   getProjectByIdentifier as getProjectByIdentifierDb,
   listProjects as listProjectsDb,
   type ProjectDetailRow,
+  type ProjectExportRow,
   type ProjectListRow,
+  type RenameProjectResult,
   type ResetProjectOptions,
   type ResetProjectResult,
+  readProjectExport as readProjectExportDb,
+  renameProject as renameProjectDb,
   resetProject as resetProjectDb,
 } from '@coodra/contextos-db';
 
@@ -44,4 +50,28 @@ export async function resetProject(
   const project = await getProjectByIdentifierDb(handle, identifier);
   if (project === null) return null;
   return resetProjectDb(handle, project.id, options);
+}
+
+export async function renameProject(
+  identifier: string,
+  newSlug: string,
+): Promise<RenameProjectResult | { readonly status: 'not_found' }> {
+  const handle = createWebDb();
+  const project = await getProjectByIdentifierDb(handle, identifier);
+  if (project === null) return { status: 'not_found' };
+  return renameProjectDb(handle, { projectId: project.id, newSlug });
+}
+
+export async function deleteProject(identifier: string): Promise<DeleteProjectResult> {
+  const handle = createWebDb();
+  const project = await getProjectByIdentifierDb(handle, identifier);
+  if (project === null) return { status: 'not_found', projectId: identifier };
+  return deleteProjectDb(handle, project.id);
+}
+
+export async function readProjectExport(identifier: string): Promise<ReadonlyArray<ProjectExportRow>> {
+  const handle = createWebDb();
+  const project = await getProjectByIdentifierDb(handle, identifier);
+  if (project === null) return [];
+  return readProjectExportDb(handle, project.id);
 }
