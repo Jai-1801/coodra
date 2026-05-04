@@ -34,7 +34,7 @@ const ITEMS: ReadonlyArray<SubNavItem> = [
   { segment: 'context-packs', label: 'Context packs', status: 'live' },
   { segment: 'templates', label: 'Templates', status: 'live' },
   { segment: 'kill-switches', label: 'Kill switches', status: 'live' },
-  { segment: 'graph', label: 'Graph', status: 'coming' },
+  { segment: 'graph', label: 'Graph', status: 'live' },
   { segment: 'doctor', label: 'Doctor', status: 'live' },
   { segment: 'logs', label: 'Logs', status: 'coming' },
   { segment: 'settings', label: 'Settings', status: 'live' },
