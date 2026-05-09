@@ -78,6 +78,12 @@ export type ContextPackSource = 'agent' | 'bridge_auto';
 export interface ContextPackWriteOptions {
   readonly source: ContextPackSource;
   readonly meta?: ContextPackMeta;
+  /**
+   * Module 04 Phase 4 — Clerk user id of the human saving the pack.
+   * Forwarded to `context_packs.created_by_user_id`. NULL in solo
+   * mode + when the actor identity is unavailable.
+   */
+  readonly createdByUserId?: string | null;
 }
 
 export interface ContextPackWriteResult {
@@ -145,6 +151,7 @@ async function insertRow(
     readonly contentExcerpt: string;
     readonly source: ContextPackSource;
     readonly metaJson: string | null;
+    readonly createdByUserId: string | null;
   },
 ): Promise<{ readonly createdAt: Date }> {
   if (db.kind === 'sqlite') {
@@ -157,6 +164,7 @@ async function insertRow(
       contentExcerpt: row.contentExcerpt,
       source: row.source,
       meta: row.metaJson,
+      createdByUserId: row.createdByUserId,
     };
     const inserted = await db.db
       .insert(sqliteSchema.contextPacks)
@@ -173,6 +181,7 @@ async function insertRow(
     contentExcerpt: row.contentExcerpt,
     source: row.source,
     meta: row.metaJson,
+    createdByUserId: row.createdByUserId,
   };
   const inserted = await db.db
     .insert(postgresSchema.contextPacks)
@@ -336,6 +345,7 @@ export function createContextPackStore(deps: CreateContextPackStoreDeps): Contex
         contentExcerpt,
         source: incomingSource,
         metaJson,
+        createdByUserId: writeOptions.createdByUserId ?? null,
       });
 
       // Materialise FS view. Failure is non-fatal — DB is source of truth.

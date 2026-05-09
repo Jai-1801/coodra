@@ -59,7 +59,12 @@ export class SystemdDaemonManager implements DaemonManager {
   }
 
   async start(unitName: string): Promise<void> {
-    await this.run('systemctl', ['--user', 'start', this.unitName(unitName)], { reject: false, timeout: 5000 });
+    // Use `restart` not `start` so a fresh `contextos start` after a
+    // unit-file change always picks up the latest env. systemd's `start`
+    // is a no-op on an already-active unit; `restart` does stop+start
+    // and re-reads the (already daemon-reloaded) unit file. install()
+    // ran daemon-reload after writing, so this picks up new env.
+    await this.run('systemctl', ['--user', 'restart', this.unitName(unitName)], { reject: false, timeout: 5000 });
   }
 
   async stop(unitName: string): Promise<void> {

@@ -180,6 +180,7 @@ describe('createSqliteDb + migrateSqlite on a file-backed DB', () => {
         'policy_decisions',
         'policy_rules',
         'projects',
+        'run_diffs',
         'run_events',
         'runs',
       ]);
@@ -203,7 +204,7 @@ describe('createSqliteDb + migrateSqlite on a file-backed DB', () => {
                AND substr(name, 1, 18) <> 'context_packs_vec_'`,
         )
         .get() as { n: number };
-      expect(rows.n).toBe(12);
+      expect(rows.n).toBe(13);
     } finally {
       first.close();
     }

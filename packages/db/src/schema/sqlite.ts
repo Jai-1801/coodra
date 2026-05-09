@@ -61,6 +61,21 @@ export const runs = sqliteTable(
     status: text('status').notNull().default('in_progress'),
     issueRef: text('issue_ref'),
     prRef: text('pr_ref'),
+    // Module 06 (Run Diff, 2026-05-09). Git HEAD SHA captured at SessionStart
+    // by the bridge (see apps/hooks-bridge/src/lib/capture-base-sha.ts). NULL
+    // when the project is not a git repo, when `git rev-parse HEAD` failed,
+    // or when SessionStart fired before this column shipped. The SessionEnd
+    // run-diff runner uses this as the diff baseline; a NULL baseSha causes
+    // the run-diff row to be written with `error = 'no_base_sha'`.
+    baseSha: text('base_sha'),
+    // Team mode (Module 04 Phase 4, 2026-05-09). Clerk user id of the
+    // human running the agent session. Solo mode rows have NULL; team
+    // mode rows are stamped at SessionStart by the bridge after reading
+    // ~/.contextos/config.json::clerk_user_id. Used by the web app's
+    // member-attribution badges and the audit log; never used for
+    // authorization (Clerk JWT is the auth-of-record, this is the
+    // historical-record-of-actor).
+    createdByUserId: text('created_by_user_id'),
     startedAt: integer('started_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     endedAt: integer('ended_at', { mode: 'timestamp' }),
   },
@@ -117,6 +132,11 @@ export const contextPacks = sqliteTable(
     // schema): { decisionIds?, affectedFiles?, testStatus?, openTodos? }.
     // NULL when the caller didn't supply any.
     meta: text('meta'),
+    // Team mode (Module 04 Phase 4, 2026-05-09). Clerk user id of the
+    // member who saved the pack. NULL on solo + bridge_auto rows where
+    // no human identity exists. The MCP `save_context_pack` tool reads
+    // this from `~/.contextos/config.json` via the actor identity layer.
+    createdByUserId: text('created_by_user_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
   },
   (t) => [
@@ -162,6 +182,10 @@ export const policies = sqliteTable('policies', {
   name: text('name').notNull(),
   description: text('description'),
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  // Team mode (Module 04 Phase 4, 2026-05-09). Clerk user id of the
+  // admin who created/last-edited this policy. NULL on solo. Surfaced
+  // in the web admin's "created by" badge.
+  createdByUserId: text('created_by_user_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
 });
@@ -224,6 +248,10 @@ export const featurePacks = sqliteTable('feature_packs', {
   parentSlug: text('parent_slug'),
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
   checksum: text('checksum').notNull(),
+  // Team mode (Module 04 Phase 4, 2026-05-09). Clerk user id of the
+  // admin who pushed the latest revision via the web pack uploader.
+  // NULL when the pack landed via git (filesystem-walked) or solo mode.
+  createdByUserId: text('created_by_user_id'),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
 });
 
@@ -259,6 +287,11 @@ export const decisions = sqliteTable(
     confidence: text('confidence'),
     // Boolean stored as integer per better-sqlite3 convention; NULL = unknown.
     reversible: integer('reversible', { mode: 'boolean' }),
+    // Team mode (Module 04 Phase 4, 2026-05-09). Clerk user id of the
+    // member whose agent recorded the decision. NULL on solo + on
+    // pre-Phase-4 rows. The MCP `record_decision` tool reads this from
+    // `~/.contextos/config.json` via the actor identity layer.
+    createdByUserId: text('created_by_user_id'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
   },
   (t) => [index('decisions_run_created_idx').on(t.runId, t.createdAt)],
@@ -302,11 +335,19 @@ export const killSwitches = sqliteTable(
     pausedAt: integer('paused_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     // null when CLI-initiated (no session); set if the bridge ever flips a switch programmatically (post-M08b).
     pausedBySessionId: text('paused_by_session_id'),
+    // Team mode (Module 04 Phase 4, 2026-05-09). Clerk user id of the
+    // admin who paused. NULL on solo. Used in admin tables and the
+    // "resume your own pause" RBAC rule.
+    pausedByUserId: text('paused_by_user_id'),
     // null = no auto-expiry; bridge treats `expires_at < now()` as already-resumed.
     expiresAt: integer('expires_at', { mode: 'timestamp' }),
     // null = active; set by `contextos resume` (soft delete).
     resumedAt: integer('resumed_at', { mode: 'timestamp' }),
     resumedBySessionId: text('resumed_by_session_id'),
+    // Team mode (Module 04 Phase 4, 2026-05-09). Clerk user id of the
+    // member who resumed. Members can resume their own pauses; admins
+    // can resume anyone's. NULL while the switch is active.
+    resumedByUserId: text('resumed_by_user_id'),
   },
   (t) => [
     // Active-switch lookup is the bridge's hot path (cached 5s; query budget
@@ -315,6 +356,65 @@ export const killSwitches = sqliteTable(
     // (scope, target) drives the per-event match.
     index('kill_switches_active_idx').on(t.resumedAt, t.scope, t.target),
   ],
+);
+
+/**
+ * Module 06 (Run Diff, 2026-05-09).
+ *
+ * One row per run, written by the hooks-bridge SessionEnd handler after
+ * the run is marked completed and before the auto-context-pack save. The
+ * row carries a `git diff <runs.base_sha>` scoped to the file paths the
+ * agent touched in `run_events` (Edit / Write / MultiEdit tool calls).
+ *
+ * Soft-failure shape — every row always lands so consumers (auto-pack,
+ * MCP tool, web view) have something to read:
+ *   - `error = 'no_base_sha'`     — SessionStart didn't capture a HEAD
+ *                                   (non-git repo, capture failed, or
+ *                                   pre-2026-05-09 run).
+ *   - `error = 'no_edits_in_run'` — agent ran but had no Edit/Write
+ *                                   tool calls; nothing to diff.
+ *   - `error = 'git_diff_failed'` — `git diff` subprocess errored
+ *                                   (broken repo, missing object, etc).
+ *                                   Detail in `unified_diff` (kept as
+ *                                   the truncated stderr for triage).
+ *   - `error = NULL`              — diff captured successfully.
+ *
+ * `truncated = true` means the diff exceeded MAX_UNIFIED_DIFF_BYTES and
+ * was clipped at a clean line boundary; the MCP tool surfaces this so
+ * the agent can choose whether to read the file directly.
+ *
+ * Cascade-on-delete on `run_id` — deleting a run wipes its diff row.
+ * No analog of context_packs' append-only constraint: a re-run of the
+ * SessionEnd diff runner over the same `runId` is treated as an idempotent
+ * upsert (DELETE + INSERT in one transaction) so a re-played hook event
+ * produces a clean row, not a stale-from-first-attempt one.
+ */
+export const runDiffs = sqliteTable(
+  'run_diffs',
+  {
+    runId: text('run_id')
+      .primaryKey()
+      .references(() => runs.id, { onDelete: 'cascade' }),
+    // Snapshot of `runs.base_sha` at the time the diff was generated.
+    // Mirrored here so the diff row stays interpretable even if the
+    // runs row is updated. NULL only when error='no_base_sha'.
+    baseSha: text('base_sha'),
+    // git rev-parse HEAD at SessionEnd time. NULL when non-git or when
+    // base_sha is null (no diff was attempted).
+    headSha: text('head_sha'),
+    // Unified `git diff` output, scoped to files the agent touched.
+    // Empty string when error='no_edits_in_run' or 'no_base_sha'.
+    // Capped at MAX_UNIFIED_DIFF_BYTES; truncated=true signals overflow.
+    unifiedDiff: text('unified_diff').notNull().default(''),
+    // JSON-encoded array of { path, status: 'added'|'modified'|'deleted',
+    // additions: number, deletions: number } from `git diff --numstat`
+    // + `git diff --name-status`. Default '[]' for the soft-failure rows.
+    filesChanged: text('files_changed').notNull().default('[]'),
+    truncated: integer('truncated', { mode: 'boolean' }).notNull().default(false),
+    error: text('error'),
+    generatedAt: integer('generated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => [index('run_diffs_generated_at_idx').on(t.generatedAt)],
 );
 
 export type Project = typeof projects.$inferSelect;
@@ -337,5 +437,7 @@ export type FeaturePack = typeof featurePacks.$inferSelect;
 export type NewFeaturePack = typeof featurePacks.$inferInsert;
 export type Decision = typeof decisions.$inferSelect;
 export type NewDecision = typeof decisions.$inferInsert;
+export type RunDiff = typeof runDiffs.$inferSelect;
+export type NewRunDiff = typeof runDiffs.$inferInsert;
 export type KillSwitch = typeof killSwitches.$inferSelect;
 export type NewKillSwitch = typeof killSwitches.$inferInsert;

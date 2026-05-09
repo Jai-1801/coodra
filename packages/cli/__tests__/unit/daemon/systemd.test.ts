@@ -57,7 +57,11 @@ describe('SystemdDaemonManager — service-file write + systemctl wiring', () =>
     expect(calls).toEqual([{ file: 'systemctl', args: ['--user', 'daemon-reload'] }]);
   });
 
-  it('start runs systemctl --user start <unit>', async () => {
+  it('start runs systemctl --user restart <unit> so re-starts pick up the new env', async () => {
+    // `start` was changed to `restart` so a second `contextos start`
+    // after a unit-file change always picks up the latest env. systemd's
+    // `start` is a no-op on an already-active unit; `restart` does
+    // stop+start and re-reads the (already daemon-reloaded) unit file.
     const calls: Array<{ file: string; args: readonly string[] }> = [];
     const mgr = new SystemdDaemonManager({
       homeDir: home,
@@ -69,7 +73,7 @@ describe('SystemdDaemonManager — service-file write + systemctl wiring', () =>
     await mgr.install({ name: 'svc', command: '/x', args: [], env: {} });
     calls.length = 0; // discard daemon-reload from install
     await mgr.start('svc');
-    expect(calls).toEqual([{ file: 'systemctl', args: ['--user', 'start', 'contextos-svc.service'] }]);
+    expect(calls).toEqual([{ file: 'systemctl', args: ['--user', 'restart', 'contextos-svc.service'] }]);
   });
 
   it('status parses ActiveState=active + MainPID', async () => {

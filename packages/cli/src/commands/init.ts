@@ -7,6 +7,7 @@ import pc from 'picocolors';
 import { EXIT_ENVIRONMENT_PROBLEM, EXIT_OK, EXIT_USER_ACTION_REQUIRED, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosHome, resolveContextosLogsDir, resolveContextosPidsDir } from '../lib/contextos-home.js';
 import { detectIDE, detectLanguages, detectProjectRoot } from '../lib/detect.js';
+import { loadHomeEnv } from '../lib/load-home-env.js';
 import { defaultClaudeSettingsPath, mergeClaudeSettings } from '../lib/init/claude-settings-merge.js';
 import { writeContextosJson } from '../lib/init/contextos-json.js';
 import { type BaselineEnv, mergeEnvFile } from '../lib/init/env-merge.js';
@@ -140,6 +141,17 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
   }
   io.writeStdout(`${pc.green('✓')} Resolved ContextOS home: ${contextosHome}\n`);
 
+  // M04 Phase 4 / Phase G+H verification: layer ~/.contextos/.env into
+  // process.env so that `ensureProject` (and any other helper that reads
+  // `process.env.CONTEXTOS_MODE`) sees `team` after `team setup` ran.
+  // Without this the team-mode sync_to_cloud enqueue for the projects
+  // row never fires from init, cloud Postgres never gets the row, and
+  // every downstream runs/decisions push hits an FK violation.
+  const homeLayered = loadHomeEnv(contextosHome, root);
+  for (const [key, value] of Object.entries(homeLayered)) {
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+
   // Apply migrations + seed F7 sentinel + register the user's project +
   // seed default policy rules (Phase 3 Fix D, 2026-05-02 — pre-Phase-3
   // init created the project but inserted zero rules; the evaluator
@@ -156,7 +168,18 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
       // path of the project (where .contextos.json lives). The web app reads
       // this back to write per-project pack uploads into the correct folder
       // — see `apps/web-v2/lib/queries/packs.ts:packsRoot()`.
-      const projectResult = await ensureProject(handle, { slug: projectSlug, cwd: root });
+      //
+      // In team mode, also pass the team's Clerk org id so the projects
+      // row carries the correct org affiliation. Without this, init would
+      // default to `__solo__` even after `team setup` set up the team
+      // config, and the cloud-side `org_id` column would split the project
+      // off from the rest of the org's data.
+      const teamOrgId = process.env.CONTEXTOS_MODE === 'team' ? process.env.CONTEXTOS_TEAM_ORG_ID : undefined;
+      const projectResult = await ensureProject(handle, {
+        slug: projectSlug,
+        cwd: root,
+        ...(teamOrgId !== undefined && teamOrgId.length > 0 ? { orgId: teamOrgId } : {}),
+      });
       const policyResult = await ensureDefaultPolicy(handle, projectResult.id);
       io.writeStdout(
         `${pc.green('✓')} Applied migrations + seeded __global__ + registered project '${projectSlug}' ` +
@@ -201,7 +224,10 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
 
   const localHookSecret = randomBytes(32).toString('hex');
   const baselineEnv: BaselineEnv = {
-    CONTEXTOS_MODE: 'solo',
+    // Module 04 Phase 4 H6 — CONTEXTOS_MODE intentionally omitted. See
+    // BaselineEnv type comment for the full reason. tldr: project .env
+    // wins over home .env in `loadHomeEnv`, so writing 'solo' here
+    // would override `team setup`'s home-level CONTEXTOS_MODE=team.
     CLERK_SECRET_KEY: 'sk_test_replace_me',
     CLERK_PUBLISHABLE_KEY: 'pk_test_replace_me',
     LOCAL_HOOK_SECRET: localHookSecret,

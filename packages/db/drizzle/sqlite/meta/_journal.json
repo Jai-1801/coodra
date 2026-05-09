@@ -78,6 +78,20 @@
       "when": 1778310400000,
       "tag": "0010_projects_cwd",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1778400000000,
+      "tag": "0011_m06_run_diffs",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1778460000000,
+      "tag": "0012_team_actor_attribution",
+      "breakpoints": true
     }
   ]
 }

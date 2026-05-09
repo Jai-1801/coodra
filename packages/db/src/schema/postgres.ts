@@ -1,4 +1,14 @@
-import { boolean, index, integer, pgTable, text, timestamp, uniqueIndex, vector } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  vector,
+} from 'drizzle-orm/pg-core';
 
 /**
  * Postgres schema — team-mode cloud store (`system-architecture.md` §4.2).
@@ -46,6 +56,10 @@ export const runs = pgTable(
     status: text('status').notNull().default('in_progress'),
     issueRef: text('issue_ref'),
     prRef: text('pr_ref'),
+    // Module 06 — see ./sqlite.ts::runs.baseSha for the full rationale.
+    baseSha: text('base_sha'),
+    // Module 04 Phase 4 — see ./sqlite.ts::runs.createdByUserId.
+    createdByUserId: text('created_by_user_id'),
     startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     endedAt: timestamp('ended_at', { withTimezone: true, mode: 'date' }),
   },
@@ -93,6 +107,8 @@ export const contextPacks = pgTable(
     // Module 05 — JSON-encoded agent-curated metadata. Use `text` (not
     // `jsonb`) for parity with SQLite. Handler does JSON.parse/stringify.
     meta: text('meta'),
+    // Module 04 Phase 4 — see ./sqlite.ts::contextPacks.createdByUserId.
+    createdByUserId: text('created_by_user_id'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   (t) => [
@@ -138,6 +154,8 @@ export const policies = pgTable('policies', {
   name: text('name').notNull(),
   description: text('description'),
   isActive: boolean('is_active').notNull().default(true),
+  // Module 04 Phase 4 — see ./sqlite.ts::policies.createdByUserId.
+  createdByUserId: text('created_by_user_id'),
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
 });
@@ -196,6 +214,8 @@ export const featurePacks = pgTable('feature_packs', {
   parentSlug: text('parent_slug'),
   isActive: boolean('is_active').notNull().default(true),
   checksum: text('checksum').notNull(),
+  // Module 04 Phase 4 — see ./sqlite.ts::featurePacks.createdByUserId.
+  createdByUserId: text('created_by_user_id'),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
 });
 
@@ -226,6 +246,8 @@ export const decisions = pgTable(
     impact: text('impact'),
     confidence: text('confidence'),
     reversible: boolean('reversible'),
+    // Module 04 Phase 4 — see ./sqlite.ts::decisions.createdByUserId.
+    createdByUserId: text('created_by_user_id'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   (t) => [index('decisions_run_created_idx').on(t.runId, t.createdAt)],
@@ -248,15 +270,42 @@ export const killSwitches = pgTable(
     reason: text('reason').notNull(),
     pausedAt: timestamp('paused_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     pausedBySessionId: text('paused_by_session_id'),
+    // Module 04 Phase 4 — see ./sqlite.ts::killSwitches.pausedByUserId.
+    pausedByUserId: text('paused_by_user_id'),
     expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }),
     resumedAt: timestamp('resumed_at', { withTimezone: true, mode: 'date' }),
     resumedBySessionId: text('resumed_by_session_id'),
+    // Module 04 Phase 4 — see ./sqlite.ts::killSwitches.resumedByUserId.
+    resumedByUserId: text('resumed_by_user_id'),
   },
   (t) => [
     // Mirror of the SQLite active-switch index. See sqlite.ts for the
     // hot-path rationale.
     index('kill_switches_active_idx').on(t.resumedAt, t.scope, t.target),
   ],
+);
+
+/**
+ * Module 06 — run diffs (postgres mirror of sqlite.ts::runDiffs). See
+ * ./sqlite.ts for the full design rationale, soft-failure shape, and
+ * idempotency contract. Schema-parity test enforces column-name +
+ * dataType + notNull match.
+ */
+export const runDiffs = pgTable(
+  'run_diffs',
+  {
+    runId: text('run_id')
+      .primaryKey()
+      .references(() => runs.id, { onDelete: 'cascade' }),
+    baseSha: text('base_sha'),
+    headSha: text('head_sha'),
+    unifiedDiff: text('unified_diff').notNull().default(''),
+    filesChanged: text('files_changed').notNull().default('[]'),
+    truncated: boolean('truncated').notNull().default(false),
+    error: text('error'),
+    generatedAt: timestamp('generated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (t) => [index('run_diffs_generated_at_idx').on(t.generatedAt)],
 );
 
 export type Project = typeof projects.$inferSelect;
@@ -281,3 +330,73 @@ export type Decision = typeof decisions.$inferSelect;
 export type NewDecision = typeof decisions.$inferInsert;
 export type KillSwitch = typeof killSwitches.$inferSelect;
 export type NewKillSwitch = typeof killSwitches.$inferInsert;
+export type RunDiff = typeof runDiffs.$inferSelect;
+export type NewRunDiff = typeof runDiffs.$inferInsert;
+
+/**
+ * Module 04 Phase 4 — `_migration_attempts`. **Postgres-only**; the
+ * solo SQLite store has no use for this since migration moves data
+ * solo→team, never team→solo at the data layer (`contextos team leave`
+ * just clears local team config — it doesn't write a migration row).
+ *
+ * Tracks the lifecycle of each `contextos team migrate` invocation so:
+ *   - A crashed migration can be **resumed** on the next CLI run by
+ *     looking up `status='running'` for this (orgId, userId) and
+ *     continuing from `last_phase`.
+ *   - A failed migration can be **rolled back** by deleting all rows
+ *     in `_migration_map` for `attempt_id` and undoing the cloud
+ *     INSERTs they tracked.
+ *   - Concurrent migrations from the same user are **prevented** at
+ *     application level: the executor SELECTs `status='running'` for
+ *     (orgId, userId) before INSERTing a new attempt; the second
+ *     concurrent CLI sees the existing row and refuses.
+ *
+ * Schema-parity test does NOT cover this table because it has no
+ * SQLite mirror (deliberate — see comment header). Future audits that
+ * walk the schema must check for this exception.
+ */
+export const migrationAttempts = pgTable('_migration_attempts', {
+  id: text('id').primaryKey(),
+  clerkUserId: text('clerk_user_id').notNull(),
+  clerkOrgId: text('clerk_org_id').notNull(),
+  // Hostname of the source machine — for triage.
+  sourceMachine: text('source_machine').notNull(),
+  // 'running' | 'completed' | 'failed' | 'rolled_back'
+  status: text('status').notNull(),
+  startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
+  // Last successfully-completed phase, for resume. e.g. 'projects', 'runs',
+  // 'children', 'org_scoped', 'verify', 'commit'.
+  lastPhase: text('last_phase'),
+  error: text('error'),
+});
+
+/**
+ * Module 04 Phase 4 — `_migration_map`. Postgres-only. Per-attempt log
+ * of every (table, old_id, new_id) tuple the executor wrote, so a
+ * resume can skip already-migrated rows and a rollback can DELETE
+ * exactly the cloud rows the failed attempt created.
+ *
+ * Composite primary key on (attempt_id, table_name, old_id). One row
+ * per source-table source-id; the new_id is the cloud-side uuid the
+ * executor minted (or the same id when the executor preserved it,
+ * e.g. for runs where we keep the original `run:{projectId}:{...}`
+ * shape per the §3.4 design decision).
+ */
+export const migrationMap = pgTable(
+  '_migration_map',
+  {
+    attemptId: text('attempt_id')
+      .notNull()
+      .references(() => migrationAttempts.id, { onDelete: 'cascade' }),
+    tableName: text('table_name').notNull(),
+    oldId: text('old_id').notNull(),
+    newId: text('new_id').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.attemptId, t.tableName, t.oldId] })],
+);
+
+export type MigrationAttempt = typeof migrationAttempts.$inferSelect;
+export type NewMigrationAttempt = typeof migrationAttempts.$inferInsert;
+export type MigrationMapEntry = typeof migrationMap.$inferSelect;
+export type NewMigrationMapEntry = typeof migrationMap.$inferInsert;

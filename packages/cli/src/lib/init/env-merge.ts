@@ -11,7 +11,16 @@ import type { WriteOutcome } from './types.js';
  * gets a fresh secret without the user ever pasting one.
  */
 export interface BaselineEnv {
-  readonly CONTEXTOS_MODE: string;
+  // CONTEXTOS_MODE intentionally NOT in the project-level baseline.
+  // Mode is a per-machine setting that lives in ~/.contextos/.env
+  // (written by `team setup` / `team join`) — putting it in the
+  // project .env would override the home setting because cwd .env
+  // wins over home in `loadHomeEnv`'s precedence. See Phase 4 H6
+  // verification: writing `CONTEXTOS_MODE=solo` to project .env
+  // silently put team-mode users back into solo on every `start`.
+  // Solo's default is read at the bridge / mcp-server boot path's
+  // Zod schema (`baseEnvSchema.CONTEXTOS_MODE.default('solo')`), so
+  // a missing var still yields solo for fresh users.
   readonly CLERK_SECRET_KEY: string;
   readonly CLERK_PUBLISHABLE_KEY: string;
   readonly LOCAL_HOOK_SECRET: string;

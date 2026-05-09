@@ -33,6 +33,7 @@ import { upgradeAvailableCheck } from './checks/32-upgrade-available.js';
 import { staleBackupsCheck } from './checks/33-stale-backups.js';
 import { bundledTemplatesCheck } from './checks/34-bundled-templates.js';
 import { autoMarkerSmokeCheck } from './checks/35-auto-marker-smoke.js';
+import { teamConfigCheck } from './checks/36-team-config.js';
 import type { Check } from './types.js';
 
 /**
@@ -106,6 +107,8 @@ export const ALL_CHECKS: readonly Check[] = tagEssential([
   staleBackupsCheck,
   bundledTemplatesCheck,
   autoMarkerSmokeCheck,
+  // Module 04 Phase 4 — team-mode bootstrap state.
+  teamConfigCheck,
 ]);
 
 /**

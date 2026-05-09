@@ -67,7 +67,11 @@ describe('LaunchdDaemonManager — plist write + launchctl wiring', () => {
     expect(called).toBeNull();
   });
 
-  it('start invokes launchctl bootstrap gui/<uid> <plist>', async () => {
+  it('start invokes launchctl bootout-then-bootstrap so re-starts pick up new plists', async () => {
+    // Background: launchctl bootstrap is a no-op when the label is
+    // already loaded. A second `contextos start` with a different
+    // CONTEXTOS_HOME used to be silently ignored; the daemon kept its
+    // stale env. Fix: bootout-first, then bootstrap. Verify both calls.
     const calls: Array<{ file: string; args: readonly string[] }> = [];
     const mgr = new LaunchdDaemonManager({
       homeDir: home,
@@ -78,11 +82,14 @@ describe('LaunchdDaemonManager — plist write + launchctl wiring', () => {
     });
     await mgr.install({ name: 'svc', command: '/x', args: [], env: {} });
     await mgr.start('svc');
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls[0]?.file).toBe('launchctl');
-    expect(calls[0]?.args[0]).toBe('bootstrap');
-    expect(calls[0]?.args[1]).toMatch(/^gui\/\d+$/);
-    expect(String(calls[0]?.args[2])).toContain('com.contextos.svc.plist');
+    expect(calls[0]?.args[0]).toBe('bootout');
+    expect(calls[0]?.args[1]).toMatch(/^gui\/\d+\/com\.contextos\.svc$/);
+    expect(calls[1]?.file).toBe('launchctl');
+    expect(calls[1]?.args[0]).toBe('bootstrap');
+    expect(calls[1]?.args[1]).toMatch(/^gui\/\d+$/);
+    expect(String(calls[1]?.args[2])).toContain('com.contextos.svc.plist');
   });
 
   it('status parses pid from `launchctl print` output', async () => {

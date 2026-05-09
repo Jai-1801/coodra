@@ -56,7 +56,14 @@ describe('FallbackDaemonManager — real-spawn integration', () => {
     await expect(readFile(unitPath, 'utf8')).rejects.toThrow();
   });
 
-  it('start is idempotent — second call no-ops when already running', async () => {
+  it('start force-restarts when already running so a re-installed unit picks up the new env', async () => {
+    // The OLD contract was "start is idempotent — second call no-ops".
+    // That was a bug: after `contextos start` is invoked a second time
+    // with a different CONTEXTOS_HOME, the previously-spawned process
+    // continued to serve the OLD env and the new install() was silently
+    // ignored. The contract is now: `start` always tears down any prior
+    // instance first, then spawns fresh against the latest installed
+    // unit. Verify the second start produces a different PID.
     const mgr = new FallbackDaemonManager({ contextosHome: home });
     await mgr.install({
       name: 'idempo',
@@ -66,9 +73,11 @@ describe('FallbackDaemonManager — real-spawn integration', () => {
     });
     await mgr.start('idempo');
     const first = await mgr.status('idempo');
+    expect(first.state).toBe('running');
     await mgr.start('idempo');
     const second = await mgr.status('idempo');
-    expect(second.pid).toBe(first.pid);
+    expect(second.state).toBe('running');
+    expect(second.pid).not.toBe(first.pid);
     await mgr.stop('idempo');
     await mgr.uninstall('idempo');
   });

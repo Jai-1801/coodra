@@ -16,6 +16,7 @@ import { createPreToolUseHandler } from './handlers/pre-tool-use.js';
 import { createSessionEndHandler } from './handlers/session-end.js';
 import { createSessionStartHandler } from './handlers/session-start.js';
 import { createUserPromptSubmitHandler } from './handlers/user-prompt-submit.js';
+import { getActorIdentity } from './lib/actor-identity.js';
 import { createHooksBridgeDbClient, resolveSqlitePathFromEnv } from './lib/db.js';
 import { composeDispatch } from './lib/dispatch.js';
 import { createKillSwitchEvaluator } from './lib/kill-switch-evaluator.js';
@@ -87,6 +88,11 @@ async function main(): Promise<void> {
     // recorder's defensive implicit session_open uses the right
     // value. Falls back to 'solo' if env.CONTEXTOS_MODE is undefined.
     mode: env.CONTEXTOS_MODE ?? 'solo',
+    // M04 Phase 4: human-actor identity for `created_by_user_id`
+    // stamping in team mode. Reads from `~/.contextos/config.json`
+    // on every call so a `contextos team migrate` mid-run picks up
+    // the new identity without a bridge restart.
+    resolveActorIdentity: getActorIdentity,
   });
   outboxWorker.start();
   bootLogger.info({ event: 'outbox_worker_started' }, 'OutboxWorker started; pending_jobs draining');

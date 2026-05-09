@@ -11,7 +11,7 @@ import * as sq from '../../src/schema/sqlite.js';
  * This file fails the build if the SQLite and Postgres dialects drift on:
  *   - the set of tables (5-table Module-01 core + 5-table Module-02
  *     additions including `decisions` + 1 M08b-S1 addition `kill_switches`
- *     = 11 tables)
+ *     + 1 M06 addition `run_diffs` = 12 tables)
  *   - column names per table
  *   - notNull flags per column
  *   - Drizzle dataType category per column (with the architected exemption)
@@ -49,6 +49,7 @@ const tablePairs = [
   ['feature_packs', sq.featurePacks, pg.featurePacks],
   ['decisions', sq.decisions, pg.decisions],
   ['kill_switches', sq.killSwitches, pg.killSwitches],
+  ['run_diffs', sq.runDiffs, pg.runDiffs],
 ] as const;
 
 /** Columns whose dialect-specific type difference is architecturally intentional. */
@@ -60,8 +61,8 @@ function columnsOf(table: unknown): Record<string, Column> {
   return getTableColumns(table as Parameters<typeof getTableColumns>[0]) as Record<string, Column>;
 }
 
-describe('eleven-table schema is present in both dialects', () => {
-  it('SQLite exports all eleven tables', () => {
+describe('twelve-table schema is present in both dialects', () => {
+  it('SQLite exports all twelve tables', () => {
     expect(sq.projects).toBeDefined();
     expect(sq.runs).toBeDefined();
     expect(sq.runEvents).toBeDefined();
@@ -73,9 +74,10 @@ describe('eleven-table schema is present in both dialects', () => {
     expect(sq.featurePacks).toBeDefined();
     expect(sq.decisions).toBeDefined();
     expect(sq.killSwitches).toBeDefined();
+    expect(sq.runDiffs).toBeDefined();
   });
 
-  it('Postgres exports all eleven tables', () => {
+  it('Postgres exports all twelve tables', () => {
     expect(pg.projects).toBeDefined();
     expect(pg.runs).toBeDefined();
     expect(pg.runEvents).toBeDefined();
@@ -87,6 +89,7 @@ describe('eleven-table schema is present in both dialects', () => {
     expect(pg.featurePacks).toBeDefined();
     expect(pg.decisions).toBeDefined();
     expect(pg.killSwitches).toBeDefined();
+    expect(pg.runDiffs).toBeDefined();
   });
 });
 

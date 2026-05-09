@@ -8,8 +8,12 @@ import type { Check } from '../types.js';
 /**
  * Module 04a doctor surface — sync lag.
  *
- * Compares the newest `runs.created_at` on local SQLite with the
+ * Compares the newest `runs.started_at` on local SQLite with the
  * newest on cloud Postgres. The delta is "how far behind cloud is."
+ * (`started_at` is the column name; M04a's original check used
+ * `created_at` which doesn't exist on `runs` and made this check
+ * always RED on team mode. Fixed 2026-05-09 during the manual
+ * end-to-end verification of Phase 4.)
  *
  * Skipped in solo mode (no cloud) and when cloud is unreachable
  * (check 24 covers that case).
@@ -52,16 +56,16 @@ export const syncLagCheck: Check = {
         return { status: 'skipped', detail: `cloud connect failed (check 24): ${(err as Error).message}` };
       }
 
-      // SQLite schema stores `runs.created_at` as integer Unix seconds
+      // SQLite schema stores `runs.started_at` as integer Unix seconds
       // (drizzle `integer({ mode: 'timestamp' })`).
-      const localNewestRow = local.raw.prepare(`SELECT MAX(created_at) AS s FROM runs`).get() as
+      const localNewestRow = local.raw.prepare(`SELECT MAX(started_at) AS s FROM runs`).get() as
         | { s: number | null }
         | undefined;
       const localNewest = localNewestRow?.s ?? null;
 
       let cloudNewest: number | null = null;
       try {
-        const rows = await cloud.raw<Array<{ s: Date | null }>>`SELECT MAX(created_at) AS s FROM runs`;
+        const rows = await cloud.raw<Array<{ s: Date | null }>>`SELECT MAX(started_at) AS s FROM runs`;
         cloudNewest = rows[0]?.s ? Math.floor(rows[0].s.getTime() / 1000) : null;
       } catch (err) {
         return { status: 'skipped', detail: `cloud query failed: ${(err as Error).message}` };
@@ -74,14 +78,22 @@ export const syncLagCheck: Check = {
       const lagSec = Math.max(0, localNewest - cloudOrZero);
 
       if (cloudNewest === null && localNewest !== null) {
-        // No cloud rows at all yet.
+        // No cloud rows at all yet. The naive lag math here would be
+        // (localNewest - 0) which is "decades behind" — meaningless.
+        // Treat empty cloud as YELLOW with a useful remediation
+        // distinguishing two real scenarios:
+        //   1. Fresh team setup: local has solo-mode history that
+        //      hasn't been migrated yet → run `team migrate`.
+        //   2. Sync hasn't run yet: a `contextos start` will begin
+        //      draining the outbox.
         return {
-          status: lagSec > 5 * 60 ? 'red' : lagSec > 30 ? 'yellow' : 'green',
-          detail: `cloud has no runs rows; local has ${localNewest ? 'rows' : 'none'} (${formatLag(lagSec)} behind)`,
+          status: 'yellow',
+          detail: 'cloud has no runs rows yet; local has historical data',
           remediation:
-            cloudOrZero === 0
-              ? 'Cloud is empty. If this is the first deploy, the daemon will catch up after the first sync window.'
-              : 'Sync may be stalled — inspect sync-daemon logs.',
+            'Two paths: (a) if this is your first team-mode session and local has solo data, run ' +
+            '`contextos team migrate` to push it up; (b) if you just ran `team setup` and have not yet ' +
+            'started services, run `contextos start` to launch the sync-daemon — new writes will flow ' +
+            'within ~10s. This check will re-run green on the next `contextos doctor` once cloud has rows.',
         };
       }
 

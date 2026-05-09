@@ -43,7 +43,7 @@ describe('buildProgram — full surface (post-S8)', () => {
     const team = program.commands.find((c) => c.name() === 'team');
     expect(team).toBeDefined();
     const sub = team?.commands.map((c) => c.name()).sort() ?? [];
-    expect(sub).toEqual(['login', 'logout']);
+    expect(sub).toEqual(['join', 'leave', 'login', 'logout', 'migrate', 'setup']);
 
     const db = program.commands.find((c) => c.name() === 'db');
     expect(db).toBeDefined();

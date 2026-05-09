@@ -6,7 +6,13 @@ import type {
   SessionClosePayloadV1,
   SessionOpenPayloadV1,
 } from '@coodra/contextos-cli/lib/outbox';
-import { type DbHandle, GLOBAL_PROJECT_ID, insertRun, scheduleAuditWriteWithSync } from '@coodra/contextos-db';
+import {
+  type DbHandle,
+  GLOBAL_PROJECT_ID,
+  insertRun,
+  scheduleAuditWriteWithSync,
+  scheduleDurableWrite,
+} from '@coodra/contextos-db';
 import { buildPolicyDecisionIdempotencyKey } from '@coodra/contextos-policy';
 import { createLogger, generateRunKey } from '@coodra/contextos-shared';
 import type { HookEvent } from '@coodra/contextos-shared/hooks';
@@ -100,6 +106,14 @@ export interface CreateRunRecorderDeps {
    * different mode, ON CONFLICT DO NOTHING keeps the first value.
    */
   readonly mode?: 'solo' | 'team';
+  /**
+   * Module 04 Phase 4. Resolver for the active human-actor identity.
+   * Bridge boot wires `() => getActorIdentity()` so every audit-write
+   * path picks up the current user's clerk id from `~/.contextos/
+   * config.json`. Returning null → no `createdByUserId` stamped (solo
+   * mode + pre-team-join state).
+   */
+  readonly resolveActorIdentity?: () => { readonly userId: string; readonly orgId: string } | null;
 }
 
 export interface RunRecorder {
@@ -148,6 +162,7 @@ export interface RunRecorder {
 export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
   const kick = deps.kick;
   const mode = deps.mode ?? 'solo';
+  const resolveActorIdentity = deps.resolveActorIdentity ?? (() => null);
 
   /**
    * M04 Phase 2 S1 (F3 root-cause fix). In-memory set of
@@ -201,24 +216,54 @@ export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
     // before the runs row landed → the dispatcher's lookupRunId returned
     // null → run_event landed with `run_id = NULL`. Storing the promise
     // here lets enqueueRunEvent await it.
+    const actorIdentity = resolveActorIdentity();
     const insertPromise = insertRun(deps.db, {
       id: rowId,
       projectId: effectiveProjectId,
       sessionId: event.sessionId,
       agentType: event.agentType,
       mode,
-    }).catch((err) => {
-      recorderLogger.warn(
-        {
-          event: 'implicit_session_open_insert_failed',
-          sessionId: event.sessionId,
-          projectId: effectiveProjectId,
-          err: err instanceof Error ? err.message : String(err),
-        },
-        'implicit session_open direct insertRun threw; swallowing — run_event may end up with NULL run_id',
-      );
-      sessionsOpened.delete(key);
-    });
+      ...(actorIdentity !== null ? { createdByUserId: actorIdentity.userId } : {}),
+    })
+      .then(async () => {
+        // M04 Phase 4 / Phase G+H verification: the implicit session_open
+        // path bypasses scheduleAuditWriteWithSync (it inserts the runs
+        // row directly to close the F3 race), so it must enqueue the
+        // paired sync_to_cloud job by hand. Without this the runs row
+        // lives only in local SQLite and every dependent FK push
+        // (run_events, policy_decisions, decisions, context_packs)
+        // fails forever against cloud Postgres.
+        if (mode === 'team') {
+          try {
+            await scheduleDurableWrite(deps.db, {
+              queue: 'sync_to_cloud',
+              payload: { v: 1 as const, table: 'runs', lookup: { kind: 'id', value: rowId } },
+            });
+          } catch (err) {
+            recorderLogger.warn(
+              {
+                event: 'implicit_session_open_sync_enqueue_failed',
+                sessionId: event.sessionId,
+                projectId: effectiveProjectId,
+                err: err instanceof Error ? err.message : String(err),
+              },
+              'sync_to_cloud enqueue threw after implicit insertRun — runs row will not reach cloud until next session_open',
+            );
+          }
+        }
+      })
+      .catch((err) => {
+        recorderLogger.warn(
+          {
+            event: 'implicit_session_open_insert_failed',
+            sessionId: event.sessionId,
+            projectId: effectiveProjectId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'implicit session_open direct insertRun threw; swallowing — run_event may end up with NULL run_id',
+        );
+        sessionsOpened.delete(key);
+      });
     sessionInflightInserts.set(key, insertPromise);
     void insertPromise.finally(() => {
       // Drop the entry so the map doesn't grow without bound. Future
@@ -344,6 +389,7 @@ export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
       // bridge minted bare UUIDs that didn't carry their session
       // affiliation in the id, breaking grep-based audit cross-refs.
       const rowId = generateRunKey({ projectId: effectiveProjectId, sessionId: event.sessionId });
+      const actorIdentity = resolveActorIdentity();
       const payload: SessionOpenPayloadV1 = {
         v: 1,
         rowId,
@@ -351,6 +397,7 @@ export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
         sessionId: event.sessionId,
         agentType: event.agentType,
         mode,
+        ...(actorIdentity !== null ? { createdByUserId: actorIdentity.userId } : {}),
       };
       void scheduleAuditWriteWithSync(deps.db, {
         audit: { queue: 'session_open', payload },

@@ -55,21 +55,29 @@ export const DEFAULT_CLOUD_MIGRATE_IO: CloudMigrateIO = {
 };
 
 /**
- * The 10 application tables shipped by `packages/db/src/schema/postgres.ts`.
- * `__drizzle_migrations` lives in the `drizzle` schema by default but some
- * deploys force it into `public` — we accept either to avoid false-flag
- * refusals on a previously-migrated DB.
+ * Application tables shipped by `packages/db/src/schema/postgres.ts` (and
+ * the postgres-only migration-tracking pair from M04 Phase 4).
+ *
+ * Updated 2026-05-09 (M04 Phase 4) — added kill_switches (M08b), run_diffs
+ * (M06), and the migration-tracking pair (_migration_attempts +
+ * _migration_map). `__drizzle_migrations` lives in the `drizzle` schema by
+ * default but some deploys force it into `public` — we accept either to
+ * avoid false-flag refusals on a previously-migrated DB.
  */
 const EXPECTED_PUBLIC_TABLES: ReadonlySet<string> = new Set([
   '__drizzle_migrations',
+  '_migration_attempts',
+  '_migration_map',
   'context_packs',
   'decisions',
   'feature_packs',
+  'kill_switches',
   'pending_jobs',
   'policies',
   'policy_decisions',
   'policy_rules',
   'projects',
+  'run_diffs',
   'run_events',
   'runs',
 ]);

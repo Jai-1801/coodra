@@ -77,6 +77,76 @@ describe('buildAutoSummary', () => {
     expect(result.content).toContain('Publish all workspace packages');
   });
 
+  it('renders a "## Diff" section when a run-diff snapshot is provided', () => {
+    const result = buildAutoSummary({
+      runId: 'run:proj_x:sess:abcdefgh-1234-5678-9012-abcdefabcdef',
+      events: [],
+      decisions: [],
+      diff: {
+        baseSha: 'a'.repeat(40),
+        headSha: 'b'.repeat(40),
+        unifiedDiff:
+          'diff --git a/src/foo.ts b/src/foo.ts\n@@ -1,1 +1,2 @@\n hello\n+world\n',
+        filesChanged: [
+          { path: 'src/foo.ts', status: 'modified', additions: 1, deletions: 0 },
+        ],
+        truncated: false,
+        error: null,
+      },
+    });
+    expect(result.content).toContain('## Diff');
+    expect(result.content).toContain('Diff vs `aaaaaaaaaaaa`');
+    expect(result.content).toContain('**Files changed:**');
+    expect(result.content).toContain('`src/foo.ts` — modified +1 -0');
+    expect(result.content).toContain('```diff');
+    expect(result.content).toContain('+world');
+  });
+
+  it('renders the no_base_sha soft-failure prose when the runner reported it', () => {
+    const result = buildAutoSummary({
+      runId: 'run:none',
+      events: [],
+      decisions: [],
+      diff: {
+        baseSha: null,
+        headSha: null,
+        unifiedDiff: '',
+        filesChanged: [],
+        truncated: false,
+        error: 'no_base_sha',
+      },
+    });
+    expect(result.content).toContain('## Diff');
+    expect(result.content).toContain('not a git repository');
+  });
+
+  it('renders the no_edits soft-failure prose when the runner reported it', () => {
+    const result = buildAutoSummary({
+      runId: 'run:none',
+      events: [],
+      decisions: [],
+      diff: {
+        baseSha: 'a'.repeat(40),
+        headSha: 'a'.repeat(40),
+        unifiedDiff: '',
+        filesChanged: [],
+        truncated: false,
+        error: 'no_edits_in_run',
+      },
+    });
+    expect(result.content).toContain('## Diff');
+    expect(result.content).toContain('No Edit/Write tool calls');
+  });
+
+  it('omits the "## Diff" section when no snapshot is provided', () => {
+    const result = buildAutoSummary({
+      runId: 'run:none',
+      events: [],
+      decisions: [],
+    });
+    expect(result.content).not.toContain('## Diff');
+  });
+
   it('produces a valid summary with zero events + zero decisions', () => {
     const result = buildAutoSummary({
       runId: 'run:empty:1:abc',

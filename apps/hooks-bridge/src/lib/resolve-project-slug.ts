@@ -7,6 +7,25 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
 /**
+ * In team mode, every auto-created project must adopt the team's
+ * Clerk org id so cloud-side `org_id` columns line up with the rest of
+ * the org's data. Pre-fix the bridge defaulted to `__solo__` even
+ * after the user ran `team setup`, which split the project off from
+ * the team's audit chain at the cloud layer.
+ *
+ * Returns `{ orgId: '<clerk-org>' }` when team mode is active and the
+ * env carries a non-empty org id; an empty object otherwise so the
+ * spread is a no-op and the helper falls through to the SOLO_ORG_ID
+ * default in `ensureProject`.
+ */
+function resolveTeamOrgIdArg(): { readonly orgId: string } | Record<string, never> {
+  if (process.env.CONTEXTOS_MODE !== 'team') return {};
+  const orgId = process.env.CONTEXTOS_TEAM_ORG_ID;
+  if (typeof orgId !== 'string' || orgId.length === 0) return {};
+  return { orgId };
+}
+
+/**
  * `apps/hooks-bridge/src/lib/resolve-project-slug` — two-stage resolver:
  *   1. cwd → slug  (read `<cwd>/.contextos.json`, or derive from basename)
  *   2. slug → projects.id  (DB lookup; M04 Phase 2 S1 adds optional auto-ensure)
@@ -211,7 +230,7 @@ export function createProjectSlugResolver(options: CreateProjectResolverOptions 
           if (!backfilledSlugs.has(slug)) {
             backfilledSlugs.add(slug);
             try {
-              await ensureProject(db, { slug, cwd });
+              await ensureProject(db, { slug, cwd, ...resolveTeamOrgIdArg() });
             } catch (err) {
               projectSlugLogger.debug(
                 {
@@ -248,7 +267,7 @@ export function createProjectSlugResolver(options: CreateProjectResolverOptions 
       // ensureProject backfills only when the existing row's cwd is null, so
       // a stale cwd from a renamed/moved project never overwrites the original.
       try {
-        const result = await ensureProject(db, { slug, cwd });
+        const result = await ensureProject(db, { slug, cwd, ...resolveTeamOrgIdArg() });
         // Cache the brand-new id so the next read is instant.
         idCache.set(slug, { projectId: result.id, loadedAt: now() });
         // If the slug was derived (no sidecar), also cache the cwd→slug

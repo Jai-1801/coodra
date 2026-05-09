@@ -1,4 +1,4 @@
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { resolveContextosLogsDir } from './contextos-home.js';
 import type { DaemonUnit } from './daemon/index.js';
 import { loadHomeEnv } from './load-home-env.js';
@@ -110,20 +110,9 @@ export async function resolveServices(options: BuildServiceUnitOptions): Promise
     if (descriptor.kind === 'worker' && descriptor.requiresTeamMode && !isTeamMode) continue;
 
     const port = descriptor.kind === 'http' ? (descriptor.name === 'mcp-server' ? mcpPort : bridgePort) : null;
-    let entryPath: string;
-    let entrySource: 'bundled' | 'monorepo';
-    if (descriptor.name === 'sync-daemon') {
-      // Worker has no `runtime/` bundle yet — solo mode skips it above
-      // and team-mode self-host runs from the monorepo for v1.0.
-      // Maintain legacy resolution via `relativeEntry` for now.
-      entryPath = resolve(options.contextosHome, '..', descriptor.relativeEntry);
-      entrySource = 'monorepo';
-    } else {
-      const runtimeApp = descriptor.name as 'mcp-server' | 'hooks-bridge';
-      const resolvedBin = await resolveRuntimeBinary(runtimeApp);
-      entryPath = resolvedBin.path;
-      entrySource = resolvedBin.source;
-    }
+    const resolvedBin = await resolveRuntimeBinary(descriptor.name);
+    const entryPath = resolvedBin.path;
+    const entrySource = resolvedBin.source;
     const unitEnv = buildServiceEnv({
       env,
       contextosHome: options.contextosHome,

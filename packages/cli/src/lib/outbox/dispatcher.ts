@@ -76,6 +76,13 @@ export interface SessionOpenPayloadV1 {
   readonly sessionId: string;
   readonly agentType: string;
   readonly mode: string;
+  /**
+   * Module 04 Phase 4 — optional Clerk user id of the session owner.
+   * Bridge populates from team config when CONTEXTOS_MODE=team. Solo
+   * mode + pre-Phase-4 payloads omit the field (treated as null at
+   * the destination).
+   */
+  readonly createdByUserId?: string | null;
 }
 
 export interface SessionClosePayloadV1 {
@@ -249,15 +256,20 @@ export function createOutboxDispatchHandler(deps: CreateOutboxDispatchHandlerDep
           ) {
             return PERMANENT('session_open payload missing required fields');
           }
+          const createdByUserId =
+            typeof payload.createdByUserId === 'string' && payload.createdByUserId.length > 0
+              ? payload.createdByUserId
+              : null;
           await insertRun(deps.db, {
             id: rowId,
             projectId,
             sessionId,
             agentType,
             mode,
+            createdByUserId,
           });
           log.debug(
-            { event: 'outbox_dispatch_session_open', jobId: job.id, sessionId, projectId },
+            { event: 'outbox_dispatch_session_open', jobId: job.id, sessionId, projectId, createdByUserId },
             'runs row dispatched (SessionStart)',
           );
           return SUCCESS;

@@ -76,6 +76,9 @@ function readLookup(value: unknown): SyncLookup | null {
 }
 
 const SYNC_TABLES = [
+  // M04 Phase 4 / Phase G+H verification — projects must land in cloud
+  // before any runs/decisions/etc that FK to it can land.
+  'projects',
   'runs',
   'run_events',
   'policy_decisions',
@@ -130,8 +133,29 @@ export function createSyncDispatchHandler(deps: CreateSyncDispatchHandlerDeps): 
       return SUCCESS;
     } catch (cause) {
       const msg = cause instanceof Error ? cause.message : String(cause);
+      // postgres-js attaches `.code`, `.detail`, `.constraint`, `.table`
+      // to the error. Without explicitly logging them, the only visible
+      // text is "Failed query: <sql>\nparams: <values>" which never
+      // tells the operator WHY the insert was rejected. Surface the
+      // structured fields so FK violations / NOT NULL / unique-conflict
+      // diagnoses are obvious in the daemon log.
+      const pgCode = cause !== null && typeof cause === 'object' && 'code' in cause ? String(cause.code) : undefined;
+      const pgDetail =
+        cause !== null && typeof cause === 'object' && 'detail' in cause ? String(cause.detail) : undefined;
+      const pgConstraint =
+        cause !== null && typeof cause === 'object' && 'constraint_name' in cause
+          ? String((cause as { constraint_name: unknown }).constraint_name)
+          : undefined;
       log.warn(
-        { event: 'sync_dispatch_threw', jobId: job.id, table: payload.table, err: msg },
+        {
+          event: 'sync_dispatch_threw',
+          jobId: job.id,
+          table: payload.table,
+          err: msg,
+          pgCode,
+          pgDetail,
+          pgConstraint,
+        },
         'sync dispatch threw — treating as transient',
       );
       return TRANSIENT(msg);
@@ -161,6 +185,8 @@ interface SyncOneArgs {
  */
 async function syncOne(args: SyncOneArgs): Promise<boolean> {
   switch (args.table) {
+    case 'projects':
+      return syncProjects(args);
     case 'runs':
       return syncRuns(args);
     case 'run_events':
@@ -174,6 +200,41 @@ async function syncOne(args: SyncOneArgs): Promise<boolean> {
     case 'kill_switches':
       return syncKillSwitches(args);
   }
+}
+
+/**
+ * M04 Phase 4 — projects push. Without this, cloud `runs` inserts hit
+ * an FK violation against `projects(id)` and the entire team-mode
+ * sync chain blocks. Projects are mostly-immutable bootstrap state;
+ * `cwd` is the one mutable field (backfilled when an existing row is
+ * re-encountered with a known cwd). ON CONFLICT (id) DO UPDATE on cwd
+ * keeps the cloud row fresh.
+ */
+async function syncProjects({ localDb, cloudDb, lookup, log, jobId }: SyncOneArgs): Promise<boolean> {
+  if (lookup.kind !== 'id') return false;
+  const lt = sqliteSchema.projects;
+  const row = (await localDb.db.select().from(lt).where(eq(lt.id, lookup.value)).limit(1))[0];
+  if (!row) return false;
+  const ct = postgresSchema.projects;
+  await cloudDb.db
+    .insert(ct)
+    .values({
+      id: row.id,
+      slug: row.slug,
+      orgId: row.orgId,
+      name: row.name,
+      cwd: row.cwd,
+    })
+    .onConflictDoUpdate({
+      target: [ct.id],
+      set: {
+        cwd: row.cwd,
+        name: row.name,
+        updatedAt: new Date(),
+      },
+    });
+  log.debug({ event: 'sync_projects_pushed', jobId, projectId: row.id, slug: row.slug }, 'projects row synced');
+  return true;
 }
 
 /**
@@ -204,6 +265,9 @@ async function syncKillSwitches({ localDb, cloudDb, lookup, log, jobId }: SyncOn
       expiresAt: row.expiresAt,
       resumedAt: row.resumedAt,
       resumedBySessionId: row.resumedBySessionId,
+      // M04 Phase 4 actor identity columns.
+      pausedByUserId: row.pausedByUserId,
+      resumedByUserId: row.resumedByUserId,
     })
     .onConflictDoUpdate({
       target: [ct.id],
@@ -213,6 +277,7 @@ async function syncKillSwitches({ localDb, cloudDb, lookup, log, jobId }: SyncOn
         // (a re-pause inserts a fresh row).
         resumedAt: row.resumedAt,
         resumedBySessionId: row.resumedBySessionId,
+        resumedByUserId: row.resumedByUserId,
         expiresAt: row.expiresAt,
       },
     });
@@ -254,6 +319,9 @@ async function syncRuns({ localDb, cloudDb, lookup, log, jobId }: SyncOneArgs): 
       prRef: row.prRef,
       startedAt: row.startedAt,
       endedAt: row.endedAt,
+      // M04 Phase 4 / Module 06.
+      baseSha: row.baseSha,
+      createdByUserId: row.createdByUserId,
     })
     .onConflictDoUpdate({
       target: [ct.projectId, ct.sessionId],
@@ -262,6 +330,7 @@ async function syncRuns({ localDb, cloudDb, lookup, log, jobId }: SyncOneArgs): 
         endedAt: row.endedAt,
         issueRef: row.issueRef,
         prRef: row.prRef,
+        baseSha: row.baseSha,
       },
     });
   log.debug({ event: 'sync_runs_pushed', jobId, runId: row.id, sessionId: row.sessionId }, 'runs row synced');
@@ -332,6 +401,14 @@ async function syncDecisions({ localDb, cloudDb, lookup, log, jobId }: SyncOneAr
       rationale: row.rationale,
       alternatives: row.alternatives,
       createdAt: row.createdAt,
+      // M05 / M04 Phase 4 — see schema/sqlite.ts::decisions.
+      source: row.source,
+      meta: row.meta,
+      context: row.context,
+      impact: row.impact,
+      confidence: row.confidence,
+      reversible: row.reversible,
+      createdByUserId: row.createdByUserId,
     })
     .onConflictDoNothing({ target: postgresSchema.decisions.idempotencyKey });
   log.debug({ event: 'sync_decisions_pushed', jobId, key: row.idempotencyKey }, 'decisions row synced');
@@ -358,6 +435,10 @@ async function syncContextPacks({ localDb, cloudDb, lookup, log, jobId }: SyncOn
       content: row.content,
       contentExcerpt: row.contentExcerpt,
       createdAt: row.createdAt,
+      // M05 / M04 Phase 4 — see schema/sqlite.ts::contextPacks.
+      source: row.source,
+      meta: row.meta,
+      createdByUserId: row.createdByUserId,
     })
     .onConflictDoNothing({ target: postgresSchema.contextPacks.id });
   log.debug({ event: 'sync_context_packs_pushed', jobId, packId: row.id }, 'context_packs row synced');

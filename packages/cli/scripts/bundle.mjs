@@ -95,6 +95,15 @@ async function main() {
     resolve(cliDist, 'runtime/hooks-bridge/index.js'),
   );
 
+  // 3b) sync-daemon runtime bundle. Spawned by `contextos start` only
+  // when CONTEXTOS_MODE=team (services.ts skips it in solo). Drains the
+  // outbox `sync_to_cloud` queue and pulls cloud → local rows.
+  await bundleEntry(
+    '@coodra/contextos-sync-daemon',
+    resolve(repoRoot, 'apps/sync-daemon/src/index.ts'),
+    resolve(cliDist, 'runtime/sync-daemon/index.js'),
+  );
+
   // 4) Drizzle migration SQL files. The runtime resolver
   // (`lib/runtime-paths.ts`) sets `CONTEXTOS_MIGRATIONS_DIR` to this
   // location when launching bundles; `@coodra/contextos-db::migrateSqlite`

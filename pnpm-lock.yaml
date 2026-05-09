@@ -317,6 +317,9 @@ importers:
       '@coodra/contextos-shared':
         specifier: workspace:*
         version: link:../shared
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
       '@types/node':
         specifier: ^22.15.0
         version: 22.19.17

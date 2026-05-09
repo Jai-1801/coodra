@@ -82,10 +82,13 @@ The previous AI plan was designed for a public SaaS at scale. Wrong mental model
 | MCP Server | local (stdio + HTTP) | local (HTTP :3100) | TypeScript | Express + MCP SDK | 3100 |
 | Hooks Bridge | local (HTTP :3101) | local (HTTP :3101) | TypeScript | Hono | 3101 |
 | Web App | local (:3000) | local (:3000) + cloud-deployed | TypeScript | Next.js 15 | 3000 |
-| Semantic Diff | local (HTTP :3201) | local (optional) | Python | FastAPI | 3201 |
-| NL Assembly | local (HTTP :3200) | local (optional) | Python | FastAPI | 3200 |
+| Run Diff | in-process (mcp-server) | in-process (mcp-server) | TypeScript | `git diff` subprocess | — |
 | Sync Daemon | absent | background process | TypeScript | Node.js | — |
 | Workers | in-process (SQLite queue) | BullMQ (Upstash Redis) | TypeScript | BullMQ | — |
+
+**Notes on the post-Module-04-Phase-4 inventory:**
+- The original Python services (`Semantic Diff` :3201 and `NL Assembly` :3200) are **gone**. Module 05 reshape (2026-05-08) replaced NL Assembly with the agent-driven retrieval tools `list_context_packs` + `read_context_pack`. Module 06 (Run Diff, 2026-05-09) replaced Semantic Diff with an in-process TypeScript runner using `git diff` (no AST parsing, no LLM enrichment). See ADR-013.
+- The **Hooks Bridge runs locally in both modes** — there is no cloud-deployed bridge. Module 04 Phase 4 (Caveat 2 fix) confirmed that pushing the bridge to cloud added latency and a new failure mode without a real benefit. Local audit writes flow through the durable outbox to the sync-daemon, which pushes them to cloud Postgres asynchronously. The `LOCAL_HOOK_SECRET` (formerly billed as the auth token for cloud-bridge HTTP calls) is now solely the credential for the local sync-daemon's cloud-API calls.
 
 **Key change from prototype:** In solo mode, workers run in-process within the Hooks Bridge using a SQLite-backed job queue. In team mode, the queue backend switches to BullMQ + Redis. The same processor function signatures are used in both modes — only the queue driver changes.
 
@@ -1065,22 +1068,32 @@ Not a security concern: solo mode services bind to `127.0.0.1`. External process
 
 ### Team Cloud Mode: Clerk JWT + Local Secret
 
-Three-mode middleware (unchanged from prototype):
+Three-mode middleware:
 1. `sk_test_replace_me` → bypass, dev org/user IDs
-2. `Authorization: Bearer {LOCAL_HOOK_SECRET}` → local adapter scripts calling cloud services
-3. Full Clerk JWT → production
+2. `Authorization: Bearer {LOCAL_HOOK_SECRET}` → **sync daemon → cloud-API authentication** (NOT bridge — see Module 04 Phase 4 Caveat 2 fix below)
+3. Full Clerk JWT → production web app authentication
 
-The `LOCAL_HOOK_SECRET` is generated on first `contextos team login` and stored in `~/.contextos/config.json`. The Windsurf adapter script uses it to authenticate against the cloud Hooks Bridge without embedding a user token in a shell script:
+The `LOCAL_HOOK_SECRET` is generated on first `contextos team join` (Module 04 Phase 4; replaces the older `team login` plan) and stored in `~/.contextos/config.json::team.localHookSecret`. The sync daemon's cloud-push uses it as the bearer token when calling cloud Postgres-fronted REST endpoints.
 
-```bash
-# In ~/.windsurf/hooks/contextos.sh
-CONTEXTOS_SECRET=$(cat ~/.contextos/config.json | python3 -c "import sys,json; print(json.load(sys.stdin)['local_hook_secret'])")
-curl -H "Authorization: Bearer $CONTEXTOS_SECRET" \
-  https://hooks.contextos.dev/v1/hooks/windsurf \
-  -d "$PAYLOAD"
-```
+#### Caveat 2 fix (Module 04 Phase 4, 2026-05-09): Hooks Bridge is local-only in both modes
 
-The cloud Hooks Bridge validates this secret, maps it to the developer's org, and injects the correct `orgId` into the request context.
+The original architecture proposed a cloud-deployed Hooks Bridge that local agents (Windsurf, Cursor) would call directly via HTTPS with `LOCAL_HOOK_SECRET`. **That bridge does not ship.** Each developer's local Hooks Bridge is the protocol layer:
+- Local audit events (run_events, decisions, policy_decisions, context_packs) write to local SQLite first.
+- The sync daemon's outbox-worker pushes them to cloud Postgres asynchronously.
+- The cloud web app reads cloud Postgres directly.
+
+Why the change:
+1. **Latency.** A cloud bridge added 50–200ms per hook event in the §6 hot path. Local-bridge + async-push has zero hot-path penalty.
+2. **Failure mode.** Cloud bridge unreachable would either drop hook events or block agent sessions. Local-bridge + outbox is durable across cloud outages — events queue locally and drain on recovery.
+3. **Auth surface.** A cloud bridge needed HTTPS, certs, DNS, and the bearer-token shape per request. The local bridge has none of those concerns.
+
+The `LOCAL_HOOK_SECRET`'s scope narrows accordingly: it's now only consumed by the sync-daemon's cloud-API calls (push of pending_jobs, pull of decisions/context_packs/run_events), never by the bridge itself. The bridge still binds to `127.0.0.1:3101` exactly like solo mode.
+
+#### Caveat 1 fix (Module 04 Phase 4, 2026-05-09): Bidirectional sync
+
+Pre-fix: M04a's sync daemon was push-only (local → cloud). Post-fix: a `team-rows-puller` (apps/sync-daemon/src/lib/team-rows-puller.ts) ticks every 10s pulling cloud rows newer than the local watermark for `runs`, `decisions`, `context_packs`, and `run_events`. Without this, member A's decision was invisible to member B's local MCP server, breaking the M05 SessionStart recent-decisions injection.
+
+ADR-007 append-only semantics make the pull conflict-free: `INSERT ... ON CONFLICT (id) DO NOTHING` for every row. No merge logic needed.
 
 ---
 

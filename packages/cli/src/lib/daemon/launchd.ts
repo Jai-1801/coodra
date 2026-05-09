@@ -56,8 +56,24 @@ export class LaunchdDaemonManager implements DaemonManager {
   }
 
   async start(unitName: string): Promise<void> {
-    const target = `gui/${process.getuid?.() ?? 0}`;
-    await this.run('launchctl', ['bootstrap', target, this.plistPath(unitName)], {
+    const userTarget = `gui/${process.getuid?.() ?? 0}`;
+    const labelTarget = `${userTarget}/${this.label(unitName)}`;
+    // CRITICAL: launchctl bootstrap is a no-op on an already-loaded
+    // label. Without an explicit bootout first, a second `contextos
+    // start` invocation with a different CONTEXTOS_HOME (or any plist
+    // change — env, working dir, log path) is silently ignored, and
+    // the previously-loaded daemon keeps running with its stale env.
+    // The user thinks the new home is being served (`✓ Sync Daemon
+    // started`, /healthz responds 200) but every audit row is going
+    // to the wrong SQLite database.
+    //
+    // Best-effort bootout — if the label isn't loaded it returns
+    // non-zero, which we ignore (reject: false).
+    await this.run('launchctl', ['bootout', labelTarget], {
+      reject: false,
+      timeout: 5000,
+    });
+    await this.run('launchctl', ['bootstrap', userTarget, this.plistPath(unitName)], {
       reject: false,
       timeout: 5000,
     });

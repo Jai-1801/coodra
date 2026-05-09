@@ -100,9 +100,13 @@ describe('cold install — bundled binary works end-to-end', () => {
     expect(entry.env.CONTEXTOS_LOG_DESTINATION).toBe('stderr');
     expect(typeof entry.env.CONTEXTOS_MIGRATIONS_DIR).toBe('string');
 
-    // 4) .env solo-mode sentinels.
+    // 4) .env solo-mode sentinels. CONTEXTOS_MODE intentionally NOT
+    // in project .env per Phase 4 H5 — mode is per-machine and lives
+    // in ~/.contextos/.env (written by `team setup` / `team join`).
+    // The bridge / mcp-server boot path defaults to 'solo' when
+    // CONTEXTOS_MODE is absent, so the project .env doesn't need it.
     const envBody = await readFile(join(cwd, '.env'), 'utf8');
-    expect(envBody).toContain('CONTEXTOS_MODE=solo');
+    expect(envBody).not.toContain('CONTEXTOS_MODE=');
     expect(envBody).toContain('CLERK_SECRET_KEY=sk_test_replace_me');
     expect(envBody).toMatch(/LOCAL_HOOK_SECRET=[0-9a-f]{64}/);
 

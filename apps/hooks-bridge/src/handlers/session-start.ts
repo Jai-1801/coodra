@@ -4,6 +4,7 @@ import type { HookEvent } from '@coodra/contextos-shared/hooks';
 
 import type { HookDispatchResult } from '../app.js';
 import { abandonStaleInProgressRuns } from '../lib/abandon-stale-runs.js';
+import { captureBaseSha } from '../lib/capture-base-sha.js';
 import { loadFeaturePackForSession } from '../lib/feature-pack-loader.js';
 import { loadFeaturesIndexForSession } from '../lib/features-index-loader.js';
 import { loadRecentDecisionsForSession } from '../lib/recent-decisions.js';
@@ -104,6 +105,41 @@ export function createSessionStartHandler(deps: CreateSessionStartHandlerDeps): 
             err: err instanceof Error ? err.message : String(err),
           },
           'fire-and-forget orphan cleanup threw; SessionStart response unaffected',
+        );
+      });
+    }
+
+    // Module 06 (Run Diff, 2026-05-09). Capture `git rev-parse HEAD` in
+    // the session's cwd and persist it to runs.base_sha so the SessionEnd
+    // run-diff runner has a baseline to diff against. Fire-and-forget —
+    // the SessionStart response goes back to the agent immediately while
+    // the git subprocess + UPDATE run in the background.
+    //
+    // Skipped when:
+    //   - projectId is undefined (no `.contextos.json`) — we wouldn't have
+    //     a runs row to UPDATE anyway.
+    //   - cwd is empty / missing.
+    //   - The repo is non-git or `git rev-parse HEAD` fails — captured
+    //     inside captureBaseSha; the SessionEnd runner surfaces this as
+    //     `error='no_base_sha'` on the run_diffs row.
+    if (
+      typeof projectId === 'string' && projectId.length > 0 &&
+      typeof event.cwd === 'string' && event.cwd.length > 0
+    ) {
+      void captureBaseSha({
+        cwd: event.cwd,
+        db: deps.db,
+        projectId,
+        sessionId: event.sessionId,
+      }).catch((err) => {
+        sessionStartLogger.warn(
+          {
+            event: 'capture_base_sha_threw',
+            sessionId: event.sessionId,
+            projectId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'fire-and-forget base-sha capture threw; SessionStart response unaffected',
         );
       });
     }

@@ -37,6 +37,11 @@ import {
  */
 
 export type SyncTableName =
+  // M04 Phase 4 / Phase G+H verification: projects must sync too so
+  // that runs/decisions/etc can satisfy their FK to projects(id) on
+  // the cloud side. ensureProjectFromCwd enqueues this whenever it
+  // creates a new local row in team mode.
+  | 'projects'
   | 'runs'
   | 'run_events'
   | 'policy_decisions'

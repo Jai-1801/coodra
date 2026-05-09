@@ -61,20 +61,25 @@ export default async function RunDetailPage({
               <span className="badge__dot"></span>
               {run.status.toUpperCase()}
             </span>
-            {isLive ? (
-              <div style={{ display: 'flex', gap: 6, marginTop: 12, justifyContent: 'flex-end' }}>
-                <a className="btn btn--sm btn--accent" href={`/runs/${run.id}/live`}>
-                  Live tail →
-                </a>
-                <form action={cancelRunAction} style={{ display: 'inline' }}>
-                  <input type="hidden" name="id" value={run.id} />
-                  <input type="hidden" name="returnTo" value={`/runs/${run.id}`} />
-                  <button className="btn btn--sm btn--ghost" type="submit" title="Force-complete this stuck run">
-                    Force complete
-                  </button>
-                </form>
-              </div>
-            ) : null}
+            <div style={{ display: 'flex', gap: 6, marginTop: 12, justifyContent: 'flex-end' }}>
+              <a className="btn btn--sm btn--ghost" href={`/runs/${run.id}/diff`}>
+                View diff →
+              </a>
+              {isLive ? (
+                <>
+                  <a className="btn btn--sm btn--accent" href={`/runs/${run.id}/live`}>
+                    Live tail →
+                  </a>
+                  <form action={cancelRunAction} style={{ display: 'inline' }}>
+                    <input type="hidden" name="id" value={run.id} />
+                    <input type="hidden" name="returnTo" value={`/runs/${run.id}`} />
+                    <button className="btn btn--sm btn--ghost" type="submit" title="Force-complete this stuck run">
+                      Force complete
+                    </button>
+                  </form>
+                </>
+              ) : null}
+            </div>
           </div>
         </div>
 

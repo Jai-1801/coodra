@@ -95,6 +95,12 @@ export interface FeaturePackStore {
 export interface ContextPackStoreWriteOptions {
   readonly source: 'agent' | 'bridge_auto';
   readonly meta?: Record<string, unknown>;
+  /**
+   * Module 04 Phase 4 — Clerk user id of the actor saving the pack.
+   * Stamped on `context_packs.created_by_user_id`. NULL on solo-mode
+   * + when the actor identity is unavailable.
+   */
+  readonly createdByUserId?: string | null;
 }
 
 export interface ContextPackStore {

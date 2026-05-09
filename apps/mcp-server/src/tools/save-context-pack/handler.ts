@@ -2,6 +2,7 @@ import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-d
 import { createLogger } from '@coodra/contextos-shared';
 import { and, eq, ne, sql } from 'drizzle-orm';
 import type { ToolContext } from '../../framework/tool-context.js';
+import { getActorIdentity } from '../../lib/actor-identity.js';
 import type { ContextPackWriteResult } from '../../lib/context-pack.js';
 import type { SaveContextPackInput, SaveContextPackOutput } from './schema.js';
 
@@ -108,6 +109,11 @@ export function createSaveContextPackHandler(deps: SaveContextPackHandlerDeps) {
     // Module 05: explicit MCP-tool calls always carry source='agent'.
     // The bridge's auto-pack path (auto-context-pack.ts) bypasses this
     // tool and writes directly via the store with source='bridge_auto'.
+    //
+    // Module 04 Phase 4: stamp the active user's clerk id on the row so
+    // the web app's "saved by" badge attributes correctly. Solo mode +
+    // missing team-config returns null → column written as NULL.
+    const actor = getActorIdentity();
     const written = (await ctx.contextPack.write(
       {
         runId: input.runId,
@@ -119,6 +125,7 @@ export function createSaveContextPackHandler(deps: SaveContextPackHandlerDeps) {
       {
         source: 'agent',
         ...(input.meta !== undefined ? { meta: input.meta } : {}),
+        ...(actor !== null ? { createdByUserId: actor.userId } : {}),
       },
     )) as ContextPackWriteResult;
 

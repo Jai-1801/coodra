@@ -65,7 +65,12 @@ describe('runInitCommand — integration', () => {
     expect(mcpJson.mcpServers.contextos).toBeDefined();
 
     const envBody = await readFile(join(cwd, '.env'), 'utf8');
-    expect(envBody).toContain('CONTEXTOS_MODE=solo');
+    // Phase 4 H5: CONTEXTOS_MODE intentionally NOT in project .env —
+    // mode lives in ~/.contextos/.env (per-machine), which the
+    // daemon-spawn path layers UNDER project .env. If we wrote
+    // CONTEXTOS_MODE=solo here, it would override `team setup`'s
+    // home-level CONTEXTOS_MODE=team and silently break team mode.
+    expect(envBody).not.toContain('CONTEXTOS_MODE=');
     expect(envBody).toContain('CLERK_SECRET_KEY=sk_test_replace_me');
     expect(envBody).toMatch(/LOCAL_HOOK_SECRET=[0-9a-f]{64}/);
     expect(envBody).toContain('MCP_SERVER_PORT=3100');

@@ -3,8 +3,10 @@ import { join } from 'node:path';
 import pc from 'picocolors';
 import { EXIT_OK, EXIT_USER_ACTION_REQUIRED, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosHome } from '../lib/contextos-home.js';
+import { selectDaemonManager } from '../lib/daemon/index.js';
 import { openLocalDb } from '../lib/open-local-db.js';
 import { readPidStatus } from '../lib/pid-status.js';
+import { loadHomeEnv } from '../lib/load-home-env.js';
 import { SERVICES } from '../lib/services.js';
 
 export interface StatusOptions {
@@ -67,12 +69,19 @@ export interface StatusReport {
 }
 
 export async function runStatusCommand(options: StatusOptions = {}, io: StatusIO = DEFAULT_STATUS_IO): Promise<never> {
-  const env = options.env ?? process.env;
+  const baseEnv = options.env ?? process.env;
   const cwd = options.cwd ?? process.cwd();
   const contextosHome = resolveContextosHome({
     ...(options.home !== undefined ? { override: options.home } : {}),
-    env,
+    env: baseEnv,
   });
+  // Layer ~/.contextos/.env + <cwd>/.env in so that team-mode flags
+  // surface in `ctx status` even when the operator hasn't exported
+  // CONTEXTOS_MODE in their shell. Without this, status from a
+  // non-demo cwd reports the worker as "stopped" because the
+  // `requiresTeamMode` filter trips off the team check entirely.
+  const layered = loadHomeEnv(contextosHome, cwd);
+  const env: NodeJS.ProcessEnv = { ...layered, ...baseEnv };
   const fetchImpl = options.fetchImpl ?? fetch;
 
   const project = await collectProjectState(cwd, contextosHome, env);
@@ -143,10 +152,22 @@ async function collectServiceStates(
         url,
       });
     } else {
-      // Worker: PID-based aliveness check.
-      const pid = await readPidStatus(contextosHome, descriptor.name);
-      const state: ServiceState['state'] =
-        pid.state === 'alive' ? 'running' : pid.state === 'dead' ? 'unknown' : 'stopped';
+      // Worker: ask the active daemon manager. launchd-managed daemons
+      // do NOT write to ~/.contextos/pids/, so the PID-file fallback
+      // alone reports stopped even when the daemon is running. Try the
+      // manager first, fall back to PID file for the no-launchd
+      // (`fallback`) manager which DOES write the PID file at start.
+      let state: ServiceState['state'] = 'stopped';
+      try {
+        const manager = await selectDaemonManager({ contextosHome });
+        const ds = await manager.status(descriptor.name);
+        if (ds.state === 'running') state = 'running';
+        else if (ds.state === 'unknown') state = 'unknown';
+        else state = 'stopped';
+      } catch {
+        const pid = await readPidStatus(contextosHome, descriptor.name);
+        state = pid.state === 'alive' ? 'running' : pid.state === 'dead' ? 'unknown' : 'stopped';
+      }
       states.push({
         name: descriptor.name,
         displayName: descriptor.displayName,

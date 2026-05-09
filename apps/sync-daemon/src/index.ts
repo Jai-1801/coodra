@@ -9,6 +9,7 @@ import { createLogger } from '@coodra/contextos-shared';
 import { env } from './config/env.js';
 import { createSyncDispatchHandler } from './lib/dispatch.js';
 import { createKillSwitchPuller } from './lib/kill-switch-puller.js';
+import { createTeamRowsPuller } from './lib/team-rows-puller.js';
 
 /**
  * `apps/sync-daemon/src/index.ts` — boot entry.
@@ -86,6 +87,21 @@ async function main(): Promise<void> {
     'sync-daemon: kill_switches cloud → local poller started (M04 S8a)',
   );
 
+  // (4b) Module 04 Phase 4 — bidirectional sync for the append-only
+  // tables that drive cross-team-member visibility (Caveat 1 fix from
+  // the team-mode plan). Without this, member A's decision is invisible
+  // to member B's local MCP server, and the M05 SessionStart recent-
+  // decisions injection silently misses the org-wide history.
+  const teamRowsPuller = createTeamRowsPuller({
+    localDb,
+    cloudDb,
+    intervalMs: env.CONTEXTOS_SYNC_TICK_MS,
+  });
+  bootLogger.info(
+    { event: 'team_rows_puller_started', intervalMs: env.CONTEXTOS_SYNC_TICK_MS },
+    'sync-daemon: runs/decisions/context_packs/run_events cloud → local poller started (M04 Phase 4 / Caveat 1)',
+  );
+
   // (5) Graceful shutdown.
   let shuttingDown = false;
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
@@ -96,6 +112,8 @@ async function main(): Promise<void> {
     bootLogger.info({ event: 'sync_worker_stopped' }, 'OutboxWorker stopped');
     await killSwitchPuller.stop();
     bootLogger.info({ event: 'kill_switch_puller_stopped' }, 'kill_switches puller stopped');
+    await teamRowsPuller.stop();
+    bootLogger.info({ event: 'team_rows_puller_stopped' }, 'team-rows puller stopped');
     localDb.close();
     await cloudDb.close();
     bootLogger.info({ event: 'shutdown_complete' }, 'shutdown complete');

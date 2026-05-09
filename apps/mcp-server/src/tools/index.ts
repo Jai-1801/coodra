@@ -11,6 +11,7 @@ import { createListFeaturesToolRegistration } from './list-features/manifest.js'
 import { pingToolRegistration } from './ping/manifest.js';
 import { createQueryCodebaseGraphToolRegistration } from './query-codebase-graph/manifest.js';
 import { createQueryDecisionsToolRegistration } from './query-decisions/manifest.js';
+import { createQueryRunDiffToolRegistration } from './query-run-diff/manifest.js';
 import { createQueryRunHistoryToolRegistration } from './query-run-history/manifest.js';
 import { createReadContextPackToolRegistration } from './read-context-pack/manifest.js';
 import { createRecordDecisionToolRegistration } from './record-decision/manifest.js';
@@ -69,4 +70,11 @@ export function registerAllTools(registry: ToolRegistry, deps: RegisterAllToolsD
   registry.register(createListFeaturesToolRegistration({ db: deps.db }));
   registry.register(createGetFeatureToolRegistration({ db: deps.db }));
   registry.register(createGetFeatureFileToolRegistration({ db: deps.db }));
+  // Module 06 (Run Diff, 2026-05-09): surfaces run_diffs rows written
+  // by the hooks-bridge SessionEnd runner. Server-side computation is
+  // pure-deterministic (git diff, no LLM); the agent reads the
+  // structured output and writes its own narrative recap into
+  // save_context_pack. ADR-013 records why M06 ships TypeScript-in-
+  // process with no external LLM (supersedes ADR-002 for this module).
+  registry.register(createQueryRunDiffToolRegistration({ db: deps.db }));
 }

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { type DbHandle, sqliteSchema } from '@coodra/contextos-db';
-import { createLogger } from '@coodra/contextos-shared';
+import { createLogger, parseRunDiffFilesChanged, type RunDiffFileEntry } from '@coodra/contextos-shared';
 import { contextPackFilename, defaultContextPacksRoot } from '@coodra/contextos-shared/context-pack-paths';
 import { asc, eq } from 'drizzle-orm';
 
@@ -68,6 +68,12 @@ export interface AutoContextPackInput {
    * Tests pass a tmpdir; production uses the default. (Slice 3.)
    */
   readonly contextPacksRoot?: string;
+  /**
+   * Module 04 Phase 4. Clerk user id of the human owning this session.
+   * Stamped on the inserted context_packs row's `created_by_user_id`.
+   * NULL on solo mode + when team config is missing.
+   */
+  readonly createdByUserId?: string | null;
 }
 
 interface RunEventRow {
@@ -88,6 +94,87 @@ interface DecisionRow {
   readonly createdAt: Date;
 }
 
+/**
+ * Module 06 — Slice 3. Snapshot of the run_diffs row used to render the
+ * "## Diff" section in the auto-context-pack body. The bridge runner
+ * (apps/hooks-bridge/src/lib/run-diff-runner.ts) writes this row before
+ * the auto-pack save runs, so by the time `buildAutoSummary` is called
+ * the row either exists or doesn't (no in-flight race).
+ */
+export interface RunDiffSnapshot {
+  readonly baseSha: string | null;
+  readonly headSha: string | null;
+  readonly unifiedDiff: string;
+  readonly filesChanged: ReadonlyArray<RunDiffFileEntry>;
+  readonly truncated: boolean;
+  readonly error: string | null;
+}
+
+/** Hard cap on the unified-diff bytes inlined into the auto-pack body.
+ * 16 KiB is a workable read-window without dwarfing the rest of the
+ * digest; the full diff stays in `run_diffs.unified_diff` and can be
+ * pulled via the MCP `query_run_diff` tool. */
+const AUTO_PACK_DIFF_INLINE_BYTES = 16 * 1024;
+
+function buildDiffSection(diff: RunDiffSnapshot | null): string[] {
+  if (diff === null) return [];
+  const lines: string[] = [];
+  lines.push('## Diff');
+  lines.push('');
+  if (diff.error === 'no_base_sha') {
+    lines.push(
+      '_No `git rev-parse HEAD` was captured at SessionStart — diff baseline is unavailable. ' +
+        'Most likely cause: this project is not a git repository._',
+    );
+    lines.push('');
+    return lines;
+  }
+  if (diff.error === 'no_edits_in_run') {
+    lines.push('_No Edit/Write tool calls in this run — nothing to diff._');
+    lines.push('');
+    return lines;
+  }
+  if (diff.error === 'git_diff_failed') {
+    lines.push(
+      '_`git diff` failed for this run — see `run_diffs.unified_diff` for stderr. The session continued normally._',
+    );
+    lines.push('');
+    return lines;
+  }
+  // Success path.
+  if (diff.baseSha !== null) {
+    const headLabel = diff.headSha === null ? '(working tree)' : diff.headSha.slice(0, 12);
+    lines.push(`Diff vs \`${diff.baseSha.slice(0, 12)}\` … \`${headLabel}\`.`);
+    lines.push('');
+  }
+  if (diff.filesChanged.length > 0) {
+    lines.push('**Files changed:**');
+    lines.push('');
+    const sorted = [...diff.filesChanged].sort((a, b) => a.path.localeCompare(b.path));
+    for (const f of sorted) {
+      const counts = `+${f.additions} -${f.deletions}`;
+      const renameSuffix = f.oldPath !== undefined ? ` (from \`${f.oldPath}\`)` : '';
+      lines.push(`- \`${f.path}\` — ${f.status} ${counts}${renameSuffix}`);
+    }
+    lines.push('');
+  }
+  if (diff.unifiedDiff.length > 0) {
+    const inline = diff.unifiedDiff.slice(0, AUTO_PACK_DIFF_INLINE_BYTES);
+    const wasTrimmedHere = diff.unifiedDiff.length > AUTO_PACK_DIFF_INLINE_BYTES;
+    lines.push('```diff');
+    lines.push(inline.endsWith('\n') ? inline.slice(0, -1) : inline);
+    lines.push('```');
+    if (wasTrimmedHere || diff.truncated) {
+      lines.push('');
+      lines.push(
+        '_(diff truncated for the auto-pack — call the `query_run_diff` MCP tool with `runId` for the full output)_',
+      );
+    }
+    lines.push('');
+  }
+  return lines;
+}
+
 function computeExcerpt(content: string): string {
   const chars = Array.from(content);
   const sliced = chars.length <= EXCERPT_MAX_CODE_POINTS ? chars : chars.slice(0, EXCERPT_MAX_CODE_POINTS);
@@ -104,8 +191,11 @@ export function buildAutoSummary(args: {
   readonly runId: string;
   readonly events: ReadonlyArray<RunEventRow>;
   readonly decisions: ReadonlyArray<DecisionRow>;
+  /** Module 06: optional run-diff snapshot. Renders a "## Diff" section. */
+  readonly diff?: RunDiffSnapshot | null;
 }): { title: string; content: string } {
   const { runId, events, decisions } = args;
+  const diff = args.diff ?? null;
   const filesTouched = new Set<string>();
   let writeCount = 0;
   let readCount = 0;
@@ -164,6 +254,12 @@ export function buildAutoSummary(args: {
     }
     lines.push('');
   }
+
+  // Module 06 (Run Diff, 2026-05-09): render the "## Diff" section after
+  // the tool-call digest and before decisions, so a reader scanning the
+  // pack top-to-bottom sees what the agent ran, then what changed in
+  // code, then what was decided.
+  for (const line of buildDiffSection(diff)) lines.push(line);
 
   if (decisions.length > 0) {
     lines.push('## Decisions');
@@ -256,7 +352,43 @@ export async function saveAutoContextPack(input: AutoContextPackInput): Promise<
     .where(eq(sqliteSchema.decisions.runId, input.runId))
     .orderBy(asc(sqliteSchema.decisions.createdAt))) as Array<DecisionRow>;
 
-  const summary = buildAutoSummary({ runId: input.runId, events, decisions });
+  // Module 06 — Slice 3. Pull the run_diffs row written by the bridge's
+  // run-diff runner (which fires before this auto-save in session-end.ts).
+  // A null result means the row hasn't landed (runner skipped on no-cwd
+  // or hit an unexpected throw); the auto-pack still writes successfully
+  // without a "## Diff" section.
+  const diffRows = (await input.db.db
+    .select({
+      baseSha: sqliteSchema.runDiffs.baseSha,
+      headSha: sqliteSchema.runDiffs.headSha,
+      unifiedDiff: sqliteSchema.runDiffs.unifiedDiff,
+      filesChanged: sqliteSchema.runDiffs.filesChanged,
+      truncated: sqliteSchema.runDiffs.truncated,
+      error: sqliteSchema.runDiffs.error,
+    })
+    .from(sqliteSchema.runDiffs)
+    .where(eq(sqliteSchema.runDiffs.runId, input.runId))
+    .limit(1)) as Array<{
+    baseSha: string | null;
+    headSha: string | null;
+    unifiedDiff: string;
+    filesChanged: string;
+    truncated: boolean;
+    error: string | null;
+  }>;
+  const diffSnapshot: RunDiffSnapshot | null =
+    diffRows[0] !== undefined
+      ? {
+          baseSha: diffRows[0].baseSha,
+          headSha: diffRows[0].headSha,
+          unifiedDiff: diffRows[0].unifiedDiff,
+          filesChanged: parseRunDiffFilesChanged(diffRows[0].filesChanged),
+          truncated: diffRows[0].truncated,
+          error: diffRows[0].error,
+        }
+      : null;
+
+  const summary = buildAutoSummary({ runId: input.runId, events, decisions, diff: diffSnapshot });
   const id = `cp_${randomUUID()}`;
   const contentExcerpt = computeExcerpt(summary.content);
 
@@ -271,6 +403,11 @@ export async function saveAutoContextPack(input: AutoContextPackInput): Promise<
     // Agent-explicit save_context_pack overrides this row (one ADR-007
     // relaxation, narrow + documented).
     source: 'bridge_auto',
+    // Module 04 Phase 4 — owner of the local bridge process. NULL in
+    // solo mode; clerk user id when team config is set. Distinct from
+    // the `source` column ('bridge_auto' here) — that's the write path
+    // provenance; this is who was operating the machine.
+    createdByUserId: input.createdByUserId ?? null,
   });
 
   // Phase 4 Fix H (Slice 3 — 2026-05-03 audit): materialise to FS so

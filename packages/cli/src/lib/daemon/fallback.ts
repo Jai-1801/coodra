@@ -67,8 +67,15 @@ export class FallbackDaemonManager implements DaemonManager {
   }
 
   async start(unitName: string): Promise<void> {
+    // Same hazard as the launchd manager: short-circuiting on "already
+    // running" leaves the previously-spawned process serving the OLD
+    // env even when `contextos start` was re-invoked with a different
+    // CONTEXTOS_HOME (or other plist-equivalent change). Always tear
+    // down first, then spawn fresh against the latest installed unit.
     const status = await this.status(unitName);
-    if (status.state === 'running') return;
+    if (status.state === 'running') {
+      await this.stop(unitName);
+    }
     const record = await this.readUnit(unitName);
     if (record === null) {
       throw new Error(`fallback daemon: no unit installed at ${this.unitPath(unitName)}`);

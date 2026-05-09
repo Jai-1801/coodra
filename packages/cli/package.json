@@ -15,6 +15,10 @@
       "types": "./dist/lib/outbox/index.d.ts",
       "import": "./dist/lib/outbox/index.js"
     },
+    "./lib/team-config": {
+      "types": "./dist/lib/team-config.d.ts",
+      "import": "./dist/lib/team-config.js"
+    },
     "./lib/init": {
       "types": "./dist/lib/init/index.d.ts",
       "import": "./dist/lib/init/index.js"
@@ -89,6 +93,7 @@
     "@coodra/contextos-db": "workspace:*",
     "@coodra/contextos-policy": "workspace:*",
     "@coodra/contextos-shared": "workspace:*",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.0",
     "@types/semver": "^7.7.1",
     "commander": "^13.1.0",

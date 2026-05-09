@@ -24,3 +24,16 @@ export {
   runKeySegmentSchema,
 } from './idempotency.js';
 export { createLogger, type Logger, type LoggerOptions, logger } from './logger.js';
+export {
+  MAX_FILES_PER_DIFF,
+  MAX_UNIFIED_DIFF_BYTES,
+  parseRunDiffFilesChanged,
+  type RunDiffErrorCode,
+  runDiffErrorCodeSchema,
+  type RunDiffFileEntry,
+  runDiffFileEntrySchema,
+  runDiffFileStatusSchema,
+  runDiffFilesChangedSchema,
+  type RunDiffFileStatus,
+  truncateUnifiedDiff,
+} from './run-diff.js';

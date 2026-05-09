@@ -4,6 +4,7 @@ import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-d
 import { createLogger } from '@coodra/contextos-shared';
 import { eq } from 'drizzle-orm';
 import type { ToolContext } from '../../framework/tool-context.js';
+import { getActorIdentity } from '../../lib/actor-identity.js';
 import type { RecordDecisionInput, RecordDecisionOutput } from './schema.js';
 
 /**
@@ -118,6 +119,9 @@ async function insertIgnoreOnConflict(
     readonly impact: string | null;
     readonly confidence: 'high' | 'medium' | 'low' | null;
     readonly reversible: boolean | null;
+    // Module 04 Phase 4 — Clerk user id of the actor whose agent
+    // recorded this decision. NULL on solo + when team config absent.
+    readonly createdByUserId: string | null;
   },
 ): Promise<InsertResult> {
   if (db.kind === 'sqlite') {
@@ -134,6 +138,7 @@ async function insertIgnoreOnConflict(
         impact: row.impact,
         confidence: row.confidence,
         reversible: row.reversible,
+        createdByUserId: row.createdByUserId,
       })
       .onConflictDoNothing({ target: sqliteSchema.decisions.idempotencyKey })
       .returning({
@@ -159,6 +164,7 @@ async function insertIgnoreOnConflict(
       impact: row.impact,
       confidence: row.confidence,
       reversible: row.reversible,
+      createdByUserId: row.createdByUserId,
     })
     .onConflictDoNothing({ target: postgresSchema.decisions.idempotencyKey })
     .returning({
@@ -205,6 +211,10 @@ export function createRecordDecisionHandler(deps: RecordDecisionHandlerDeps) {
     // schema enum; reversible stored as boolean (NULL when omitted).
     const impactJson = input.impact !== undefined && input.impact.length > 0 ? JSON.stringify(input.impact) : null;
 
+    // Module 04 Phase 4: stamp the actor's clerk id on the decision row so
+    // the web app's "decided by" badge attributes correctly. Solo +
+    // missing-team-config returns null → DB column written as NULL.
+    const actor = getActorIdentity();
     const { inserted, id, createdAt } = await insertIgnoreOnConflict(deps.db, {
       id: `dec_${randomUUID()}`,
       idempotencyKey,
@@ -216,6 +226,7 @@ export function createRecordDecisionHandler(deps: RecordDecisionHandlerDeps) {
       impact: impactJson,
       confidence: input.confidence ?? null,
       reversible: input.reversible ?? null,
+      createdByUserId: actor !== null ? actor.userId : null,
     });
 
     if (!inserted) {

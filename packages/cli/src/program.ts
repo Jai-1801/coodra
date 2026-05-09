@@ -74,6 +74,15 @@ import {
   type TeamLoginOptions,
 } from './commands/team.js';
 import {
+  runTeamJoinCommand,
+  runTeamLeaveCommand,
+  runTeamMigrateCommand,
+  type TeamJoinOptions,
+  type TeamLeaveOptions,
+  type TeamMigrateOptions,
+} from './commands/team-migrate-cmd.js';
+import { runTeamSetupCommand, type TeamSetupOptions } from './commands/team-setup-cmd.js';
+import {
   runTemplateInstallCommand,
   runTemplateListCommand,
   type TemplateInstallOptions,
@@ -104,6 +113,10 @@ interface BuildProgramOptions {
   readonly teamIO?: TeamCommandIO;
   readonly runTeamLogin?: (options: TeamLoginOptions, io?: TeamCommandIO) => Promise<unknown>;
   readonly runTeamLogout?: (io?: TeamCommandIO) => Promise<unknown>;
+  readonly runTeamMigrate?: (options: TeamMigrateOptions, io?: TeamCommandIO) => Promise<unknown>;
+  readonly runTeamJoin?: (options: TeamJoinOptions, io?: TeamCommandIO) => Promise<unknown>;
+  readonly runTeamLeave?: (options: TeamLeaveOptions, io?: TeamCommandIO) => Promise<unknown>;
+  readonly runTeamSetup?: (options: TeamSetupOptions, io?: TeamCommandIO) => Promise<unknown>;
   readonly cloudMigrateIO?: CloudMigrateIO;
   readonly runCloudMigrate?: (options: CloudMigrateOptions, io?: CloudMigrateIO) => Promise<unknown>;
   readonly pauseIO?: PauseIO;
@@ -729,6 +742,66 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     )
     .action(async () => {
       await logoutRunner(options.teamIO);
+    });
+
+  // Module 04 Phase 4 — three new team commands.
+  const migrateRunner = options.runTeamMigrate ?? runTeamMigrateCommand;
+  team
+    .command('migrate')
+    .description('Move local solo-mode data into the team cloud (idempotent + resumable).')
+    .option('--user-id <id>', 'Clerk user id (or env CONTEXTOS_TEAM_USER_ID).')
+    .option('--org-id <id>', 'Clerk org id (or env CONTEXTOS_TEAM_ORG_ID).')
+    .option('--secret <hex>', 'Local hook secret (or env CONTEXTOS_TEAM_HOOK_SECRET).')
+    .option('--database-url <url>', 'Cloud Postgres URL (or env DATABASE_URL).')
+    .option('--yes', 'Skip the dry-run prompt and execute the migration.')
+    .option('--resume', 'Resume an in-flight migration from the last successfully-completed phase.')
+    .option('--rollback', 'Roll back the most-recent in-flight migration and restore the local snapshot.')
+    .action(async (opts: TeamMigrateOptions) => {
+      await migrateRunner(opts, options.teamIO);
+    });
+
+  const joinRunner = options.runTeamJoin ?? runTeamJoinCommand;
+  team
+    .command('join')
+    .description('Join an existing team — writes ~/.contextos/config.json and seeds local from cloud.')
+    .option('--user-id <id>', 'Clerk user id (or env CONTEXTOS_TEAM_USER_ID).')
+    .option('--org-id <id>', 'Clerk org id (or env CONTEXTOS_TEAM_ORG_ID).')
+    .option('--org-slug <slug>', 'Optional Clerk org slug for display.')
+    .option('--secret <hex>', 'Local hook secret (or env CONTEXTOS_TEAM_HOOK_SECRET).')
+    .option('--database-url <url>', 'Cloud Postgres URL (or env DATABASE_URL).')
+    .action(async (opts: TeamJoinOptions) => {
+      await joinRunner(opts, options.teamIO);
+    });
+
+  const leaveRunner = options.runTeamLeave ?? runTeamLeaveCommand;
+  team
+    .command('leave')
+    .description('Demote the local config back to solo mode (cloud data untouched).')
+    .option('--yes', 'Confirm the demotion.')
+    .action(async (opts: TeamLeaveOptions) => {
+      await leaveRunner(opts, options.teamIO);
+    });
+
+  // Module 04 Phase 4 — admin bootstrap. Run ONCE per team after creating
+  // your own Supabase / Postgres project. Validates connectivity, installs
+  // pgvector, applies migrations, generates a local hook secret, prints
+  // credentials for teammates' `team join`.
+  const setupRunner = options.runTeamSetup ?? runTeamSetupCommand;
+  team
+    .command('setup')
+    .description(
+      'Bootstrap a team — runs against your own Supabase/Postgres. ' +
+        'Verifies connectivity, installs pgvector, applies schema, prints credentials to share.',
+    )
+    .option('--user-id <id>', 'Your Clerk user id (or env CONTEXTOS_TEAM_USER_ID).')
+    .option('--org-id <id>', 'Your Clerk org id (or env CONTEXTOS_TEAM_ORG_ID).')
+    .option('--org-slug <slug>', 'Optional Clerk org slug for display.')
+    .option('--secret <hex>', 'Local hook secret to use (or generate fresh 32-byte hex if absent).')
+    .option('--database-url <url>', 'Cloud Postgres URL (or env DATABASE_URL).')
+    .option('--skip-pgvector', 'Skip CREATE EXTENSION vector (use when role lacks privileges).')
+    .option('--json', 'Print credentials as JSON instead of human-formatted prose.')
+    .action(async (opts: TeamSetupOptions) => {
+      await setupRunner(opts, options.teamIO);
     });
 
   return program;

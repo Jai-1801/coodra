@@ -4,9 +4,11 @@ import type { HookEvent } from '@coodra/contextos-shared/hooks';
 import { and, eq, ne, sql } from 'drizzle-orm';
 
 import type { HookDispatchResult } from '../app.js';
+import { getActorIdentity } from '../lib/actor-identity.js';
 import { saveAutoContextPack } from '../lib/auto-context-pack.js';
 import type { ProjectSlugResolver } from '../lib/resolve-project-slug.js';
 import type { RunRecorder } from '../lib/run-recorder.js';
+import { runRunDiff } from '../lib/run-diff-runner.js';
 import { clearSessionState } from '../lib/session-state.js';
 
 /**
@@ -91,10 +93,16 @@ export function createSessionEndHandler(deps: CreateSessionEndHandlerDeps): Sess
     // Auto-save the Context Pack in the background — fire-and-forget
     // so the hook responds within the §6 latency budget. Errors are
     // logged and swallowed.
+    //
+    // Module 06 (Run Diff, 2026-05-09): the run-diff runner runs *inside*
+    // scheduleAutoContextPackSave, before saveAutoContextPack, so the
+    // auto-pack digest can include a "## Diff" section pulling from the
+    // freshly-written run_diffs row. See scheduleAutoContextPackSave below.
     void scheduleAutoContextPackSave({
       sessionId: event.sessionId,
       projectId,
       db: deps.db,
+      ...(typeof event.cwd === 'string' && event.cwd.length > 0 ? { cwd: event.cwd } : {}),
     });
 
     return { permissionDecision: 'allow' };
@@ -105,6 +113,7 @@ async function scheduleAutoContextPackSave(args: {
   readonly sessionId: string;
   readonly projectId: string | undefined;
   readonly db: DbHandle;
+  readonly cwd?: string;
 }): Promise<void> {
   if (args.projectId === undefined) {
     sessionEndLogger.info(
@@ -138,6 +147,33 @@ async function scheduleAutoContextPackSave(args: {
   // unknown runId. Done before the auto-save so the counter can't
   // outlive the run even if the auto-save throws.
   clearSessionState(runId);
+
+  // Module 06 (Run Diff, 2026-05-09): generate the run_diffs row before
+  // the auto-context-pack save so the digest's "## Diff" section can
+  // pull from it. Awaited so the auto-pack reads the fresh row, not a
+  // stale or absent one. Failure is logged + swallowed — runRunDiff
+  // already lands a soft-failure row on its own error paths, so a throw
+  // here is a programming bug, not a normal recoverable failure.
+  if (typeof args.cwd === 'string' && args.cwd.length > 0) {
+    try {
+      await runRunDiff({ db: args.db, runId, cwd: args.cwd });
+    } catch (err) {
+      sessionEndLogger.warn(
+        {
+          event: 'session_end_run_diff_threw',
+          sessionId: args.sessionId,
+          runId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'run-diff runner threw; auto-pack save will proceed without a diff section',
+      );
+    }
+  } else {
+    sessionEndLogger.info(
+      { event: 'session_end_run_diff_skipped', reason: 'no_cwd', sessionId: args.sessionId, runId },
+      'run-diff runner skipped: SessionEnd event had no cwd',
+    );
+  }
   // 2026-05-08 fix: mark the run completed BEFORE attempting the
   // auto-pack save. Pre-fix, runs.status was only flipped to 'completed'
   // by `save_context_pack` MCP (handler.ts → markRunCompleted). When the
@@ -162,7 +198,18 @@ async function scheduleAutoContextPackSave(args: {
     );
   }
   try {
-    await saveAutoContextPack({ runId, projectId: args.projectId, db: args.db });
+    // Module 04 Phase 4: stamp the bridge_auto context_packs row with
+    // the active user's clerk id (team mode) so the web app's "created
+    // by" badges still attribute even when the agent skipped the
+    // explicit save_context_pack call. Solo + missing-config returns
+    // null → column written as NULL.
+    const actor = getActorIdentity();
+    await saveAutoContextPack({
+      runId,
+      projectId: args.projectId,
+      db: args.db,
+      ...(actor !== null ? { createdByUserId: actor.userId } : {}),
+    });
   } catch (err) {
     sessionEndLogger.warn(
       {

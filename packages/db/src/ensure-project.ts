@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 
 import type { DbHandle } from './client.js';
 import { postgresSchema, sqliteSchema } from './schema/index.js';
+import { scheduleDurableWrite } from './schedule-durable-write.js';
 
 /**
  * `packages/db/src/ensure-project` — idempotent project seed for an
@@ -106,6 +107,28 @@ export async function ensureProject(db: DbHandle, args: EnsureProjectArgs): Prom
       { event: 'project_seeded', slug, projectId: settledId, created, ...(cwd !== undefined ? { cwd } : {}) },
       'inserted projects row for cwd-resolved slug',
     );
+    // M04 Phase 4 / Phase G+H: in team mode, enqueue a sync_to_cloud
+    // job so the row reaches cloud Postgres. Without this, every runs
+    // row that FKs to this project hits a violation in cloud and the
+    // entire team-mode audit chain silently never lands.
+    if (created && process.env.CONTEXTOS_MODE === 'team') {
+      try {
+        await scheduleDurableWrite(db, {
+          queue: 'sync_to_cloud',
+          payload: { v: 1 as const, table: 'projects', lookup: { kind: 'id', value: settledId } },
+        });
+      } catch (err) {
+        seedLogger.warn(
+          {
+            event: 'project_sync_enqueue_failed',
+            slug,
+            projectId: settledId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'failed to enqueue projects sync_to_cloud — cloud will lack this row until next ensureProject call',
+        );
+      }
+    }
     return { id: settledId, created };
   }
 

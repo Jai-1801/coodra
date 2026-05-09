@@ -32,7 +32,7 @@ import { findRepoRoot } from './find-repo-root.js';
  * with one canonical resolver that tries bundled paths first.
  */
 
-export type RuntimeApp = 'mcp-server' | 'hooks-bridge';
+export type RuntimeApp = 'mcp-server' | 'hooks-bridge' | 'sync-daemon';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
