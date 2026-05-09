@@ -1,0 +1,13 @@
+{
+  "slug": "coodra",
+  "parentSlug": null,
+  "sourceFiles": [
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.mjs",
+    "**/*.cjs"
+  ],
+  "isActive": true
+}
