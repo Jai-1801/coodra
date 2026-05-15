@@ -1,6 +1,6 @@
 # @coodra/contextos-cli
 
-> **Status:** in development on `feat/08a-cli`. Not yet published to npm — the publish-flag-day is tracked separately as a user-side ops task.
+> **Status:** beta. Published to npm under the `beta` dist-tag — install with `npm i -g @coodra/contextos-cli@beta`. The command reference below is partial; run `contextos` (no args) for the full interactive catalog, or `contextos --help`.
 
 The single-binary install / configure / run / diagnose surface for ContextOS, the MCP server platform that gives AI coding agents (Claude Code, Cursor, Windsurf) Feature Packs, Context Packs, and policy enforcement.
 

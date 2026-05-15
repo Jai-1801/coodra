@@ -198,12 +198,7 @@ export function updateLastPulledAt(table: string, ts: number, opts: ResolveTeamC
 // our four keys, atomic-renames the file.
 
 /** The four env vars team mode requires for `contextos start` to launch the full stack. */
-const TEAM_ENV_KEYS = [
-  'CONTEXTOS_MODE',
-  'DATABASE_URL',
-  'LOCAL_HOOK_SECRET',
-  'CONTEXTOS_TEAM_ORG_ID',
-] as const;
+const TEAM_ENV_KEYS = ['CONTEXTOS_MODE', 'DATABASE_URL', 'LOCAL_HOOK_SECRET', 'CONTEXTOS_TEAM_ORG_ID'] as const;
 
 export interface TeamHomeEnvInput {
   readonly databaseUrl: string;

@@ -54,7 +54,7 @@ import { runKeySegmentSchema } from '../idempotency.js';
  */
 export const HookEventSchema = z
   .object({
-    agentType: z.enum(['claude_code', 'windsurf', 'cursor', 'unknown']),
+    agentType: z.enum(['claude_code', 'windsurf', 'cursor', 'codex', 'unknown']),
     eventPhase: z.enum(['pre', 'post', 'session_start', 'session_end', 'turn_end', 'user_prompt']),
     sessionId: runKeySegmentSchema,
     turnId: z.string().optional(),

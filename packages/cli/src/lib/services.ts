@@ -4,7 +4,7 @@ import type { DaemonUnit } from './daemon/index.js';
 import { loadHomeEnv } from './load-home-env.js';
 import { bundledMigrationsDir, resolveRuntimeBinary } from './runtime-paths.js';
 
-export type ServiceName = 'mcp-server' | 'hooks-bridge' | 'sync-daemon';
+export type ServiceName = 'mcp-server' | 'hooks-bridge' | 'sync-daemon' | 'web';
 
 /**
  * Service descriptors are a discriminated union: HTTP services bind to
@@ -58,6 +58,23 @@ export const SERVICES: readonly ServiceDescriptor[] = [
     relativeEntry: 'apps/sync-daemon/dist/index.js',
     requiresTeamMode: true,
   },
+  {
+    // Web Bundle W1 (2026-05-13). The Next.js standalone server. Runs in
+    // both solo and team mode; the page tree handles mode-awareness via
+    // `lib/deployment-mode.ts` and the role helpers from Phase G.
+    //
+    // Port 3001 is the long-established dev port (apps/web-v2/package.json's
+    // `next dev --port 3001`) and what every Phase G/H install link
+    // hard-codes. /api/healthz is a public GET that returns
+    // `{ ok: true, service: 'web-v2', deploymentMode, timestamp }`.
+    kind: 'http',
+    name: 'web',
+    displayName: 'ContextOS Web',
+    port: 3001,
+    defaultPort: 3001,
+    relativeEntry: 'apps/web-v2/.next/standalone/apps/web-v2/server.js',
+    healthUrl: (port) => `http://127.0.0.1:${port}/api/healthz`,
+  },
 ];
 
 export interface BuildServiceUnitOptions {
@@ -100,6 +117,10 @@ export async function resolveServices(options: BuildServiceUnitOptions): Promise
   const env: NodeJS.ProcessEnv = { ...layered, ...options.env };
   const mcpPort = parsePort(env.MCP_SERVER_PORT, 3100);
   const bridgePort = parsePort(env.HOOKS_BRIDGE_PORT, 3101);
+  // CONTEXTOS_WEB_PORT — env override path for the rare case the user
+  // already runs something on 3001 (e.g. an unrelated Next.js dev server).
+  // Default matches apps/web-v2/package.json's dev port.
+  const webPort = parsePort(env.CONTEXTOS_WEB_PORT, 3001);
 
   const logsDir = resolveContextosLogsDir(options.contextosHome);
   const isTeamMode = env.CONTEXTOS_MODE === 'team';
@@ -109,7 +130,12 @@ export async function resolveServices(options: BuildServiceUnitOptions): Promise
     // sync-daemon has no purpose without DATABASE_URL.
     if (descriptor.kind === 'worker' && descriptor.requiresTeamMode && !isTeamMode) continue;
 
-    const port = descriptor.kind === 'http' ? (descriptor.name === 'mcp-server' ? mcpPort : bridgePort) : null;
+    let port: number | null = null;
+    if (descriptor.kind === 'http') {
+      if (descriptor.name === 'mcp-server') port = mcpPort;
+      else if (descriptor.name === 'hooks-bridge') port = bridgePort;
+      else if (descriptor.name === 'web') port = webPort;
+    }
     const resolvedBin = await resolveRuntimeBinary(descriptor.name);
     const entryPath = resolvedBin.path;
     const entrySource = resolvedBin.source;
@@ -176,6 +202,12 @@ function buildServiceEnv(args: {
     'MCP_SERVER_HOST',
     'HOOKS_BRIDGE_PORT',
     'HOOKS_BRIDGE_HOST',
+    // Web (W1 2026-05-13): standalone server reads PORT/HOSTNAME directly.
+    // NODE_ENV must be 'production' so Next picks the prebuilt server (the
+    // standalone bundle has no source maps / HMR baked in).
+    'PORT',
+    'HOSTNAME',
+    'NODE_ENV',
   ]);
   for (const [key, value] of Object.entries(args.env)) {
     if (typeof value !== 'string' || value.length === 0) continue;
@@ -191,6 +223,24 @@ function buildServiceEnv(args: {
   } else if (args.name === 'hooks-bridge' && args.port !== null) {
     env.HOOKS_BRIDGE_PORT = String(args.port);
     env.HOOKS_BRIDGE_HOST = '127.0.0.1';
+  } else if (args.name === 'web' && args.port !== null) {
+    // Bind to `localhost` (not raw `127.0.0.1`) so the listener binds
+    // both IPv4 and IPv6 loopback, matching the kernel's preferred
+    // resolution. W4 (2026-05-13) — discovered that with HOSTNAME=
+    // 127.0.0.1, Next.js's team-mode internal proxy (Clerk middleware
+    // path) fails with EADDRNOTAVAIL when CONTEXTOS_PUBLIC_URL=
+    // http://localhost:3001 because `localhost` resolves to ::1 on
+    // recent macOS / many Linux distros, but the server only listens
+    // on 127.0.0.1 → connect fails → /api/healthz returns 500. Using
+    // `localhost` as the bind hostname lets Node match the system's
+    // own loopback resolution.
+    //
+    // Security: `localhost` is still loopback-only on standard
+    // /etc/hosts setups (127.0.0.1 + ::1 only). The web is NOT
+    // externally reachable; W4's tunnel is the explicit public path.
+    env.PORT = String(args.port);
+    env.HOSTNAME = 'localhost';
+    env.NODE_ENV = 'production';
   }
   // sync-daemon: no port-bound env. DATABASE_URL is forwarded via the
   // FORWARD_LITERAL pattern above; the daemon's env validation (Zod)

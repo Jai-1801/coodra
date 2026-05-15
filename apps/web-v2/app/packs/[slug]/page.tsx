@@ -1,7 +1,13 @@
 import { notFound } from 'next/navigation';
 
+import { eq } from 'drizzle-orm';
+
+import { sqliteSchema } from '@coodra/contextos-db';
+
 import { Topbar } from '@/components/Topbar';
-import { deletePackAction, regeneratePackAction } from '@/lib/actions/packs';
+import { deletePackAction, regeneratePackAction, togglePackStatusAction } from '@/lib/actions/packs';
+import { tryGetActor } from '@/lib/auth';
+import { createWebDb } from '@/lib/db';
 import { getPack } from '@/lib/queries/packs';
 
 export const dynamic = 'force-dynamic';
@@ -13,6 +19,7 @@ interface SearchParams {
   readonly uploaded?: string;
   readonly error?: string;
   readonly errorMessage?: string;
+  readonly statusFlipped?: 'draft' | 'published';
 }
 
 export default async function PackDetailPage({
@@ -24,10 +31,35 @@ export default async function PackDetailPage({
 }) {
   const { slug } = await params;
   const sp = await searchParams;
-  const pack = getPack(decodeURIComponent(slug));
+  const pack = await getPack(decodeURIComponent(slug));
   if (pack === null) notFound();
 
   const cwd = process.cwd();
+
+  // Phase F.3.b — look up the DB row to render the draft/published
+  // badge and gate the toggle UI. Defaults to 'published' when the
+  // DB row doesn't exist yet (the MCP-side lazy-sync will bootstrap
+  // it on the next get_feature_pack call).
+  const dbHandle = createWebDb();
+  const dbRow =
+    dbHandle.kind === 'sqlite'
+      ? (
+          await dbHandle.db
+            .select({ status: sqliteSchema.featurePacks.status, id: sqliteSchema.featurePacks.id })
+            .from(sqliteSchema.featurePacks)
+            .where(eq(sqliteSchema.featurePacks.slug, pack.slug))
+            .limit(1)
+        )[0]
+      : undefined;
+  const packStatus: 'draft' | 'published' = dbRow?.status === 'draft' ? 'draft' : 'published';
+
+  // Phase F.6 — actor + role for permission gating. Falls back to admin
+  // when actor is unresolvable (local modes give admin by default; see
+  // SOLO_ACTOR + the local-team branch of getActor()).
+  const actor = await tryGetActor();
+  const role = actor?.role ?? 'admin';
+  const isAdmin = role === 'admin';
+  const isViewer = role === 'viewer';
 
   return (
     <>
@@ -49,10 +81,14 @@ export default async function PackDetailPage({
               ) : null}
             </p>
           </div>
-          <div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <span className={`badge ${pack.isActive ? 'badge--ok' : ''}`}>
               <span className="badge__dot"></span>
               {pack.isActive ? 'ACTIVE' : 'OFF'}
+            </span>
+            <span className={`badge ${packStatus === 'published' ? 'badge--ok' : 'badge--caution'}`}>
+              <span className="badge__dot"></span>
+              {packStatus === 'published' ? 'PUBLISHED' : 'DRAFT'}
             </span>
           </div>
         </div>
@@ -68,6 +104,14 @@ export default async function PackDetailPage({
           </Banner>
         ) : null}
         {sp.error !== undefined ? <Banner tone="warn">{sp.errorMessage ?? sp.error}</Banner> : null}
+        {sp.statusFlipped !== undefined ? (
+          <Banner tone="ok">
+            Pack status flipped → <strong>{sp.statusFlipped}</strong>.
+            {sp.statusFlipped === 'draft'
+              ? ' Drafts are hidden from agent contexts (MCP get_feature_pack returns slug_not_found).'
+              : ' The pack is now agent-visible; teammates will see it on next pull.'}
+          </Banner>
+        ) : null}
 
         {/* Action bar — regenerate + delete */}
         <div
@@ -93,16 +137,48 @@ export default async function PackDetailPage({
             Pack actions
           </span>
 
-          <form action={regeneratePackAction} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-            <input type="hidden" name="projectSlug" value={pack.slug} />
-            <input type="hidden" name="packSlug" value={pack.slug} />
-            <input type="hidden" name="cwd" value={cwd} />
-            <input type="hidden" name="confirm" value="yes" />
-            <button className="btn btn--sm" type="submit" title="Re-render spec/impl/techstack from the markers">
-              Regenerate
-            </button>
-          </form>
+          {!isViewer ? (
+            <form action={regeneratePackAction} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+              <input type="hidden" name="projectSlug" value={pack.slug} />
+              <input type="hidden" name="packSlug" value={pack.slug} />
+              <input type="hidden" name="cwd" value={cwd} />
+              <input type="hidden" name="confirm" value="yes" />
+              <button className="btn btn--sm" type="submit" title="Re-render spec/impl/techstack from the markers">
+                Regenerate
+              </button>
+            </form>
+          ) : null}
 
+          {/* Phase F.6 — Publish/Demote is admin-only. Members can
+              author content (via regenerate) but only admins gate
+              agent visibility. Viewers see neither button. */}
+          {isAdmin ? (
+            <form action={togglePackStatusAction} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+              <input type="hidden" name="slug" value={pack.slug} />
+              <button
+                className="btn btn--sm"
+                type="submit"
+                title={
+                  packStatus === 'published'
+                    ? 'Hide from agent contexts (MCP get_feature_pack will return slug_not_found). The filesystem files stay; only the agent-visible status flips.'
+                    : 'Make agent-visible. Teammates will pull the published pack on the next sync tick.'
+                }
+                style={
+                  packStatus === 'draft'
+                    ? { borderColor: 'var(--accent)', color: 'var(--accent)' }
+                    : undefined
+                }
+              >
+                {packStatus === 'published' ? 'Move to draft' : 'Publish'}
+              </button>
+            </form>
+          ) : null}
+
+          {/* Phase F.6 — Delete is admin-only (mirror of policy in
+              actions/packs.ts::deletePackAction). Members/viewers see
+              no Delete button; if they need to delete, an admin must
+              do it for them. */}
+          {isAdmin ? (
           <details style={{ position: 'relative' }}>
             <summary
               className="btn btn--sm btn--ghost"
@@ -160,6 +236,27 @@ export default async function PackDetailPage({
               </button>
             </form>
           </details>
+          ) : null}
+
+          {/* Phase F.6 — viewer banner so the read-only state is
+              obvious. Members see no banner since they retain author
+              rights on their own packs. */}
+          {isViewer ? (
+            <span
+              style={{
+                fontFamily: 'var(--mono)',
+                fontSize: 10,
+                letterSpacing: '0.04em',
+                color: 'var(--ink-mute)',
+                padding: '4px 8px',
+                border: '1px dashed var(--ink-mute)',
+                borderRadius: 4,
+              }}
+              title="Viewers can read every pack but cannot author, edit, publish, or delete."
+            >
+              Read-only · viewer role
+            </span>
+          ) : null}
 
           <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--ink-mute)' }}>
             cwd · {cwd}

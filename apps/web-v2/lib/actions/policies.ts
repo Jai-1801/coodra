@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
+import { assertActorRole } from '@/lib/action-guards';
 import { addPolicyRule, deletePolicyRule, setPolicyActive } from '@/lib/queries/policies';
 
 /**
@@ -31,6 +32,11 @@ const ADD_RULE_FORM_SCHEMA = z.object({
 });
 
 export async function addRuleAction(formData: FormData): Promise<void> {
+  // RBAC: only admins can edit policy rules. Phase 1 of team-mode auth
+  // (see docs/team-hosted-web-and-cli-install-plan.md §4). In local-solo
+  // and local-team the actor is implicitly admin (one user per machine).
+  await assertActorRole('admin');
+
   const parsed = ADD_RULE_FORM_SCHEMA.safeParse({
     projectId: formData.get('projectId') ?? '',
     policyName: formData.get('policyName') ?? undefined,
@@ -71,6 +77,8 @@ export async function addRuleAction(formData: FormData): Promise<void> {
 }
 
 export async function setActiveAction(formData: FormData): Promise<void> {
+  await assertActorRole('admin');
+
   const identifier = String(formData.get('identifier') ?? '');
   const active = formData.get('active') === 'true';
   const projectId = formData.get('projectId');
@@ -92,6 +100,8 @@ export async function setActiveAction(formData: FormData): Promise<void> {
  * way to remove a rule was to deactivate the parent policy.
  */
 export async function deleteRuleAction(formData: FormData): Promise<void> {
+  await assertActorRole('admin');
+
   const ruleId = String(formData.get('ruleId') ?? '');
   const returnTo = String(formData.get('returnTo') ?? '/policies');
   if (ruleId.length === 0) {

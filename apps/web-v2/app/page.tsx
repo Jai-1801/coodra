@@ -2,8 +2,12 @@ import Link from 'next/link';
 
 import { Topbar } from '@/components/Topbar';
 import { cancelAllInProgressRunsAction } from '@/lib/actions/runs';
+import { tryGetActor } from '@/lib/auth';
+import { resolveDeploymentMode } from '@/lib/deployment-mode';
 import { fmtClock, fmtClockSec } from '@/lib/format';
 import { type DecisionCapture, fetchDashboardSnapshot, type NarrativeCoverage } from '@/lib/queries/dashboard';
+import { listProjects } from '@/lib/queries/projects';
+import { readTeamConfig } from '@/lib/team-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,25 +21,80 @@ export default async function DashboardPage({
     error?: string;
     errorMessage?: string;
     cleared?: string;
+    joined?: string;
+    org?: string;
   }>;
 }) {
   const sp = await searchParams;
   const snap = await fetchDashboardSnapshot();
   const totalDecisions = snap.allow24h + snap.denials24h;
 
+  // Three deployment modes drive the dashboard's identity story:
+  //   - local-solo  → isTeam=false, no team banner
+  //   - local-team  → isTeam=true, read team config from ~/.contextos
+  //   - team-hosted → isTeam=true, read team identity from Clerk session
+  const dm = resolveDeploymentMode();
+  const isTeam = dm !== 'local-solo';
+
+  // Team identity for hero copy + breadcrumb. Source depends on mode.
+  let teamLabel: string | null = null;
+  let teamMisconfigured = false;
+  if (dm === 'local-team') {
+    const teamCfg = readTeamConfig();
+    if (teamCfg.mode === 'team' && teamCfg.team !== undefined) {
+      teamLabel = teamCfg.team.clerkOrgSlug ?? teamCfg.team.clerkOrgId;
+    } else {
+      // CONTEXTOS_MODE/DEPLOYMENT says team but config doesn't agree.
+      teamMisconfigured = true;
+    }
+  } else if (dm === 'team-hosted') {
+    const actor = await tryGetActor();
+    teamLabel = actor !== null ? actor.orgId : null;
+  }
+  const teamHealthy = isTeam && !teamMisconfigured && teamLabel !== null;
+
+  // First-run nudge: only fires in local-solo. For local-team the user
+  // already configured their team; for team-hosted they were invited
+  // into a team that already exists — they don't need to "pick a mode".
+  // Showing FirstRunBanner to a freshly-invited teammate is confusing.
+  const projectsList = await safeListProjectsForBanner();
+  const isFirstRun = dm === 'local-solo' && projectsList.length === 0 && snap.totalRuns === 0;
+
+  // Team-hosted member who just joined an empty workspace — show a calm
+  // "welcome to <team>" empty state instead of the dashboard's stats grid
+  // which would all read 0.
+  const isFreshTeamMember = dm === 'team-hosted' && projectsList.length === 0 && snap.totalRuns === 0;
+
+  // Hero copy: mode-aware so the dashboard tells you which workspace
+  // you're looking at without you having to read the URL.
+  const heroEyebrow = isTeam
+    ? `/00 · TEAM WORKSPACE${teamLabel !== null ? ` · ${teamLabel.toUpperCase()}` : ''}`
+    : '/00 · SOLO WORKSPACE';
+  const heroTitle = isTeam ? (
+    <>
+      Your <em>team's</em> context.
+    </>
+  ) : (
+    <>
+      Your <em>local</em> context.
+    </>
+  );
+  const heroLede = isTeam
+    ? "Every run, every decision, every context pack from every member of your org — mirrored to your Postgres, attributed to who wrote it, queryable by every teammate's next agent session."
+    : 'Every run, every decision, every context pack — recorded on this machine. Local-first SQLite, no cloud, no sign-in.';
+
   return (
     <>
-      <Topbar crumb="Dashboard" />
+      <Topbar
+        crumb="Dashboard"
+        crumbPrefix={isTeam ? `contextos · ${teamLabel ?? 'team'}` : 'contextos · solo'}
+      />
       <section className="screen">
         <div className="head">
           <div>
-            <div className="head__num">/00 · WORKSPACE</div>
-            <h1 className="head__title">
-              Master the <em>context</em>.
-            </h1>
-            <p className="head__lede">
-              Every run, every decision, every pack — local-first. Recorded, never reconstructed. Read-only by default.
-            </p>
+            <div className="head__num">{heroEyebrow}</div>
+            <h1 className="head__title">{heroTitle}</h1>
+            <p className="head__lede">{heroLede}</p>
           </div>
           <div>
             <div className="head__meta">
@@ -61,13 +120,29 @@ export default async function DashboardPage({
               <Link className="btn btn--ghost" href="/sync">
                 Audit queue
               </Link>
-              <Link className="btn btn--accent" href="/init">
-                New project
-              </Link>
+              {dm === 'team-hosted' ? (
+                // /init writes to the local repo — meaningless on a hosted
+                // server. Direct admins to the project list instead so they
+                // see what's in the team's cloud.
+                <Link className="btn btn--accent" href="/projects">
+                  Browse projects
+                </Link>
+              ) : (
+                <Link className="btn btn--accent" href="/init">
+                  New project
+                </Link>
+              )}
             </div>
           </div>
         </div>
 
+        {sp.joined === 'ok' ? (
+          <BannerStrip tone="ok">
+            ● Joined team {sp.org !== undefined ? sp.org : ''} · ~/.contextos/config.json + ~/.contextos/.env written ·
+            run <code style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>contextos start</code> in a project
+            dir to bring this machine online.
+          </BannerStrip>
+        ) : null}
         {sp.started !== undefined ? (
           <BannerStrip tone="ok">Services started · MCP + Hooks Bridge online.</BannerStrip>
         ) : null}
@@ -78,6 +153,11 @@ export default async function DashboardPage({
           </BannerStrip>
         ) : null}
         {sp.error !== undefined ? <BannerStrip tone="warn">{sp.errorMessage ?? sp.error}</BannerStrip> : null}
+
+        {isFirstRun ? <FirstRunBanner /> : null}
+        {isFreshTeamMember ? <FreshTeamMemberBanner orgLabel={teamLabel ?? 'your team'} /> : null}
+        {teamMisconfigured ? <TeamMisconfiguredBanner /> : null}
+        {teamHealthy ? <TeamHealthyBanner orgId={teamLabel ?? ''} /> : null}
 
         <div className="stats">
           <div className="stat">
@@ -212,19 +292,38 @@ export default async function DashboardPage({
                   <span className="badge__dot"></span>HEALTHY
                 </span>
               </div>
-              <SystemRow title="MCP server" sub="127.0.0.1:3100 · stdio + http" tone="ok" />
-              <SystemRow title="Hooks bridge" sub="127.0.0.1:3101 · 4 handlers" tone="ok" />
-              <SystemRow
-                title="Sync daemon"
-                sub={snap.mode === 'solo' ? 'standby · solo' : 'queue depth · 0'}
-                tone={snap.mode === 'solo' ? 'idle' : 'ok'}
-              />
-              <SystemRow
-                title="Storage"
-                sub={snap.mode === 'solo' ? '~/.contextos/data.db' : 'cloud postgres'}
-                tone="ok"
-                last
-              />
+              {dm === 'team-hosted' ? (
+                <>
+                  {/* Team-hosted: the web is the only thing running on
+                      this server. The bridge + MCP + sync daemons all
+                      run on individual developers' laptops, not here. */}
+                  <SystemRow title="Web shell" sub="Next.js · this deployment" tone="ok" />
+                  <SystemRow title="Identity" sub="Clerk session JWT" tone="ok" />
+                  <SystemRow title="Storage" sub="cloud postgres · supabase" tone="ok" />
+                  <SystemRow
+                    title="Local daemons"
+                    sub="run on each developer's laptop"
+                    tone="ok"
+                    last
+                  />
+                </>
+              ) : (
+                <>
+                  <SystemRow title="MCP server" sub="127.0.0.1:3100 · stdio + http" tone="ok" />
+                  <SystemRow title="Hooks bridge" sub="127.0.0.1:3101 · 4 handlers" tone="ok" />
+                  <SystemRow
+                    title="Sync daemon"
+                    sub={snap.mode === 'solo' ? 'standby · solo' : 'queue depth · 0'}
+                    tone={snap.mode === 'solo' ? 'idle' : 'ok'}
+                  />
+                  <SystemRow
+                    title="Storage"
+                    sub={snap.mode === 'solo' ? '~/.contextos/data.db' : 'cloud postgres'}
+                    tone="ok"
+                    last
+                  />
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -394,6 +493,182 @@ const inlineMono: React.CSSProperties = {
   fontSize: 12,
   color: 'var(--accent)',
 };
+
+async function safeListProjectsForBanner() {
+  try {
+    return await listProjects();
+  } catch {
+    return [] as Awaited<ReturnType<typeof listProjects>>;
+  }
+}
+
+function FirstRunBanner() {
+  return (
+    <div
+      style={{
+        padding: '20px 24px',
+        marginBottom: 32,
+        border: '1px solid var(--accent)',
+        background: 'var(--accent-glow)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 24,
+        justifyContent: 'space-between',
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontFamily: 'var(--mono)',
+            fontSize: 9,
+            letterSpacing: '0.22em',
+            color: 'var(--accent)',
+            textTransform: 'uppercase',
+            marginBottom: 8,
+          }}
+        >
+          ● first-run
+        </div>
+        <div style={{ fontFamily: 'var(--serif)', fontSize: 26, lineHeight: 1.1, fontWeight: 400 }}>
+          Pick your <em style={{ color: 'var(--accent)' }}>mode</em>, then add a project.
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--ink-dim)', lineHeight: 1.55, marginTop: 6, maxWidth: 640 }}>
+          Solo runs entirely on this machine. Team mirrors to your own Postgres so collaborators see each other’s
+          decisions. Either way, no signup is required by ContextOS — only by the cloud you bring.
+        </p>
+      </div>
+      <div style={{ display: 'flex', gap: 10, flexShrink: 0 }}>
+        <Link href="/welcome" className="btn btn--accent">
+          Start onboarding
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function FreshTeamMemberBanner({ orgLabel }: { readonly orgLabel: string }) {
+  return (
+    <div
+      style={{
+        padding: '20px 24px',
+        marginBottom: 32,
+        border: '1px solid var(--accent)',
+        background: 'var(--accent-glow)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 24,
+        justifyContent: 'space-between',
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontFamily: 'var(--mono)',
+            fontSize: 9,
+            letterSpacing: '0.22em',
+            color: 'var(--accent)',
+            textTransform: 'uppercase',
+            marginBottom: 8,
+          }}
+        >
+          ● welcome
+        </div>
+        <div style={{ fontFamily: 'var(--serif)', fontSize: 26, lineHeight: 1.1, fontWeight: 400 }}>
+          You're in <em style={{ color: 'var(--accent)' }}>{orgLabel}</em>.
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--ink-dim)', lineHeight: 1.55, marginTop: 6, maxWidth: 640 }}>
+          No runs or decisions yet — this team's audit history is empty so far. When teammates use ContextOS in their
+          editors (Claude Code, Cursor, Windsurf), their decisions and context packs appear here within seconds. If
+          you also want to run AI agents on your own machine, see <Link href="/onboarding/team/join" style={{ color: 'var(--accent)' }}>Connect to existing</Link>{' '}
+          for the CLI install command.
+        </p>
+      </div>
+      <div style={{ display: 'flex', gap: 10, flexShrink: 0 }}>
+        <Link href="/settings/team" className="btn btn--ghost">
+          Team settings
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function TeamMisconfiguredBanner() {
+  return (
+    <div
+      style={{
+        padding: '16px 22px',
+        marginBottom: 32,
+        border: '1px solid var(--warn)',
+        background: 'var(--warn-glow)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 16,
+        justifyContent: 'space-between',
+      }}
+    >
+      <div>
+        <strong style={{ color: 'var(--warn)', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.18em' }}>
+          ⚠ TEAM MODE — INCOMPLETE SETUP
+        </strong>
+        <p style={{ fontSize: 13, color: 'var(--ink-dim)', lineHeight: 1.55, marginTop: 6 }}>
+          <code style={inlineMono}>CONTEXTOS_MODE=team</code> is set in <code style={inlineMono}>~/.contextos/.env</code>{' '}
+          but <code style={inlineMono}>~/.contextos/config.json::team</code> has no team block. Run{' '}
+          <code style={inlineMono}>contextos team setup</code> or follow the wizard.
+        </p>
+      </div>
+      <Link href="/onboarding/team" className="btn btn--ghost" style={{ flexShrink: 0 }}>
+        Open wizard
+      </Link>
+    </div>
+  );
+}
+
+function TeamHealthyBanner({ orgId }: { readonly orgId: string }) {
+  return (
+    <div
+      style={{
+        padding: '14px 22px',
+        marginBottom: 32,
+        border: '1px solid var(--accent)',
+        background: 'transparent',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 16,
+        justifyContent: 'space-between',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <span
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            background: 'var(--accent)',
+            boxShadow: '0 0 6px var(--accent-glow)',
+          }}
+        />
+        <span
+          style={{
+            fontFamily: 'var(--mono)',
+            fontSize: 11,
+            letterSpacing: '0.18em',
+            color: 'var(--accent)',
+            textTransform: 'uppercase',
+          }}
+        >
+          team mode · {orgId.slice(0, 16)}
+          {orgId.length > 16 ? '…' : ''}
+        </span>
+        <span style={{ fontSize: 13, color: 'var(--ink-dim)' }}>
+          syncing local SQLite ⇄ cloud Postgres every 10 s
+        </span>
+      </div>
+      <Link href="/settings/team" className="btn btn--sm btn--ghost" style={{ flexShrink: 0 }}>
+        Team settings
+      </Link>
+    </div>
+  );
+}
 
 function BannerStrip({ children, tone }: { children: React.ReactNode; tone: 'ok' | 'warn' }) {
   return (

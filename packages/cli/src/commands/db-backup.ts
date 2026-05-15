@@ -1,7 +1,5 @@
 import { mkdir, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-
-import pc from 'picocolors';
 import { EXIT_BACKUP_RESTORE_PRECONDITION, EXIT_OK, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import {
   resolveContextosConfigJson,
@@ -10,6 +8,7 @@ import {
   resolveContextosLogsDir,
 } from '../lib/contextos-home.js';
 import { openLocalDb } from '../lib/open-local-db.js';
+import { pc } from '../ui/index.js';
 
 /**
  * `contextos db backup` — copy the live `~/.contextos/data.db` to a

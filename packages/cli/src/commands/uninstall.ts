@@ -1,11 +1,12 @@
 import { rm, stat } from 'node:fs/promises';
-
-import pc from 'picocolors';
-
 import { EXIT_OK } from '../exit-codes.js';
 import { resolveContextosHome } from '../lib/contextos-home.js';
 import { removeClaudeSettings } from '../lib/init/claude-settings-merge.js';
+import { removeCodexConfig } from '../lib/init/codex-merge.js';
+import { removeInstructionBlock } from '../lib/init/instruction-files.js';
 import { removeMcpJson } from '../lib/init/mcp-merge.js';
+import { removeWindsurfMcpConfig } from '../lib/init/windsurf-merge.js';
+import { pc } from '../ui/index.js';
 
 /**
  * `contextos uninstall` — reverse `contextos init` writes.
@@ -125,6 +126,25 @@ export async function runUninstallCommand(options: UninstallOptions, ioOverride?
       action: 'failed',
       notes: err instanceof Error ? err.message : String(err),
     });
+  }
+
+  // Step 2b: beta.95 (Scope A) — reverse the Codex + Windsurf writes.
+  // Each is idempotent: a no-op when the entry/block isn't present, so
+  // running uninstall on a Claude-only install is harmless. Best-effort
+  // per step — one failure doesn't block the rest (same as every other
+  // uninstall step).
+  for (const [step, fn] of [
+    ['codex-config', () => removeCodexConfig({ cwd, dryRun })],
+    ['codex-agents-md', () => removeInstructionBlock({ cwd, filename: 'AGENTS.md', dryRun })],
+    ['windsurf-mcp', () => removeWindsurfMcpConfig({ dryRun })],
+    ['windsurf-rules', () => removeInstructionBlock({ cwd, filename: '.windsurfrules', dryRun })],
+  ] as const) {
+    try {
+      const result = await fn();
+      steps.push({ step, action: String(result.action), notes: result.notes ?? '' });
+    } catch (err) {
+      steps.push({ step, action: 'failed', notes: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   // Step 3: ~/.contextos/ purge (only on --purge)

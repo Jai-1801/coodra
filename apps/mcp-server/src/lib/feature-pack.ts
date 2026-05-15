@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-db';
+import { type DbHandle, lookupProjectBySlug, postgresSchema, sqliteSchema } from '@coodra/contextos-db';
 import { InternalError, type Logger } from '@coodra/contextos-shared';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -230,12 +230,32 @@ async function upsertFeaturePackRow(
     readonly isActive: boolean;
     readonly checksum: string;
     readonly updatedAt: Date;
+    /**
+     * Phase F.2 — JSON envelope of the pack files for cloud distribution.
+     * The MCP-side lazy-sync populates this from disk on every read so
+     * the cloud sync path (sync_to_cloud job → cloud Postgres → puller
+     * → teammate filesystem) always has a current snapshot. Optional
+     * for backwards compat: tests + integration scenarios that don't
+     * exercise the content path can omit it.
+     */
+    readonly contentJson?: string | null;
+    /**
+     * Phase F.2 — draft/published lifecycle. Defaults to 'published'
+     * so pre-Phase-F packs (which all carry this implicit semantic)
+     * stay agent-visible. The MCP `get_feature_pack` handler is the
+     * eventual consumer of this filter (Phase F.3.a).
+     */
+    readonly status?: 'draft' | 'published';
   },
 ): Promise<void> {
   if (db.kind === 'sqlite') {
     await db.db
       .insert(sqliteSchema.featurePacks)
-      .values(row)
+      .values({
+        ...row,
+        ...(row.contentJson !== undefined ? { contentJson: row.contentJson } : {}),
+        ...(row.status !== undefined ? { status: row.status } : {}),
+      })
       .onConflictDoUpdate({
         target: sqliteSchema.featurePacks.slug,
         set: {
@@ -243,13 +263,24 @@ async function upsertFeaturePackRow(
           isActive: row.isActive,
           checksum: row.checksum,
           updatedAt: row.updatedAt,
+          // Only update content_json / status when the caller passed
+          // a value — undefined means "keep existing". This protects
+          // a previously-set cloud-content row from being clobbered
+          // by an MCP-side checksum refresh that didn't recompute the
+          // envelope (defensive — current callers always pass).
+          ...(row.contentJson !== undefined ? { contentJson: row.contentJson } : {}),
+          ...(row.status !== undefined ? { status: row.status } : {}),
         },
       });
     return;
   }
   await db.db
     .insert(postgresSchema.featurePacks)
-    .values(row)
+    .values({
+      ...row,
+      ...(row.contentJson !== undefined ? { contentJson: row.contentJson } : {}),
+      ...(row.status !== undefined ? { status: row.status } : {}),
+    })
     .onConflictDoUpdate({
       target: postgresSchema.featurePacks.slug,
       set: {
@@ -257,6 +288,8 @@ async function upsertFeaturePackRow(
         isActive: row.isActive,
         checksum: row.checksum,
         updatedAt: row.updatedAt,
+        ...(row.contentJson !== undefined ? { contentJson: row.contentJson } : {}),
+        ...(row.status !== undefined ? { status: row.status } : {}),
       },
     });
 }
@@ -277,8 +310,39 @@ async function loadOne(
   const checksum = computeChecksum(disk.content);
   const existing = await selectFeaturePackRow(db, slug);
   const updatedAt = new Date(now());
+
+  // Phase F.3.a — draft/published filter at the MCP layer. Draft rows
+  // exist in DB (web admin authored them) but are intentionally hidden
+  // from agent contexts so unfinished knowledge never reaches a live
+  // session. The bridge SessionStart loader walks filesystem directly
+  // and applies its own filter (Phase F.3.b adds that path); here we
+  // gate the MCP get_feature_pack / list inheritance paths.
+  //
+  // Defensive: only filter when the DB row says 'draft' AND has a
+  // populated status column. Pre-Phase-F rows whose status column was
+  // populated by migration 0015's DEFAULT 'published' are agent-visible
+  // as expected. The disk-only path (no DB row yet) defaults to visible
+  // — we never hide a pack we just discovered.
+  if (existing !== null && existing.status === 'draft') {
+    log.info(
+      { event: 'feature_pack_skipped_draft', slug, status: existing.status },
+      'feature_pack is draft — hidden from MCP get_feature_pack/list',
+    );
+    return null;
+  }
   if (!existing || existing.checksum !== checksum || existing.parentSlug !== (disk.meta.parentSlug ?? null)) {
     const id = existing?.id ?? `fp_${randomUUID()}`;
+    // Phase F.2 — bundle disk content into a JSON envelope so the
+    // sync-daemon's syncFeaturePacks dispatch case can push the full
+    // pack content to cloud Postgres. The puller on remote machines
+    // renders this back to `<projectCwd>/docs/feature-packs/<slug>/`.
+    const contentJson = JSON.stringify({
+      spec: disk.content.spec,
+      implementation: disk.content.implementation,
+      techstack: disk.content.techstack,
+      meta: disk.meta,
+      sourceFiles: [...disk.content.sourceFiles],
+    });
     await upsertFeaturePackRow(db, {
       id,
       slug,
@@ -286,6 +350,11 @@ async function loadOne(
       isActive: existing?.isActive ?? true,
       checksum,
       updatedAt,
+      contentJson,
+      // Preserve any existing status (e.g. an admin marked it draft
+      // via the web UI); only fall back to 'published' on first
+      // bootstrap.
+      ...(existing === null ? { status: 'published' as const } : {}),
     });
     log.info(
       {
@@ -378,22 +447,52 @@ export function createFeaturePackStore(deps: CreateFeaturePackStoreDeps): Featur
     'createFeaturePackStore: filesystem-first store wired (checksum-invalidated 60s cache).',
   );
 
+  // Phase F.6 fix — per-project pack root resolution. The daemon's boot
+  // cwd is no longer the only place packs live: a user with multiple
+  // registered projects (e.g. /tmp/demo, ~/work/app, ~/play/spike) should
+  // be able to `get_feature_pack` from any of them. We resolve the pack
+  // root from `projects.cwd` on every call, falling back to the daemon's
+  // default root when the project has no recorded cwd (legacy rows) or
+  // when the slug doesn't match a registered project (project-agnostic
+  // global packs).
+  //
+  // The cache key now includes the resolved root so two projects with
+  // the same slug (e.g. both happen to call their primary pack "auth")
+  // don't shadow each other.
+  async function resolveRootForSlug(slug: string): Promise<string> {
+    try {
+      // Lookup by slug in projects table. The slug → cwd mapping is
+      // populated by `contextos init` and bridge SessionStart cwd
+      // backfill (see `apps/hooks-bridge/src/lib/session-state.ts`).
+      const project = await lookupProjectBySlug(deps.db, slug);
+      if (project !== null && project.cwd !== null) {
+        return resolve(project.cwd, 'docs', 'feature-packs');
+      }
+    } catch (err) {
+      log.warn(
+        { event: 'feature_pack_root_lookup_failed', slug, err: err instanceof Error ? err.message : String(err) },
+        'project lookup failed; falling back to daemon default root',
+      );
+    }
+    return root;
+  }
+
   async function getCached(slug: string): Promise<FeaturePackReturn | null> {
-    const cached = cache.get(slug);
+    const projectRoot = await resolveRootForSlug(slug);
+    const cacheKey = `${projectRoot}::${slug}`;
+    const cached = cache.get(cacheKey);
     if (cached && now() - cached.loadedAt < cacheTtlMs) {
       return cached.result;
     }
-    const fresh = await loadOne(deps.db, root, slug, log, now);
+    const fresh = await loadOne(deps.db, projectRoot, slug, log, now);
     if (!fresh) {
-      cache.delete(slug);
+      cache.delete(cacheKey);
       return null;
     }
-    // Invalidate on checksum change (the cache's raison d'être) —
-    // `loadOne` has already updated the DB row when mismatched.
     if (cached && cached.result.metadata.checksum !== fresh.metadata.checksum) {
-      cache.delete(slug);
+      cache.delete(cacheKey);
     }
-    cache.set(slug, { result: fresh, loadedAt: now() });
+    cache.set(cacheKey, { result: fresh, loadedAt: now() });
     return fresh;
   }
 
@@ -406,7 +505,8 @@ export function createFeaturePackStore(deps: CreateFeaturePackStoreDeps): Featur
       if (!leaf) {
         throw new InternalError(`feature-pack.get: slug '${projectSlug}' not found on disk + DB`);
       }
-      const inherited = await walkAncestors(deps.db, root, projectSlug, leaf.metadata.parentSlug, log, now);
+      const projectRoot = await resolveRootForSlug(projectSlug);
+      const inherited = await walkAncestors(deps.db, projectRoot, projectSlug, leaf.metadata.parentSlug, log, now);
       const result: FeaturePackGetReturn = { ...leaf, inherited };
       return result;
     },
@@ -417,7 +517,8 @@ export function createFeaturePackStore(deps: CreateFeaturePackStoreDeps): Featur
       }
       const leaf = await getCached(projectSlug);
       if (!leaf) return [];
-      const inherited = await walkAncestors(deps.db, root, projectSlug, leaf.metadata.parentSlug, log, now);
+      const projectRoot = await resolveRootForSlug(projectSlug);
+      const inherited = await walkAncestors(deps.db, projectRoot, projectSlug, leaf.metadata.parentSlug, log, now);
       // Root-first, including the leaf itself at the end.
       return [...inherited, leaf];
     },

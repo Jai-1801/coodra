@@ -2,8 +2,6 @@ import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { getRunWithEverything } from '@coodra/contextos-db';
-import pc from 'picocolors';
-
 import { EXIT_OK, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosDataDb, resolveContextosHome } from '../lib/contextos-home.js';
 import { renderHtml } from '../lib/export/render-html.js';
@@ -11,6 +9,7 @@ import { renderJson } from '../lib/export/render-json.js';
 import { renderMarkdown } from '../lib/export/render-markdown.js';
 import { renderSlack } from '../lib/export/render-slack.js';
 import { openLocalDb } from '../lib/open-local-db.js';
+import { pc } from '../ui/index.js';
 
 /**
  * `contextos export <runId> --format markdown|json|html|slack` —

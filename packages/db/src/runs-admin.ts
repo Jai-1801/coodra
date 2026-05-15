@@ -75,6 +75,12 @@ export interface DecisionRow {
   readonly confidence: string | null;
   /** M05 — boolean stored nullable so legacy rows have no answer. */
   readonly reversible: boolean | null;
+  /**
+   * Module 04 Phase 4 — Clerk user id of the agent that recorded this
+   * decision. NULL on solo + on pre-Phase-4 rows; web app's "decided by"
+   * badge branches on null vs userId.
+   */
+  readonly createdByUserId: string | null;
   readonly createdAt: Date;
 }
 
@@ -88,6 +94,12 @@ export interface ContextPackRow {
   readonly source: string;
   /** M05 — JSON-encoded agent-curated metadata. */
   readonly meta: string | null;
+  /**
+   * Module 04 Phase 4 — Clerk user id of the agent that wrote this pack.
+   * NULL on solo + bridge_auto rows + pre-Phase-4 rows. The "authored by"
+   * badge in the web app branches on null.
+   */
+  readonly createdByUserId: string | null;
   readonly createdAt: Date;
 }
 
@@ -363,6 +375,7 @@ interface RawDecisionRow {
   impact: string | null;
   confidence: string | null;
   reversible: boolean | null;
+  createdByUserId: string | null;
   createdAt: Date;
 }
 
@@ -374,6 +387,7 @@ interface RawContextPackRow {
   contentExcerpt: string;
   source: string;
   meta: string | null;
+  createdByUserId: string | null;
   createdAt: Date;
 }
 
@@ -438,6 +452,7 @@ function toDecisionRow(r: unknown): DecisionRow {
     impact: row.impact ?? null,
     confidence: row.confidence ?? null,
     reversible: row.reversible ?? null,
+    createdByUserId: row.createdByUserId ?? null,
     createdAt: row.createdAt,
   };
 }
@@ -452,6 +467,7 @@ function toContextPackRow(r: unknown): ContextPackRow {
     contentExcerpt: row.contentExcerpt,
     source: row.source ?? 'agent',
     meta: row.meta ?? null,
+    createdByUserId: row.createdByUserId ?? null,
     createdAt: row.createdAt,
   };
 }
@@ -515,6 +531,7 @@ function toContextPackDetailRow(r: unknown): ContextPackDetailRow {
     content: row.content,
     source: row.source ?? 'agent',
     meta: row.meta ?? null,
+    createdByUserId: row.createdByUserId ?? null,
     createdAt: row.createdAt,
   };
 }
@@ -559,6 +576,7 @@ export async function listAllDecisions(db: DbHandle, filter: ListDecisionsFilter
         impact: d.impact,
         confidence: d.confidence,
         reversible: d.reversible,
+        createdByUserId: d.createdByUserId,
         createdAt: d.createdAt,
         projectId: r.projectId,
         projectSlug: p.slug,
@@ -581,6 +599,7 @@ export async function listAllDecisions(db: DbHandle, filter: ListDecisionsFilter
       impact: row.impact,
       confidence: row.confidence,
       reversible: row.reversible,
+      createdByUserId: row.createdByUserId ?? null,
       createdAt: row.createdAt,
       projectId: row.projectId,
       projectSlug: row.projectSlug,
@@ -601,6 +620,7 @@ export async function listAllDecisions(db: DbHandle, filter: ListDecisionsFilter
       impact: d.impact,
       confidence: d.confidence,
       reversible: d.reversible,
+      createdByUserId: d.createdByUserId,
       createdAt: d.createdAt,
       projectId: r.projectId,
       projectSlug: p.slug,
@@ -623,6 +643,7 @@ export async function listAllDecisions(db: DbHandle, filter: ListDecisionsFilter
     impact: row.impact,
     confidence: row.confidence,
     reversible: row.reversible,
+    createdByUserId: row.createdByUserId ?? null,
     createdAt: row.createdAt,
     projectId: row.projectId,
     projectSlug: row.projectSlug,
@@ -664,6 +685,7 @@ export async function listAllContextPacks(
         contentExcerpt: cp.contentExcerpt,
         source: cp.source,
         meta: cp.meta,
+        createdByUserId: cp.createdByUserId,
         createdAt: cp.createdAt,
         projectSlug: p.slug,
       })
@@ -684,6 +706,7 @@ export async function listAllContextPacks(
       contentExcerpt: row.contentExcerpt,
       source: row.source ?? 'agent',
       meta: row.meta ?? null,
+      createdByUserId: row.createdByUserId ?? null,
       createdAt: row.createdAt,
       projectSlug: row.projectSlug,
     }));
@@ -702,6 +725,7 @@ export async function listAllContextPacks(
       contentExcerpt: cp.contentExcerpt,
       source: cp.source,
       meta: cp.meta,
+      createdByUserId: cp.createdByUserId,
       createdAt: cp.createdAt,
       projectSlug: p.slug,
     })
@@ -722,6 +746,7 @@ export async function listAllContextPacks(
     contentExcerpt: row.contentExcerpt,
     source: row.source ?? 'agent',
     meta: row.meta ?? null,
+    createdByUserId: row.createdByUserId ?? null,
     createdAt: row.createdAt,
     projectSlug: row.projectSlug,
   }));

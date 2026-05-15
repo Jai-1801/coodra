@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation';
 
+import { assertActorRole } from '@/lib/action-guards';
 import { retryAllDeadJobs, retryDeadJob } from '@/lib/queries/sync';
 
 /**
@@ -16,6 +17,7 @@ import { retryAllDeadJobs, retryDeadJob } from '@/lib/queries/sync';
  */
 
 export async function retrySingleJobAction(formData: FormData): Promise<void> {
+  await assertActorRole('admin');
   const id = String(formData.get('id') ?? '');
   if (id.length === 0) redirect('/sync?error=missing_id');
   const flipped = await retryDeadJob(id);
@@ -23,6 +25,7 @@ export async function retrySingleJobAction(formData: FormData): Promise<void> {
 }
 
 export async function retryQueueAction(formData: FormData): Promise<void> {
+  await assertActorRole('admin');
   const queue = String(formData.get('queue') ?? '');
   if (queue.length === 0) redirect('/sync?error=missing_queue');
   const flipped = await retryAllDeadJobs(queue);

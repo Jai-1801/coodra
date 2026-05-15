@@ -1,8 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-
-import pc from 'picocolors';
 import { EXIT_OK, EXIT_USER_ACTION_REQUIRED, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { replaceAutoSections } from '../lib/auto-marker/index.js';
 import { resolveContextosDataDb, resolveContextosHome } from '../lib/contextos-home.js';
@@ -12,6 +10,7 @@ import { listAvailableTemplates, resolveTemplatePath } from '../lib/template-pat
 import { detectTemplate } from '../lib/templates/detect.js';
 import { loadTemplate, type TemplateDefinition, TemplateLoadError } from '../lib/templates/load-template.js';
 import { renderTemplate } from '../lib/templates/render.js';
+import { commandTitle, pc, terminalWidth } from '../ui/index.js';
 
 /**
  * `contextos pack {new|list|show|regenerate|delete}` — admin surface
@@ -223,16 +222,19 @@ export async function runPackListCommand(options: PackListOptions, ioOverride?: 
 
   if (json) {
     io.writeStdout(`${JSON.stringify({ ok: true, packs: out }, null, 2)}\n`);
-  } else if (out.length === 0) {
-    io.writeStdout(`${pc.dim('—')} no feature packs in ${root}.\n`);
   } else {
-    for (const p of out) {
-      const status = p.isActive === false ? pc.dim(' (inactive)') : '';
-      const parent = p.parentSlug !== null ? ` ← ${p.parentSlug}` : '';
-      io.writeStdout(`${pc.bold(p.slug)}${status}${parent}\n`);
-      const missing = p.files.filter((f) => !f.present).map((f) => f.name);
-      if (missing.length > 0) {
-        io.writeStdout(`  ${pc.yellow('!')} missing: ${missing.join(', ')}\n`);
+    io.writeStdout(`${commandTitle('Feature packs', `${out.length} on disk`, { width: terminalWidth() })}\n`);
+    if (out.length === 0) {
+      io.writeStdout(`${pc.dim('—')} no feature packs in ${root}.\n`);
+    } else {
+      for (const p of out) {
+        const status = p.isActive === false ? pc.dim(' (inactive)') : '';
+        const parent = p.parentSlug !== null ? ` ← ${p.parentSlug}` : '';
+        io.writeStdout(`${pc.bold(p.slug)}${status}${parent}\n`);
+        const missing = p.files.filter((f) => !f.present).map((f) => f.name);
+        if (missing.length > 0) {
+          io.writeStdout(`  ${pc.yellow('!')} missing: ${missing.join(', ')}\n`);
+        }
       }
     }
   }

@@ -1,8 +1,7 @@
-import pc from 'picocolors';
 import semver from 'semver';
-
 import { EXIT_OK, EXIT_USER_ACTION_REQUIRED, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { NpmViewError, npmViewVersion } from '../lib/npm-view.js';
+import { pc } from '../ui/index.js';
 import { VERSION } from '../version.js';
 
 /**

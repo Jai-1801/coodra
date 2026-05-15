@@ -4,8 +4,12 @@ import { dirname, join, resolve } from 'node:path';
 import { glob } from 'glob';
 import { z } from 'zod';
 
-/** IDEs we can wire `init` for. Order matters — preference for output. */
-export type IDE = 'claude' | 'cursor' | 'windsurf';
+/**
+ * IDEs / agents we can wire `init` for. Order matters — preference for
+ * output. `codex` added beta.95 (Scope A — Codex + Windsurf MCP-config
+ * + instruction-file integration).
+ */
+export type IDE = 'claude' | 'cursor' | 'windsurf' | 'codex';
 
 export type Language = 'typescript' | 'javascript' | 'python' | 'rust' | 'go' | 'java' | 'ruby';
 
@@ -93,8 +97,14 @@ export async function detectLanguages(root: string): Promise<Language[]> {
 
 /**
  * Look for IDE config dirs in $HOME. Each detected IDE gets one entry; the
- * order matches the IDE_DIRS list (Claude, Cursor, Windsurf). An empty array
- * means no supported IDE is installed — `init` warns the user.
+ * order matches the candidate list (Claude, Cursor, Windsurf, Codex). An
+ * empty array means no supported IDE is installed — `init` warns the user.
+ *
+ * Detection dirs:
+ *   - claude   → ~/.claude
+ *   - cursor   → ~/.cursor
+ *   - windsurf → ~/.windsurf
+ *   - codex    → ~/.codex   (Codex CLI's config home; beta.95)
  */
 export async function detectIDE(deps: DetectionDeps = {}): Promise<IDE[]> {
   const home = deps.homeDir ?? homedir();
@@ -102,6 +112,7 @@ export async function detectIDE(deps: DetectionDeps = {}): Promise<IDE[]> {
     { ide: 'claude', dir: '.claude' },
     { ide: 'cursor', dir: '.cursor' },
     { ide: 'windsurf', dir: '.windsurf' },
+    { ide: 'codex', dir: '.codex' },
   ];
   const found: IDE[] = [];
   for (const { ide, dir } of candidates) {

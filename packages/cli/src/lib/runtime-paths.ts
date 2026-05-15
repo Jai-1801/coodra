@@ -32,9 +32,27 @@ import { findRepoRoot } from './find-repo-root.js';
  * with one canonical resolver that tries bundled paths first.
  */
 
-export type RuntimeApp = 'mcp-server' | 'hooks-bridge' | 'sync-daemon';
+export type RuntimeApp = 'mcp-server' | 'hooks-bridge' | 'sync-daemon' | 'web';
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Web Bundle W1 (2026-05-13). The web runtime is Next.js's standalone
+ * output, which differs from the other runtimes:
+ *   - other apps:  `<runtime>/<app>/index.js`
+ *   - web:         `<runtime>/web/apps/web-v2/server.js`
+ *
+ * Reason for the asymmetry: Next.js's standalone tree is itself a
+ * directory layout — it includes `node_modules/`, transpiled workspace
+ * packages, and the project-relative `apps/web-v2/server.js` entry.
+ * Flattening that into `runtime/web/index.js` would break the server's
+ * `process.chdir(__dirname)` + relative `require('next')` lookup.
+ *
+ * Keep this constant in sync with the destination layout produced by
+ * `scripts/bundle.mjs` step 6 and the monorepo dev path
+ * `apps/web-v2/.next/standalone/apps/web-v2/server.js`.
+ */
+const WEB_STANDALONE_ENTRY_REL = 'apps/web-v2/server.js';
 
 /**
  * Compute candidate paths to the bundled runtime entry, in resolution
@@ -58,13 +76,25 @@ const here = dirname(fileURLToPath(import.meta.url));
  * production-ready CLI does.
  */
 export function bundledRuntimeCandidates(app: RuntimeApp): string[] {
-  const candidates = [
-    resolve(here, 'runtime', app, 'index.js'), // bundled CLI: here = <cli-dist>
-    resolve(here, '..', 'runtime', app, 'index.js'), // loose tsc dist: here = <cli-dist>/lib
-    resolve(here, '..', '..', 'runtime', app, 'index.js'), // deeper loose dist
-    resolve(here, '..', '..', 'dist', 'runtime', app, 'index.js'), // vitest from src: here = <cli-pkg>/src/lib
-    resolve(here, '..', '..', '..', 'dist', 'runtime', app, 'index.js'), // vitest deeper from src
-  ];
+  // Web differs from the other runtimes — it ships the Next.js standalone
+  // tree with `apps/web-v2/server.js` as the entry. See WEB_STANDALONE_ENTRY_REL.
+  const relEntry = app === 'web' ? WEB_STANDALONE_ENTRY_REL : `${app}/index.js`;
+  const candidates =
+    app === 'web'
+      ? [
+          resolve(here, 'runtime', 'web', WEB_STANDALONE_ENTRY_REL), // bundled CLI: here = <cli-dist>
+          resolve(here, '..', 'runtime', 'web', WEB_STANDALONE_ENTRY_REL), // loose tsc dist
+          resolve(here, '..', '..', 'runtime', 'web', WEB_STANDALONE_ENTRY_REL), // deeper loose dist
+          resolve(here, '..', '..', 'dist', 'runtime', 'web', WEB_STANDALONE_ENTRY_REL), // vitest from src
+          resolve(here, '..', '..', '..', 'dist', 'runtime', 'web', WEB_STANDALONE_ENTRY_REL), // vitest deeper from src
+        ]
+      : [
+          resolve(here, 'runtime', relEntry), // bundled CLI: here = <cli-dist>
+          resolve(here, '..', 'runtime', relEntry), // loose tsc dist: here = <cli-dist>/lib
+          resolve(here, '..', '..', 'runtime', relEntry), // deeper loose dist
+          resolve(here, '..', '..', 'dist', 'runtime', relEntry), // vitest from src: here = <cli-pkg>/src/lib
+          resolve(here, '..', '..', '..', 'dist', 'runtime', relEntry), // vitest deeper from src
+        ];
   return candidates;
 }
 
@@ -127,7 +157,13 @@ export async function resolveRuntimeBinary(
   const cwd = options.cwd ?? process.cwd();
   const repoRoot = (await findRepoRoot(here)) ?? (await findRepoRoot(cwd));
   if (repoRoot !== null) {
-    const monorepoPath = resolve(repoRoot, 'apps', app, 'dist', 'index.js');
+    // Web's monorepo dev path is the in-repo standalone output; if a
+    // contributor ran `pnpm --filter @coodra/contextos-web-v2 build`, the
+    // server lives at apps/web-v2/.next/standalone/apps/web-v2/server.js.
+    const monorepoPath =
+      app === 'web'
+        ? resolve(repoRoot, 'apps', 'web-v2', '.next', 'standalone', WEB_STANDALONE_ENTRY_REL)
+        : resolve(repoRoot, 'apps', app, 'dist', 'index.js');
     if (existsSync(monorepoPath)) {
       return { path: monorepoPath, source: 'monorepo' };
     }

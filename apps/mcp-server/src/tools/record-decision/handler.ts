@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-db';
+import { type DbHandle, postgresSchema, scheduleDurableWrite, sqliteSchema } from '@coodra/contextos-db';
 import { createLogger } from '@coodra/contextos-shared';
 import { eq } from 'drizzle-orm';
 import type { ToolContext } from '../../framework/tool-context.js';
-import { getActorIdentity } from '../../lib/actor-identity.js';
+import { requireActorIdentityForTeamMode } from '../../lib/actor-identity.js';
 import type { RecordDecisionInput, RecordDecisionOutput } from './schema.js';
 
 /**
@@ -211,10 +211,23 @@ export function createRecordDecisionHandler(deps: RecordDecisionHandlerDeps) {
     // schema enum; reversible stored as boolean (NULL when omitted).
     const impactJson = input.impact !== undefined && input.impact.length > 0 ? JSON.stringify(input.impact) : null;
 
-    // Module 04 Phase 4: stamp the actor's clerk id on the decision row so
-    // the web app's "decided by" badge attributes correctly. Solo +
-    // missing-team-config returns null → DB column written as NULL.
-    const actor = getActorIdentity();
+    // Phase G slice G.6 — require Clerk-verified identity for team-
+    // mode writes. Solo mode short-circuits to actor=null (NULL stamp).
+    // Team mode + no verified token returns auth_required soft-failure
+    // so the agent can surface the remediation message to the user.
+    const auth = await requireActorIdentityForTeamMode();
+    if (auth.kind === 'auth_required') {
+      handlerLogger.info(
+        { event: 'record_decision_auth_required', runId: input.runId, sessionId: ctx.sessionId },
+        'record_decision: team mode but no verified Clerk JWT — returning auth_required soft-failure',
+      );
+      return {
+        ok: false,
+        error: 'auth_required',
+        howToFix: auth.howToFix,
+      };
+    }
+    const actor = auth.actor;
     const { inserted, id, createdAt } = await insertIgnoreOnConflict(deps.db, {
       id: `dec_${randomUUID()}`,
       idempotencyKey,
@@ -239,6 +252,30 @@ export function createRecordDecisionHandler(deps: RecordDecisionHandlerDeps) {
         },
         'record_decision: idempotency key collided — returning existing decisionId',
       );
+    }
+
+    // M04 Phase 4: in team mode, enqueue a sync_to_cloud job so the
+    // sync-daemon pushes the decision to cloud Postgres. Without this
+    // enqueue the row lives only in local SQLite and teammates never
+    // see it via the team-rows-puller. Solo mode (or when the row was
+    // an idempotent hit) skips the enqueue — append-only semantics
+    // mean re-pushing on conflict is harmless but wasteful.
+    if (inserted && process.env.CONTEXTOS_MODE === 'team') {
+      try {
+        await scheduleDurableWrite(deps.db, {
+          queue: 'sync_to_cloud',
+          payload: { v: 1 as const, table: 'decisions', lookup: { kind: 'idempotency_key', value: idempotencyKey } },
+        });
+      } catch (err) {
+        handlerLogger.warn(
+          {
+            event: 'record_decision_sync_enqueue_failed',
+            decisionId: id,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'sync_to_cloud enqueue threw after decision insert — row will not reach cloud until next manual push',
+        );
+      }
     }
 
     return {

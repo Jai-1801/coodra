@@ -1,13 +1,12 @@
 import { readdir } from 'node:fs/promises';
 
 import { migrateSqlite, resolveMigrationsFolder } from '@coodra/contextos-db';
-import pc from 'picocolors';
-
 import { EXIT_OK, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosDataDb, resolveContextosHome } from '../lib/contextos-home.js';
 import { openLocalDb } from '../lib/open-local-db.js';
 import { readPidStatus } from '../lib/pid-status.js';
 import { bundledMigrationsDir } from '../lib/runtime-paths.js';
+import { pc } from '../ui/index.js';
 
 /**
  * `contextos db migrate` — apply pending Drizzle migrations to

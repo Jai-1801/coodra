@@ -52,9 +52,41 @@ describe('SystemdDaemonManager — service-file write + systemctl wiring', () =>
     expect(body).toContain('Type=simple');
     expect(body).toContain('ExecStart=/usr/bin/node');
     expect(body).toContain('Restart=on-failure');
-    expect(body).toContain('Environment=CONTEXTOS_LOG_DESTINATION=stderr');
-    // daemon-reload should have been called once.
-    expect(calls).toEqual([{ file: 'systemctl', args: ['--user', 'daemon-reload'] }]);
+    // beta.8 — env lines are now `Environment="KEY=VALUE"` (whole
+    // assignment quoted) so values with spaces / specials survive.
+    expect(body).toContain('Environment="CONTEXTOS_LOG_DESTINATION=stderr"');
+    // W5 / beta.5 — install runs daemon-reload THEN reset-failed so a
+    // unit previously latched into `failed` by systemd's restart
+    // rate-limiter becomes startable again on the next `contextos start`.
+    expect(calls).toEqual([
+      { file: 'systemctl', args: ['--user', 'daemon-reload'] },
+      { file: 'systemctl', args: ['--user', 'reset-failed', 'contextos-mcp.service'] },
+    ]);
+  });
+
+  it('escapes % in Environment values as %% (systemd specifier-expansion guard)', async () => {
+    // beta.8 regression guard. A URL-encoded Postgres password like
+    // `Abi%4029250204` (%40 = encoded `@`) contains `%4`, which systemd
+    // tries to expand as a specifier on `Environment=` lines. Pre-fix
+    // this mangled/dropped DATABASE_URL → sync-daemon booted with
+    // `DATABASE_URL=undefined` and crash-looped. Every `%` must be `%%`.
+    const mgr = new SystemdDaemonManager({
+      homeDir: home,
+      execa: fakeExeca(() => ({ exitCode: 0 })),
+    });
+    const databaseUrl = 'postgresql://postgres:Abi%4029250204@db.example.supabase.co:5432/postgres';
+    await mgr.install({
+      name: 'sync-daemon',
+      command: '/usr/bin/node',
+      args: ['/opt/contextos/dist/runtime/sync-daemon/index.js'],
+      env: { DATABASE_URL: databaseUrl },
+    });
+    const body = await readFile(join(home, '.config/systemd/user/contextos-sync-daemon.service'), 'utf8');
+    // The raw %40 must NOT appear; it must be doubled to %%40.
+    expect(body).toContain(
+      'Environment="DATABASE_URL=postgresql://postgres:Abi%%4029250204@db.example.supabase.co:5432/postgres"',
+    );
+    expect(body).not.toMatch(/Environment="DATABASE_URL=[^"]*[^%]%4029250204/);
   });
 
   it('start runs systemctl --user restart <unit> so re-starts pick up the new env', async () => {

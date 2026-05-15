@@ -2,10 +2,9 @@ import { randomBytes } from 'node:crypto';
 
 import { createPostgresDb, ensurePgVector, migratePostgres, type PostgresHandle } from '@coodra/contextos-db';
 import { sql } from 'drizzle-orm';
-import pc from 'picocolors';
-
 import { EXIT_OK, EXIT_USER_ACTION_REQUIRED, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { upgradeToTeamConfig, writeTeamHomeEnv } from '../lib/team-config.js';
+import { pc } from '../ui/index.js';
 
 import type { TeamCommandIO } from './team.js';
 import { DEFAULT_TEAM_IO } from './team.js';
@@ -105,7 +104,9 @@ export async function runTeamSetupCommand(
     return io.exit(EXIT_USER_ACTION_REQUIRED);
   }
 
-  io.writeStdout(pc.cyan(`contextos team setup — bootstrapping team Postgres at ${maskDatabaseUrl(resolved.databaseUrl)}\n`));
+  io.writeStdout(
+    pc.cyan(`contextos team setup — bootstrapping team Postgres at ${maskDatabaseUrl(resolved.databaseUrl)}\n`),
+  );
 
   let cloud: PostgresHandle;
   try {
@@ -142,7 +143,9 @@ export async function runTeamSetupCommand(
 
     // Step 2: pgvector extension.
     if (options.skipPgvector === true) {
-      io.writeStdout(pc.yellow('  ▸ skipping pgvector install (--skip-pgvector). Vector queries will fail until installed.\n'));
+      io.writeStdout(
+        pc.yellow('  ▸ skipping pgvector install (--skip-pgvector). Vector queries will fail until installed.\n'),
+      );
     } else {
       io.writeStdout(pc.dim('  ▸ installing pgvector extension (CREATE EXTENSION IF NOT EXISTS vector)...\n'));
       try {

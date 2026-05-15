@@ -85,7 +85,22 @@ const runNotFoundBranch = z
   })
   .strict();
 
-export const recordDecisionOutputSchema = z.union([successBranch, runNotFoundBranch]);
+/**
+ * Phase G slice G.6 — auth_required soft-failure.
+ *
+ * Returned in team mode when no verified Clerk JWT is available on
+ * this machine. The agent surfaces `howToFix` to the user, who runs
+ * `contextos login` and retries.
+ */
+const authRequiredBranch = z
+  .object({
+    ok: z.literal(false),
+    error: z.literal('auth_required'),
+    howToFix: z.string().min(1),
+  })
+  .strict();
+
+export const recordDecisionOutputSchema = z.union([successBranch, runNotFoundBranch, authRequiredBranch]);
 
 export type RecordDecisionInput = z.infer<typeof recordDecisionInputSchema>;
 export type RecordDecisionOutput = z.infer<typeof recordDecisionOutputSchema>;

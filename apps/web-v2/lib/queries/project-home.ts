@@ -71,7 +71,7 @@ export async function fetchProjectHomeSnapshot(args: {
     fetchLatestEventsForProject(handle, args.projectId),
   ]);
   // Pack info is filesystem-only — no DB hit, no Promise.all entry.
-  const pack = fetchProjectPackInfo(args.projectSlug, args.projectCwd ?? process.cwd());
+  const pack = await fetchProjectPackInfo(args.projectSlug, args.projectCwd ?? process.cwd());
 
   return {
     projectId: args.projectId,
@@ -97,11 +97,11 @@ export async function fetchProjectHomeSnapshot(args: {
  *   (`apps/mcp-server/src/lib/feature-pack.ts:330-357`); we mirror the
  *   algorithm here so the project home can preview what the agent sees.
  *
- * Sync — wraps the already-sync `listPacks()`. Safe to call inside the
- * async `fetchProjectHomeSnapshot`.
+ * Async since Phase F.6+ — `listPacks()` is async now so it can query
+ * the cloud Postgres in team-hosted mode + the local SQLite mirror.
  */
-export function fetchProjectPackInfo(projectSlug: string, cwd: string = process.cwd()): ProjectHomePackInfo {
-  const allPacks = listPacks(cwd);
+export async function fetchProjectPackInfo(projectSlug: string, cwd: string = process.cwd()): Promise<ProjectHomePackInfo> {
+  const allPacks = await listPacks(cwd);
   const bySlug = new Map(allPacks.map((p) => [p.slug, p]));
   const primary = bySlug.get(projectSlug) ?? null;
 

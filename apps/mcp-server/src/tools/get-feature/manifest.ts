@@ -20,11 +20,13 @@ export function createGetFeatureToolRegistration(
     name: 'get_feature',
     title: 'ContextOS: get_feature',
     description:
-      'Call this AFTER list_features identifies a feature whose trigger description matches the current task — never blindly pre-load. ' +
-      'Returns { ok: true, slug, frontmatter, body, files: [{path, bytes, modifiedAt}] } where `body` is the full feature.md ' +
-      'content (markdown, expect 1-30 KB) and `files` lists supporting documents. Soft-failure: project_not_found / project_cwd_unknown / feature_not_found, each with howToFix. ' +
-      'Supporting file CONTENTS are not included — call get_feature_file(slug, path) per file to fetch those, gated by extension and size. ' +
-      'Re-call when switching to a new feature mid-session.',
+      'Call when the user\'s prompt matches a skill\'s trigger description from `list_features` — never blindly ' +
+      'pre-load. Features are pull-based SKILLS (single markdown + frontmatter + optional supporting files), ' +
+      'distinct from Feature Packs which are MODULE blueprints (push, via `get_feature_pack`). Returns { ok: true, ' +
+      'slug, frontmatter, body, files: [{path, bytes, modifiedAt}] } where `body` is the full feature.md content ' +
+      '(markdown, expect 1-30 KB). Supporting file CONTENTS are NOT inlined — call `get_feature_file(slug, path)` ' +
+      'per file. Soft-failures: project_not_found / project_cwd_unknown / feature_not_found, each with howToFix. ' +
+      'Re-call when switching to a different skill mid-session.',
     inputSchema: getFeatureInputSchema,
     outputSchema: getFeatureOutputSchema,
     idempotencyKey: getFeatureIdempotencyKey,

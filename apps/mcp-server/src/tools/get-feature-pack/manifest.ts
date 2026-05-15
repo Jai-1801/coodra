@@ -39,11 +39,12 @@ export const getFeaturePackToolRegistration: ToolRegistration<
   name: 'get_feature_pack',
   title: 'ContextOS: get_feature_pack',
   description:
-    'Call this BEFORE editing, creating, or refactoring any file in this project. Returns the Feature Pack for the ' +
-    'module that owns the given path: architectural constraints, coding conventions, permitted files, known ' +
-    "gotchas, and the tech lead's guidelines. Always call on the first tool use of a session and whenever switching " +
-    'to a new area of the codebase. Without this, your changes will probably violate conventions the team has ' +
-    'already recorded.',
+    'Call this at SessionStart (or when switching to a different module mid-session) for the project\'s ' +
+    'architectural blueprint — the MODULE-level spec, conventions, permitted files, and gotchas the tech lead has ' +
+    'recorded for the area you\'re working in. Returns one Feature Pack scoped to the project (or to the module ' +
+    'that owns `filePath` if provided): spec.md + implementation.md + techstack.md + meta.json. This is the ' +
+    'long-lived architectural reference — NOT a callable skill. For on-demand skills (per-task recipes triggered ' +
+    'by user prompts) use `list_features` + `get_feature` instead.',
   inputSchema: getFeaturePackInputSchema,
   outputSchema: getFeaturePackOutputSchema,
   idempotencyKey: getFeaturePackIdempotencyKey,

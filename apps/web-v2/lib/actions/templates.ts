@@ -4,6 +4,8 @@ import { runTemplateInstall } from '@coodra/contextos-cli/lib/template';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
+import { assertActorRole, refuseInTeamHosted } from '@/lib/action-guards';
+
 /**
  * `apps/web/lib/actions/templates.ts` — Server Action wrapping the
  * `runTemplateInstall` library promotion (M04 Phase 2 S13).
@@ -33,6 +35,8 @@ const SCHEMA = z.object({
 });
 
 export async function installTemplateFromPathAction(formData: FormData): Promise<void> {
+  refuseInTeamHosted('installTemplateFromPathAction');
+  await assertActorRole('admin');
   const raw = {
     projectSlug: String(formData.get('projectSlug') ?? ''),
     source: String(formData.get('source') ?? '').trim(),

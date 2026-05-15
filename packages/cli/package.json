@@ -1,7 +1,7 @@
 {
   "name": "@coodra/contextos-cli",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.1.0-beta.95",
+  "private": false,
   "description": "ContextOS CLI — single-binary install/configure/run/diagnose surface for solo and team modes. Module 08a.",
   "license": "MIT",
   "type": "module",
@@ -42,6 +42,10 @@
     "./lib/template": {
       "types": "./dist/lib/template/index.d.ts",
       "import": "./dist/lib/template/index.js"
+    },
+    "./lib/team-init": {
+      "types": "./dist/lib/team-init/index.d.ts",
+      "import": "./dist/lib/team-init/index.js"
     }
   },
   "bin": {
@@ -53,7 +57,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=22.16.0 <23"
+    "node": ">=22.16.0"
   },
   "repository": {
     "type": "git",
@@ -81,7 +85,9 @@
     "test:unit": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
-    "clean": "rm -rf dist .turbo"
+    "clean": "rm -rf dist .turbo",
+    "//install:global": "Symlink the workspace build into the user's global npm prefix so `contextos` on $PATH points at the local dist/. --force overwrites any stale install (e.g. the pre-rename `@contextos/cli` package). Run after `pnpm --filter @coodra/contextos-cli build`.",
+    "install:global": "npm i -g --force ."
   },
   "//dependencies": "Only true npm-resolvable runtime deps live here (decision dec_83ba10c1). Native modules are kept external from the bundle so they install correctly per platform; everything else is inlined. Workspace deps + bundleable npm deps moved to devDependencies so `pnpm publish` / `npm install` of the published tarball does not try to resolve `workspace:*` placeholders.",
   "dependencies": {
@@ -89,12 +95,15 @@
     "sqlite-vec": "0.1.9"
   },
   "//devDependencies": "Phase 3 Fix E (2026-05-02): @coodra/contextos-{mcp-server,hooks-bridge} were previously declared here so the bundle.mjs script's esbuild could resolve their imports via cli's node_modules. They were removed because pnpm + turbo treats devDependencies as ^build edges, and apps/{mcp-server,hooks-bridge} also declare @coodra/contextos-cli (for /lib/outbox), which produced a build-time cycle that turbo refused to schedule. esbuild reads apps/{mcp-server,hooks-bridge}/src/index.ts via absolute filesystem paths and resolves their transitive imports through the workspace-root node_modules — no cli-local dep declaration is needed.",
+  "//ui-deps": "react + ink + ink-* power the interactive TUI (`contextos` no-args / `contextos ui`) and live in devDependencies, not dependencies: they are pure-JS and esbuild inlines them into dist/index.js at bundle time (same treatment as commander/execa/zod). Only the two native modules stay in `dependencies`. @types/react is dev-only typings.",
   "devDependencies": {
+    "@clerk/backend": "^3.4.7",
     "@coodra/contextos-db": "workspace:*",
     "@coodra/contextos-policy": "workspace:*",
     "@coodra/contextos-shared": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.0",
+    "@types/react": "^19.2.0",
     "@types/semver": "^7.7.1",
     "commander": "^13.1.0",
     "dotenv": "^17.4.2",
@@ -102,8 +111,14 @@
     "esbuild": "^0.27.7",
     "execa": "^9.6.0",
     "glob": "^11.0.4",
+    "ink": "^7.0.3",
+    "ink-spinner": "^5.0.0",
+    "ink-testing-library": "^4.0.0",
+    "ink-text-input": "^6.0.0",
     "picocolors": "^1.1.1",
+    "react": "^19.2.6",
     "semver": "^7.6.3",
+    "smol-toml": "^1.6.1",
     "tar": "^7.4.3",
     "tmp-promise": "^3.0.3",
     "tsx": "^4.21.0",

@@ -29,3 +29,20 @@
 if (process.env.CONTEXTOS_LOG_DESTINATION === undefined) {
   process.env.CONTEXTOS_LOG_DESTINATION = 'stderr';
 }
+
+// Phase B clarity-pass demo finding (2026-05-11): even on stderr, the
+// CLI's info-level pino logs (project_seeded, default_policy_seeded,
+// kill_switch_inserted, etc.) interleave with the human-readable
+// `✓`/`⚠` UI on the terminal because both fds default to the tty.
+// For interactive CLI commands the structured logs are noise — they
+// were designed for daemon diagnostics, not user-facing output.
+//
+// Default the CLI process to LOG_LEVEL=warn so info-level pinos go
+// silent unless the user opts in (`LOG_LEVEL=info contextos init`).
+// Spawned daemons are unaffected because services.ts only forwards
+// env keys starting with CONTEXTOS_/CLERK_ — LOG_LEVEL is intention-
+// ally NOT forwarded, so the mcp-server / hooks-bridge / sync-daemon
+// children continue to log at their own boot-time 'info' default.
+if (process.env.LOG_LEVEL === undefined) {
+  process.env.LOG_LEVEL = 'warn';
+}

@@ -16,5 +16,18 @@ import './lib/migrations-dir-shim.js';
 import './lib/env-bootstrap-shim.js';
 import { buildProgram } from './program.js';
 
-const program = buildProgram();
-await program.parseAsync(process.argv);
+// `contextos` with no arguments at all, on an interactive terminal,
+// launches the redesigned TUI. Any arguments (a subcommand, `--help`,
+// `--version`, `ui`) fall through to commander untouched — and a
+// non-TTY no-args invocation (piped, CI) also goes to commander, which
+// prints help. Gating here rather than via a commander root `.action()`
+// keeps the CLI surface unchanged: `contextos help <cmd>` and strict
+// argument arity still behave exactly as before.
+const cliArgs = process.argv.slice(2);
+if (cliArgs.length === 0 && process.stdin.isTTY === true && process.stdout.isTTY === true) {
+  const { launchTui } = await import('./tui/index.js');
+  await launchTui();
+} else {
+  const program = buildProgram();
+  await program.parseAsync(process.argv);
+}

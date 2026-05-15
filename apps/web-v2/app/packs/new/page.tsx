@@ -23,7 +23,7 @@ interface SearchParams {
 export default async function NewPackPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const root = packsRoot(process.cwd());
-  const existing = listPacks().map((p) => p.slug);
+  const existing = (await listPacks()).map((p) => p.slug);
 
   return (
     <>

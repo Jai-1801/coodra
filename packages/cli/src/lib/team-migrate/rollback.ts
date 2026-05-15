@@ -82,18 +82,10 @@ export async function rollbackMigration(input: RollbackInput): Promise<RollbackR
   // accurate and removes any timing surprises.
   const runIds = byTable.get('runs') ?? [];
   if (runIds.length > 0) {
-    await input.cloud.db
-      .delete(postgresSchema.runDiffs)
-      .where(inArray(postgresSchema.runDiffs.runId, runIds));
-    await input.cloud.db
-      .delete(postgresSchema.contextPacks)
-      .where(inArray(postgresSchema.contextPacks.runId, runIds));
-    await input.cloud.db
-      .delete(postgresSchema.decisions)
-      .where(inArray(postgresSchema.decisions.runId, runIds));
-    await input.cloud.db
-      .delete(postgresSchema.runEvents)
-      .where(inArray(postgresSchema.runEvents.runId, runIds));
+    await input.cloud.db.delete(postgresSchema.runDiffs).where(inArray(postgresSchema.runDiffs.runId, runIds));
+    await input.cloud.db.delete(postgresSchema.contextPacks).where(inArray(postgresSchema.contextPacks.runId, runIds));
+    await input.cloud.db.delete(postgresSchema.decisions).where(inArray(postgresSchema.decisions.runId, runIds));
+    await input.cloud.db.delete(postgresSchema.runEvents).where(inArray(postgresSchema.runEvents.runId, runIds));
     // policy_decisions also FK runs.id with `references … ON DELETE
     // SET NULL` (default action when no clause specified). Same
     // orphan-leak risk; clear them too.
@@ -109,9 +101,7 @@ export async function rollbackMigration(input: RollbackInput): Promise<RollbackR
   // projects. With those gone above, projects DELETE is unblocked.
   const projectIds = byTable.get('projects') ?? [];
   if (projectIds.length > 0) {
-    await input.cloud.db
-      .delete(postgresSchema.projects)
-      .where(inArray(postgresSchema.projects.id, projectIds));
+    await input.cloud.db.delete(postgresSchema.projects).where(inArray(postgresSchema.projects.id, projectIds));
     deleted += projectIds.length;
   }
 

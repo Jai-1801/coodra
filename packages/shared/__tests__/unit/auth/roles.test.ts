@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   type Actor,
+  assertCanAuthorKnowledge,
   assertCanEdit,
+  assertCanEditKnowledge,
   assertCanResumeKillSwitch,
   hasRole,
   parseClerkRole,
@@ -154,6 +156,60 @@ describe('assertCanResumeKillSwitch', () => {
     expect(() => assertCanResumeKillSwitch(actor('viewer', 'user_42'), { pausedByUserId: 'user_42' })).toThrow(
       ForbiddenError,
     );
+  });
+});
+
+describe('assertCanAuthorKnowledge (Phase F.3)', () => {
+  it('admin can author features / feature packs', () => {
+    expect(() => assertCanAuthorKnowledge(actor('admin'))).not.toThrow();
+  });
+
+  it('member can author features / feature packs', () => {
+    expect(() => assertCanAuthorKnowledge(actor('member'))).not.toThrow();
+  });
+
+  it('viewer cannot author (knowledge layer is gated above the read-only floor)', () => {
+    expect(() => assertCanAuthorKnowledge(actor('viewer'))).toThrow(ForbiddenError);
+  });
+
+  it('SOLO_ACTOR always passes (admin)', () => {
+    expect(() => assertCanAuthorKnowledge(SOLO_ACTOR)).not.toThrow();
+  });
+});
+
+describe('assertCanEditKnowledge (Phase F.3)', () => {
+  it('admin can edit anyone\'s knowledge artifact', () => {
+    expect(() => assertCanEditKnowledge(actor('admin'), { createdByUserId: 'someone-else' })).not.toThrow();
+  });
+
+  it('member can edit own knowledge artifact (default allowOwner=true)', () => {
+    expect(() =>
+      assertCanEditKnowledge(actor('member', 'user_42'), { createdByUserId: 'user_42' }),
+    ).not.toThrow();
+  });
+
+  it("member cannot edit another member's knowledge artifact", () => {
+    expect(() =>
+      assertCanEditKnowledge(actor('member', 'user_42'), { createdByUserId: 'user_99' }),
+    ).toThrow(ForbiddenError);
+  });
+
+  it('viewer cannot edit even own knowledge artifacts (read-only role)', () => {
+    expect(() =>
+      assertCanEditKnowledge(actor('viewer', 'user_42'), { createdByUserId: 'user_42' }),
+    ).toThrow(ForbiddenError);
+  });
+
+  it('allowOwner=false locks member out of own-resource edits (admin-only)', () => {
+    expect(() =>
+      assertCanEditKnowledge(actor('member', 'user_42'), { createdByUserId: 'user_42' }, { allowOwner: false }),
+    ).toThrow(ForbiddenError);
+  });
+
+  it('null createdByUserId is admin-only even with allowOwner=true', () => {
+    expect(() =>
+      assertCanEditKnowledge(actor('member'), { createdByUserId: null }, { allowOwner: true }),
+    ).toThrow(ForbiddenError);
   });
 });
 

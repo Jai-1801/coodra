@@ -51,7 +51,7 @@ export default async function NewProjectPackPage({
   const projectCwd = project.cwd ?? process.cwd();
   const cwdRecorded = project.cwd !== null;
   const root = packsRoot(projectCwd);
-  const allPacks = listPacks(projectCwd);
+  const allPacks = await listPacks(projectCwd);
   const existing = allPacks.map((p) => p.slug);
   const primaryRow = allPacks.find((p) => p.slug === project.slug);
   const primaryExists = primaryRow !== undefined;

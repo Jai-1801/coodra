@@ -1,12 +1,10 @@
 import { copyFile, rename, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-
-import pc from 'picocolors';
-
 import { EXIT_BACKUP_RESTORE_PRECONDITION, EXIT_OK, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosDataDb, resolveContextosHome } from '../lib/contextos-home.js';
 import { readPidStatus } from '../lib/pid-status.js';
 import { isSqliteFile } from '../lib/sqlite-magic.js';
+import { pc } from '../ui/index.js';
 
 /**
  * `contextos db restore <path>` — replace `~/.contextos/data.db` with

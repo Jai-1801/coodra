@@ -141,6 +141,10 @@ export async function seedFeaturePack(options: SeedFeaturePackOptions): Promise<
       parentSlug: null,
       sourceFiles: sourceFiles.length > 0 ? sourceFiles : ['**/*'],
       isActive: true,
+      // Phase F.6 — `status` is the on-disk source of truth for the
+      // bridge SessionStart draft gate. Init always writes published;
+      // admins demote via the web `/packs/[slug]` action.
+      status: 'published' as const,
     };
     metaBody = `${JSON.stringify(meta, null, 2)}\n`;
     specBody = buildSpecSkeleton(options.slug);

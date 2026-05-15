@@ -252,8 +252,93 @@ export const featurePacks = sqliteTable('feature_packs', {
   // admin who pushed the latest revision via the web pack uploader.
   // NULL when the pack landed via git (filesystem-walked) or solo mode.
   createdByUserId: text('created_by_user_id'),
+  // Phase F.2 (2026-05-11) — JSON envelope of the four canonical pack
+  // files so cloud Postgres carries the pack content across teammate
+  // machines. Shape:
+  //   { spec: string, implementation: string, techstack: string,
+  //     meta: <meta.json parsed>, sourceFiles: string[] }
+  // Nullable for backwards compat: pre-Phase-F rows landed via the
+  // filesystem walker have content on disk only and this column NULL.
+  // The sync-daemon's syncFeaturePacks dispatch case populates this
+  // on every web/CLI publish; team-rows-puller renders it back to
+  // disk on remote machines.
+  contentJson: text('content_json'),
+  // Phase F.2 — draft/published lifecycle. 'published' = agent-visible
+  // (MCP `get_feature_pack` returns it). 'draft' = web-author-visible
+  // only. Default 'published' preserves pre-Phase-F semantics where
+  // every pack was reachable by the agent.
+  status: text('status').notNull().default('published'),
+  // Phase G slice G.9 — multi-tenancy column. Local SQLite is single-
+  // tenant per laptop (one ~/.contextos = one active org) so this is
+  // informational on the laptop side. The cloud sync includes it for
+  // org-scoped reads. Nullable for backward compat; Phase G+1 tightens.
+  // See packages/db/drizzle/sqlite/0016_feature_packs_org_id.sql.
+  orgId: text('org_id'),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
 });
+
+/**
+ * Phase F.1 — features (2026-05-11).
+ *
+ * On-demand "skill recipe" rows (Anthropic Skills pattern). The agent
+ * lists frontmatter via `contextos__list_features` at SessionStart and
+ * pulls the full body via `contextos__get_feature` ONLY when a user
+ * prompt matches the trigger. This is the pull-on-trigger layer that
+ * complements feature_packs' push-at-SessionStart module blueprints.
+ *
+ * Solo mode: `docs/features/<slug>/feature.md` on disk is canonical.
+ * Team mode: cloud Postgres is the distribution channel; sync-daemon
+ * round-trips file ↔ cloud (with `.cloud.md` conflict sidecars for
+ * concurrent edits). Files stay primary for authoring.
+ *
+ * Status lifecycle (Phase F.3): `'draft'` (visible in web UI to author +
+ * admins only; NOT returned by MCP `list_features`) → `'published'`
+ * (visible to all teammates + agents). The MCP handler filters on
+ * `status='published'` so unfinished drafts never reach an agent.
+ *
+ * `created_by_user_id` — Clerk user_id of the author. NULL on rows
+ * ingested from disk by the sync-daemon's filesystem walker (no human
+ * identity available) and on solo-mode rows.
+ *
+ * Idempotency: UNIQUE(project_id, slug). Sync-daemon dispatch case keys
+ * cloud writes by (project_id, slug) so file → cloud round-trips
+ * collapse cleanly.
+ *
+ * Storage shape — frontmatter and body live in separate text columns so
+ * the `list_features` response can SELECT only frontmatter (small) and
+ * leave the body (potentially many KB per row) for the on-demand
+ * `get_feature` fetch.
+ */
+export const features = sqliteTable(
+  'features',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id),
+    slug: text('slug').notNull(),
+    // YAML or JSON-encoded frontmatter (description, trigger,
+    // whenNotToUse, maturity). The CLI's writer keeps this in YAML for
+    // round-trip with the on-disk feature.md; the web app may write
+    // JSON-encoded for editor convenience. The handler tolerates both.
+    frontmatter: text('frontmatter').notNull(),
+    // The feature.md body (markdown). Excludes the frontmatter block.
+    body: text('body').notNull(),
+    // sha256(frontmatter || body) — used by the sync-daemon to short-
+    // circuit no-op syncs and by the MCP handler to dedupe redundant
+    // file-walker upserts.
+    checksum: text('checksum').notNull(),
+    // 'draft' | 'published'. MCP filters on status='published'.
+    status: text('status').notNull().default('draft'),
+    createdByUserId: text('created_by_user_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => [
+    uniqueIndex('features_project_slug_uk').on(t.projectId, t.slug),
+    index('features_project_status_idx').on(t.projectId, t.status),
+  ],
+);
 
 export const decisions = sqliteTable(
   'decisions',
@@ -435,9 +520,107 @@ export type PolicyDecision = typeof policyDecisions.$inferSelect;
 export type NewPolicyDecision = typeof policyDecisions.$inferInsert;
 export type FeaturePack = typeof featurePacks.$inferSelect;
 export type NewFeaturePack = typeof featurePacks.$inferInsert;
+export type Feature = typeof features.$inferSelect;
+export type NewFeature = typeof features.$inferInsert;
 export type Decision = typeof decisions.$inferSelect;
 export type NewDecision = typeof decisions.$inferInsert;
 export type RunDiff = typeof runDiffs.$inferSelect;
 export type NewRunDiff = typeof runDiffs.$inferInsert;
 export type KillSwitch = typeof killSwitches.$inferSelect;
 export type NewKillSwitch = typeof killSwitches.$inferInsert;
+
+/**
+ * Module 04 Phase 2 — `team_invites` (2026-05-11). The single durable
+ * record per teammate invitation an admin mints from /settings/team in
+ * `team-hosted` mode. A row is created when the admin clicks "Invite
+ * teammate"; the row is read on every `/install/[token]` page render and
+ * every `POST /api/install/[token]` redemption to enforce single-use +
+ * expiry + revocation; the row is updated on successful CLI redemption
+ * (`used_at`, `used_by_user_id`) or on admin revoke (`revoked_at`,
+ * `revoked_by_user_id`).
+ *
+ * **Dual-dialect parity** is intentional even though only cloud Postgres
+ * ever holds rows. The reasons are:
+ *   1. The dual-dialect schema-parity test (`__tests__/unit/schema-parity.test.ts`)
+ *      enforces structural identity for "shared" tables. `team_invites`
+ *      conceptually belongs to that set because the SQLite primary store
+ *      could one day hold per-laptop invitation drafts; keeping the
+ *      schemas identical avoids retrofit pain.
+ *   2. Tests that exercise invite minting / redemption against an
+ *      in-memory SQLite (faster than testcontainers Postgres) can use
+ *      the same Drizzle querybuilder code paths.
+ *
+ * Single-use guarantee:
+ *   - `jti` is UNIQUE — duplicate JWT IDs are rejected at the DB.
+ *   - Redemption is `UPDATE … SET used_at = now() WHERE jti = $1 AND
+ *     used_at IS NULL AND revoked_at IS NULL RETURNING *` — exactly one
+ *     concurrent caller wins.
+ *
+ * Revocation:
+ *   - Admin click on /settings/team → `revoked_at = now()`,
+ *     `revoked_by_user_id = <admin clerk user_id>`. Redemption then 410s.
+ *
+ * Clerk coupling:
+ *   - `clerk_invitation_id` records the Clerk organization invitation we
+ *     created via `clerkClient.invitations.createInvitation` so the
+ *     revoke action can also revoke the Clerk-side invitation in the
+ *     same atomic operation.
+ *
+ * Bundle delivery (caveat A — security):
+ *   - The CLI bundle returned by `POST /api/install/[token]` carries
+ *     `LOCAL_HOOK_SECRET` + `DATABASE_URL` (for sync-daemon push) +
+ *     identity claims — NOT Clerk admin keys. The bundle is generated
+ *     from server env vars per redeem, not stored in this table.
+ *
+ * Audit trail:
+ *   - `invited_by_user_id` + `created_at` capture "who minted, when".
+ *   - `used_by_user_id` + `used_at` capture "who redeemed, when".
+ *   - `revoked_by_user_id` + `revoked_at` capture "who killed it, when".
+ *
+ * The SQLite dialect uses `integer({ mode: 'timestamp' })` for all
+ * timestamps so the schema-parity test sees identical Drizzle dataType
+ * categories against Postgres's `timestamp with time zone`.
+ */
+export const teamInvites = sqliteTable(
+  'team_invites',
+  {
+    id: text('id').primaryKey(),
+    orgId: text('org_id').notNull(),
+    email: text('email').notNull(),
+    // 'admin' | 'member' | 'viewer' — matches ADR-014 Tier 2.5 roles.
+    role: text('role').notNull(),
+    // JWT ID embedded in the signed token payload. UNIQUE for single-use
+    // enforcement at the DB layer (last line of defense behind the
+    // CONDITIONAL UPDATE in the redeem endpoint).
+    jti: text('jti').notNull().unique(),
+    // Clerk user_id of the admin who minted this invitation.
+    invitedByUserId: text('invited_by_user_id').notNull(),
+    // The Clerk organization-invitation id created via
+    // `clerkClient.invitations.createInvitation`. Captured so /settings/team
+    // revoke can also revoke the Clerk-side invitation atomically.
+    // Nullable for two reasons: (a) admin may mint an invite for an
+    // email Clerk refuses (already a member of another org), in which
+    // case the local row still exists for tracking but with no Clerk
+    // invitation; (b) future "copy-link only" flow can skip the Clerk
+    // notify step.
+    clerkInvitationId: text('clerk_invitation_id'),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+    usedAt: integer('used_at', { mode: 'timestamp' }),
+    usedByUserId: text('used_by_user_id'),
+    revokedAt: integer('revoked_at', { mode: 'timestamp' }),
+    revokedByUserId: text('revoked_by_user_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => [
+    // Pending-invite list query — admin's /settings/team renders
+    // WHERE org_id = ? AND used_at IS NULL AND revoked_at IS NULL.
+    index('team_invites_org_active_idx').on(t.orgId, t.usedAt, t.revokedAt),
+    // Email-bound invite lookup for the page that previews an invite
+    // before redemption (caveat B — the redeemer must be signed in as
+    // the invited email).
+    index('team_invites_email_idx').on(t.email),
+  ],
+);
+
+export type TeamInvite = typeof teamInvites.$inferSelect;
+export type NewTeamInvite = typeof teamInvites.$inferInsert;

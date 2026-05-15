@@ -231,6 +231,14 @@ export function createPostgresDb(options: CreatePostgresDbOptions): PostgresHand
   const raw = postgres(options.databaseUrl, {
     max: options.max ?? 5,
     prepare: options.prepare ?? false,
+    // Silence postgres.js's default `console.log(notice)` handler. Idem-
+    // potent DDL like `CREATE EXTENSION IF NOT EXISTS vector`, `CREATE
+    // SCHEMA IF NOT EXISTS drizzle`, `CREATE TABLE IF NOT EXISTS …`
+    // produce NOTICE-level messages whose default printer pollutes
+    // wizard / migration output. We don't surface them anywhere
+    // actionable; callers that genuinely care can wrap their own
+    // handle with a custom logger. (2026-05-11, Phase B clarity pass.)
+    onnotice: () => {},
   });
   const db = drizzlePostgres(raw, { schema: postgresSchema });
   return {

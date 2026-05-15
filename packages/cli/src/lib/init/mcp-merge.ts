@@ -23,6 +23,44 @@ export interface BuildMcpEntryOptions {
    * `@coodra/contextos-db`'s own `import.meta.url`.
    */
   readonly migrationsDir?: string | null;
+  /**
+   * Absolute path to the resolved CONTEXTOS_HOME. When set, the spawned
+   * MCP server reads/writes the project's local SQLite (in this home)
+   * instead of the user's default `~/.contextos/` — eliminating the
+   * split-brain where the bridge's audit chain lives in the project home
+   * but the MCP server's record_decision / save_context_pack writes go
+   * to a totally different SQLite database.
+   */
+  readonly contextosHome?: string;
+  /**
+   * Phase F.6+ (2026-05-12) — machine mode. When set to 'team', the MCP
+   * child process spawned by Claude Code knows to enqueue `sync_to_cloud`
+   * jobs on every record_decision / save_context_pack write so the
+   * sync-daemon pushes them to cloud Postgres.
+   *
+   * Without this, Claude Code's MCP child inherits its env from Claude's
+   * shell — which doesn't auto-load ~/.contextos/.env. Result:
+   * CONTEXTOS_MODE defaults to 'solo' inside the child, sync skips, every
+   * decision/pack stays local-only, teammates never see admin's work.
+   * Symptom: web /decisions and /context-packs render empty even after
+   * the user successfully ran the MCP tools.
+   */
+  readonly mode?: 'solo' | 'team';
+  /**
+   * Phase F.6+ — cloud Postgres URL. The MCP child's sync enqueue path
+   * actually only needs the local SQLite handle, but the sync-daemon
+   * (which dispatches the queue) needs DATABASE_URL. We inline it here
+   * so even an MCP child run from a shell that hasn't sourced
+   * ~/.contextos/.env still has it for any cloud-direct paths.
+   */
+  readonly databaseUrl?: string;
+  /**
+   * Phase F.6+ — local hook secret literal. Kept in lockstep with the
+   * daemon's secret so Claude Code's hook substitutions match. Distinct
+   * from the project `.env`'s LOCAL_HOOK_SECRET — that file isn't
+   * auto-loaded by shells.
+   */
+  readonly localHookSecret?: string;
 }
 
 export interface ContextosMcpEntry {
@@ -51,6 +89,31 @@ export function buildContextosMcpEntry(options: BuildMcpEntryOptions): Contextos
     // where to find drizzle SQL files (the bundle inlines the code but
     // not the SQL — those land under <cli-dist>/runtime/drizzle/).
     env.CONTEXTOS_MIGRATIONS_DIR = options.migrationsDir;
+  }
+  if (typeof options.contextosHome === 'string' && options.contextosHome.length > 0) {
+    // CRITICAL: when Claude Code spawns the MCP server via this entry, the
+    // child process inherits its env from Claude Code's environment (NOT
+    // from the user's shell that ran `contextos init`). Without an explicit
+    // CONTEXTOS_HOME here the MCP server defaults to `~/.contextos/`, so
+    // every decision/context_pack the agent records via record_decision /
+    // save_context_pack lands in the user's REAL home — not the project's
+    // home. The bridge writes to the configured CONTEXTOS_HOME, the MCP
+    // writes to ~/.contextos: split-brain. Pin the home explicitly.
+    env.CONTEXTOS_HOME = options.contextosHome;
+  }
+  // Phase F.6+ (2026-05-12) — pin team-mode + cloud creds in the MCP
+  // child env. See option docblocks above for the rationale. Without
+  // these, the child defaults to solo and every record_decision /
+  // save_context_pack call skips the sync_to_cloud enqueue, leaving
+  // cloud Postgres empty even though local SQLite has the rows.
+  if (options.mode === 'team') {
+    env.CONTEXTOS_MODE = 'team';
+  }
+  if (typeof options.databaseUrl === 'string' && options.databaseUrl.length > 0) {
+    env.DATABASE_URL = options.databaseUrl;
+  }
+  if (typeof options.localHookSecret === 'string' && options.localHookSecret.length > 0) {
+    env.LOCAL_HOOK_SECRET = options.localHookSecret;
   }
   return {
     command: 'node',

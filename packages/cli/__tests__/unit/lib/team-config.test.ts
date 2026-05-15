@@ -196,10 +196,7 @@ describe('writeTeamHomeEnv + readTeamHomeEnv + clearTeamHomeEnv', () => {
 
   it('overwrites prior values for managed keys (re-run idempotent)', () => {
     writeTeamHomeEnv(sampleInput, { homeOverride: homeDir });
-    writeTeamHomeEnv(
-      { ...sampleInput, localHookSecret: 'b'.repeat(64) },
-      { homeOverride: homeDir },
-    );
+    writeTeamHomeEnv({ ...sampleInput, localHookSecret: 'b'.repeat(64) }, { homeOverride: homeDir });
     const back = readTeamHomeEnv({ homeOverride: homeDir });
     expect(back?.localHookSecret).toBe('b'.repeat(64));
     // No duplicates.

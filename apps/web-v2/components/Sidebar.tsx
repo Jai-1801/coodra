@@ -20,21 +20,70 @@ interface NavGroup {
 
 interface SidebarProps {
   readonly mode: 'solo' | 'team';
+  /**
+   * Deployment-mode hint used to hide nav items that map to local-only
+   * pages (which 404 on team-hosted servers): /sync, /workspace,
+   * /onboarding/*, etc.
+   *
+   *   - undefined           → unknown, default to local behaviour
+   *   - 'local-solo'        → solo defaults
+   *   - 'local-team'        → team defaults with local-only pages visible
+   *   - 'team-hosted'       → team defaults with local-only pages hidden
+   */
+  readonly deploymentMode?: 'local-solo' | 'local-team' | 'team-hosted';
   readonly userInitial?: string;
   readonly userName?: string;
   readonly userRole?: string;
   readonly projects: ReadonlyArray<{ readonly slug: string; readonly name: string }>;
+  /** In team mode, the org slug (or org_id fallback) shown in the header. Null in solo. */
+  readonly orgSlug?: string | null;
+  /** In team mode, viewer's Clerk user id used for "you" attribution; passed through. */
+  readonly viewerUserId?: string | null;
+  /**
+   * Optional footer slot. When set, replaces the default hardcoded
+   * "user · role" pill with whatever the layout chose to render —
+   * typically Clerk's `<UserButton />` + `<OrganizationSwitcher />`
+   * in team-hosted mode. The layout owns the conditional Clerk
+   * import so this client component doesn't have to.
+   */
+  readonly footerSlot?: React.ReactNode;
 }
 
 export function Sidebar({
   mode,
+  deploymentMode,
   userInitial = 'A',
   userName = 'abishaikc',
   userRole = 'Local · MIT',
   projects,
+  orgSlug = null,
+  viewerUserId = null,
+  footerSlot,
 }: SidebarProps) {
+  // viewerUserId is forwarded by the layout but the sidebar doesn't render
+  // it directly (page-level components consume it). Reference it once so
+  // typescript doesn't complain about the unused-prop pattern.
+  void viewerUserId;
+  // Rules-of-Hooks (React 19 strict, 2026-05-11 fix): every hook MUST
+  // be called unconditionally on every render. Pre-fix the `useSearchParams()`
+  // call lived AFTER the `if (isPublicPath) return null;` guard, so on
+  // routes that flipped between public and authed (e.g. sign-in →
+  // dashboard via Clerk redirect) the hook count differed between
+  // renders, triggering React's "change in the order of Hooks" console
+  // error. Lift every hook above any conditional return.
   const pathname = usePathname() ?? '/';
   const searchParams = useSearchParams();
+
+  // Pre-auth pages — sign-in, sign-up, forbidden, install/<token> — must
+  // not render the team-workspace sidebar. A signed-out visitor on
+  // /auth/sign-in shouldn't see "Team workspace · Cloud — org pending"
+  // (broken header) plus all the audit nav links they can't actually
+  // reach yet. Match the same matchers the middleware treats as public.
+  const isPublicPath =
+    pathname.startsWith('/auth') ||
+    pathname.startsWith('/forbidden') ||
+    pathname.startsWith('/install');
+  if (isPublicPath) return null;
 
   // Resolve the project shown in the pill: URL slug if we're under
   // /projects/[slug]/*, else carry the ?project= query if present (so
@@ -62,54 +111,191 @@ export function Sidebar({
   // lands on /runs?project=taskforge instead of the global runs list.
   const scope = activeSlug !== null ? `?project=${encodeURIComponent(activeSlug)}` : '';
 
-  const groups: ReadonlyArray<NavGroup> = [
-    {
-      label: 'Workspace',
-      items: [
-        { href: '/', label: 'Dashboard', icon: <IconDashboard /> },
-        { href: '/projects', label: 'Projects', icon: <IconStack /> },
-      ],
-    },
-    {
-      label: 'Audit',
-      items: [
-        { href: `/runs${scope}`, label: 'Runs', icon: <IconLedger /> },
-        { href: `/decisions${scope}`, label: 'Decisions', icon: <IconLedger /> },
-        { href: `/graph${scope}`, label: 'Context graph', icon: <IconGraph /> },
-      ],
-    },
-    {
-      label: 'Govern',
-      items: [
-        { href: `/policies${scope}`, label: 'Policies', icon: <IconShield /> },
-        { href: `/kill-switches${scope}`, label: 'Kill switches', icon: <IconKill /> },
-      ],
-    },
-    {
-      label: 'Knowledge',
-      items: [
-        { href: '/packs', label: 'Feature packs', icon: <IconPack /> },
-        { href: `/context-packs${scope}`, label: 'Context packs', icon: <IconPack /> },
-        { href: '/templates', label: 'Templates', icon: <IconGrid /> },
-      ],
-    },
-    {
-      label: 'System',
-      items: [
-        { href: '/workspace', label: 'Workspace', icon: <IconRack /> },
-        { href: '/sync', label: 'Sync queue', icon: <IconSync /> },
-        { href: '/settings', label: 'Settings', icon: <IconCog /> },
-      ],
-    },
+  // Sidebar groups differ structurally by mode so the user can see at a
+  // glance what surfaces apply to them.
+  //
+  //   Solo mode (one developer, one machine):
+  //     · No "Team" group. /settings/team 404s in solo anyway.
+  //     · "Sync queue" hidden — solo has no outbox to drain.
+  //     · "Setup" group offers an explicit upgrade-to-team CTA.
+  //
+  //   Team mode (multiple developers, shared org):
+  //     · A dedicated "Team" group surfacing /settings/team and member-aware reads.
+  //     · Sync queue visible (it's the heartbeat of cross-machine consistency).
+  //     · "Setup" group is just diagnostics + mode-switch.
+  // In team-hosted mode, several nav items 404 because the page they
+  // point at is inherently local-laptop (see app/sync/page.tsx,
+  // app/workspace/page.tsx). Hide them from the menu so users don't
+  // click into a 404.
+  const isHosted = deploymentMode === 'team-hosted';
+
+  const teamGroupItems: NavItem[] = [
+    { href: '/settings/team', label: 'Members + org', icon: <IconUsers /> },
   ];
+  if (!isHosted) {
+    teamGroupItems.push({ href: '/sync', label: 'Sync queue', icon: <IconSync /> });
+  }
+
+  const teamSystemItems: NavItem[] = [];
+  if (!isHosted) {
+    teamSystemItems.push({ href: '/workspace', label: 'Workspace', icon: <IconRack /> });
+  }
+  teamSystemItems.push({ href: '/settings', label: 'Settings', icon: <IconCog /> });
+  teamSystemItems.push({ href: '/welcome', label: 'Welcome', icon: <IconSwitch /> });
+
+  const groups: ReadonlyArray<NavGroup> =
+    mode === 'team'
+      ? [
+          {
+            label: 'Workspace',
+            items: [
+              { href: '/', label: 'Dashboard', icon: <IconDashboard /> },
+              { href: '/projects', label: 'Projects', icon: <IconStack /> },
+            ],
+          },
+          { label: 'Team', items: teamGroupItems },
+          {
+            label: 'Audit',
+            items: [
+              { href: `/runs${scope}`, label: 'Runs', icon: <IconLedger /> },
+              { href: `/decisions${scope}`, label: 'Decisions', icon: <IconLedger /> },
+              { href: `/context-packs${scope}`, label: 'Context packs', icon: <IconPack /> },
+              { href: `/graph${scope}`, label: 'Context graph', icon: <IconGraph /> },
+            ],
+          },
+          {
+            label: 'Govern',
+            items: [
+              { href: `/policies${scope}`, label: 'Policies', icon: <IconShield /> },
+              { href: `/kill-switches${scope}`, label: 'Kill switches', icon: <IconKill /> },
+            ],
+          },
+          {
+            label: 'Knowledge',
+            items: [
+              { href: '/packs', label: 'Feature packs', icon: <IconPack /> },
+              { href: '/features', label: 'Features', icon: <IconLedger /> },
+              { href: '/templates', label: 'Templates', icon: <IconGrid /> },
+            ],
+          },
+          { label: 'System', items: teamSystemItems },
+        ]
+      : [
+          {
+            label: 'Workspace',
+            items: [
+              { href: '/', label: 'Dashboard', icon: <IconDashboard /> },
+              { href: '/projects', label: 'Projects', icon: <IconStack /> },
+            ],
+          },
+          {
+            label: 'Audit',
+            items: [
+              { href: `/runs${scope}`, label: 'Runs', icon: <IconLedger /> },
+              { href: `/decisions${scope}`, label: 'Decisions', icon: <IconLedger /> },
+              { href: `/context-packs${scope}`, label: 'Context packs', icon: <IconPack /> },
+              { href: `/graph${scope}`, label: 'Context graph', icon: <IconGraph /> },
+            ],
+          },
+          {
+            label: 'Govern',
+            items: [
+              { href: `/policies${scope}`, label: 'Policies', icon: <IconShield /> },
+              { href: `/kill-switches${scope}`, label: 'Kill switches', icon: <IconKill /> },
+            ],
+          },
+          {
+            label: 'Knowledge',
+            items: [
+              { href: '/packs', label: 'Feature packs', icon: <IconPack /> },
+              { href: '/features', label: 'Features', icon: <IconLedger /> },
+              { href: '/templates', label: 'Templates', icon: <IconGrid /> },
+            ],
+          },
+          {
+            label: 'System',
+            items: [
+              { href: '/workspace', label: 'Workspace', icon: <IconRack /> },
+              { href: '/settings', label: 'Settings', icon: <IconCog /> },
+            ],
+          },
+          {
+            label: 'Upgrade',
+            items: [
+              { href: '/welcome', label: 'About modes', icon: <IconStar /> },
+              { href: '/onboarding/team', label: 'Create a team', icon: <IconUsers /> },
+              { href: '/onboarding/team/join', label: 'Connect to existing', icon: <IconKey /> },
+            ],
+          },
+        ];
 
   return (
     <aside className="side">
       <div className="side__brand">
         <BrandMark />
         <span className="side__brand-word">ContextOS</span>
-        <span className="side__brand-mode">{mode}</span>
+        <span
+          className="side__brand-mode"
+          style={mode === 'team' ? undefined : { color: 'var(--ink-mute)', borderColor: 'var(--rule-strong)' }}
+        >
+          {mode}
+        </span>
       </div>
+
+      {/* Mode-aware identity block. In solo: "Local · this machine".
+          In team: org slug + status pill + link to /settings/team. The
+          contrast is intentional — a team-mode user should never wonder
+          which workspace they're looking at. */}
+      <Link
+        href={mode === 'team' ? '/settings/team' : '/welcome'}
+        style={{
+          display: 'block',
+          padding: '14px 24px 16px',
+          borderBottom: '1px solid var(--rule)',
+          textDecoration: 'none',
+          background: mode === 'team' ? 'rgba(125, 216, 125, 0.04)' : 'transparent',
+        }}
+      >
+        <div
+          style={{
+            fontFamily: 'var(--mono)',
+            fontSize: 9,
+            letterSpacing: '0.22em',
+            textTransform: 'uppercase',
+            color: mode === 'team' ? 'var(--accent)' : 'var(--ink-mute)',
+            marginBottom: 6,
+          }}
+        >
+          {mode === 'team' ? '● Team workspace' : 'Solo workspace'}
+        </div>
+        <div
+          style={{
+            fontFamily: 'var(--serif)',
+            fontSize: 18,
+            fontWeight: 400,
+            letterSpacing: '-0.005em',
+            color: 'var(--ink)',
+            lineHeight: 1.2,
+          }}
+        >
+          {mode === 'team' && orgSlug !== null
+            ? truncateMiddle(orgSlug, 24)
+            : mode === 'team'
+              ? 'Cloud — org pending'
+              : 'This machine'}
+        </div>
+        <div
+          style={{
+            fontFamily: 'var(--mono)',
+            fontSize: 9,
+            letterSpacing: '0.06em',
+            color: 'var(--ink-mute)',
+            marginTop: 4,
+          }}
+        >
+          {mode === 'team' ? 'syncing every 10 s · click for members' : '~/.contextos/data.db · click to upgrade'}
+        </div>
+      </Link>
 
       <div className="side__project">
         <div className="side__eyebrow">Project</div>
@@ -243,11 +429,17 @@ export function Sidebar({
       </nav>
 
       <div className="side__foot">
-        <div className="side__avatar">{userInitial}</div>
-        <div className="side__user">
-          <div className="side__user-name">{userName}</div>
-          <div className="side__user-role">{userRole}</div>
-        </div>
+        {footerSlot !== undefined ? (
+          footerSlot
+        ) : (
+          <>
+            <div className="side__avatar">{userInitial}</div>
+            <div className="side__user">
+              <div className="side__user-name">{userName}</div>
+              <div className="side__user-role">{userRole}</div>
+            </div>
+          </>
+        )}
       </div>
     </aside>
   );
@@ -256,6 +448,13 @@ export function Sidebar({
 function isActive(pathname: string, href: string): boolean {
   if (href === '/') return pathname === '/';
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/** Collapse long org slugs / clerk ids so they fit the 248px sidebar without wrapping. */
+function truncateMiddle(value: string, maxLen: number): string {
+  if (value.length <= maxLen) return value;
+  const half = Math.floor((maxLen - 1) / 2);
+  return `${value.slice(0, half)}…${value.slice(-half)}`;
 }
 
 /* ---------- Icons (1.4 stroke, 24x24, sized via .side__link svg) ---------- */
@@ -355,6 +554,38 @@ function IconCog() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 01-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1A1.7 1.7 0 004.5 9a1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 012.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 012.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z" />
+    </svg>
+  );
+}
+function IconUsers() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4">
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M3 19c0-3.5 2.7-6 6-6s6 2.5 6 6" />
+      <circle cx="17" cy="9" r="2.5" />
+      <path d="M21 19c0-2.6-1.7-4.5-4-5" />
+    </svg>
+  );
+}
+function IconStar() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4">
+      <path d="M12 3l2.6 6 6.4.6-4.9 4.4 1.5 6.4L12 17l-5.6 3.4 1.5-6.4L3 9.6 9.4 9 12 3z" />
+    </svg>
+  );
+}
+function IconSwitch() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4">
+      <path d="M4 7h12l-3-3M20 17H8l3 3" />
+    </svg>
+  );
+}
+function IconKey() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4">
+      <circle cx="8" cy="14" r="3.5" />
+      <path d="M11 14h10v4M17 14v4" />
     </svg>
   );
 }

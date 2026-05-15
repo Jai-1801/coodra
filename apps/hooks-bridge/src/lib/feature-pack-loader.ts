@@ -81,6 +81,38 @@ export async function loadFeaturePackForSession(options: LoadFeaturePackOptions)
     return null;
   }
 
+  // Phase F.6 (2026-05-11) — draft gating. Read meta.json BEFORE the
+  // markdown files so we can short-circuit on `status='draft'` without
+  // paying the spec/impl/techstack read cost. The meta.json `status`
+  // field is the canonical on-disk truth (see comment in
+  // `apps/web-v2/lib/actions/packs.ts::togglePackStatusAction` for how
+  // it's kept in lockstep with the cloud feature_packs row).
+  //
+  // Missing meta.json is treated as published — pre-Phase-F packs
+  // don't have a status field and must continue to be agent-visible.
+  // Malformed meta.json (parse fails) is also treated as published so
+  // we don't accidentally hide a working pack because an author left
+  // a stray trailing comma.
+  const metaRaw = await readMaybe(join(dir, 'meta.json'));
+  if (metaRaw !== null) {
+    try {
+      const meta = JSON.parse(metaRaw) as Record<string, unknown>;
+      if (meta.status === 'draft') {
+        featurePackLoaderLogger.info(
+          { event: 'feature_pack_skipped_draft', dir, projectSlug: options.projectSlug },
+          'feature-pack status=draft in meta.json; SessionStart will not inject additionalContext',
+        );
+        return null;
+      }
+    } catch (err) {
+      // Malformed meta.json — log + carry on (treat as published).
+      featurePackLoaderLogger.warn(
+        { event: 'feature_pack_meta_parse_failed', dir, err: err instanceof Error ? err.message : String(err) },
+        'meta.json parse failed; treating as published (continuing injection)',
+      );
+    }
+  }
+
   const [spec, implementation, techstack] = await Promise.all([
     readMaybe(join(dir, 'spec.md')),
     readMaybe(join(dir, 'implementation.md')),

@@ -1,0 +1,31 @@
+-- Phase F.2 — feature_packs cloud sync (2026-05-11).
+--
+-- Closes the "knowledge artifacts are git-distributed, not ContextOS-
+-- distributed" gap surfaced in Phase E's demo audit. Pre-Phase-F a pack
+-- written via /packs/new on admin's machine lived only on admin's
+-- filesystem; teammates never saw it without a git push/pull cycle.
+-- Phase F.2 carries the pack content through cloud Postgres so the
+-- sync-daemon's team-rows-puller can write it back to teammate disks
+-- automatically.
+--
+-- Schema deltas:
+--
+--   - `content_json` (nullable text): JSON envelope holding the four
+--     canonical pack files
+--       { spec: string, implementation: string, techstack: string,
+--         meta: <meta.json parsed object>, sourceFiles: string[] }
+--     Nullable for backwards compat: pre-Phase-F rows that landed via
+--     the filesystem walker have content on disk only. Phase F.2's
+--     sync path populates this column on every web/CLI publish; the
+--     puller renders it back to disk on remote machines.
+--
+--   - `status` (NOT NULL default 'published'): 'draft' | 'published'.
+--     The default is 'published' to preserve the pre-Phase-F semantic
+--     where every pack is agent-visible. Phase F.3 layers the
+--     draft-vs-published gate in the MCP `get_feature_pack` handler.
+--
+-- `created_by_user_id` already exists from M04 Phase 4 — no work here.
+
+ALTER TABLE `feature_packs` ADD `content_json` text;
+--> statement-breakpoint
+ALTER TABLE `feature_packs` ADD `status` text DEFAULT 'published' NOT NULL;

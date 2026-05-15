@@ -1,7 +1,6 @@
 import { createPostgresDb, ensurePgVector, migratePostgres, type PostgresHandle } from '@coodra/contextos-db';
-import pc from 'picocolors';
-
 import { EXIT_ENVIRONMENT_PROBLEM, EXIT_OK, EXIT_USER_ACTION_REQUIRED, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
+import { pc } from '../ui/index.js';
 
 /**
  * `contextos cloud-migrate` — apply Drizzle Postgres migrations to the

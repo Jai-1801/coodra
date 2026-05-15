@@ -1,13 +1,19 @@
 'use server';
 
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { postgresSchema, scheduleDurableWrite, sqliteSchema } from '@coodra/contextos-db';
 import { runInit } from '@coodra/contextos-cli/lib/init';
 import { runPackDelete, runPackRegenerate } from '@coodra/contextos-cli/lib/pack';
+import { eq } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
+import { assertActorRole, refuseInTeamHosted } from '@/lib/action-guards';
+import { createWebDb } from '@/lib/db';
+import { resolveDeploymentMode } from '@/lib/deployment-mode';
 import {
   compareMarkerSets,
   deltaIsEmpty,
@@ -89,6 +95,12 @@ const INSTALL_SCHEMA = COMMON_FIELDS.extend({
 // ---------------------------------------------------------------------------
 
 export async function regeneratePackAction(formData: FormData): Promise<void> {
+  // Pack regeneration writes spec.md / implementation.md / techstack.md
+  // to <repo>/docs/feature-packs/<slug>/ on the local disk. In
+  // team-hosted mode there's no repo on the server. Refuse + nudge
+  // them toward the CLI.
+  refuseInTeamHosted('regeneratePackAction');
+  await assertActorRole('admin');
   const raw = {
     projectSlug: String(formData.get('projectSlug') ?? ''),
     packSlug: String(formData.get('packSlug') ?? ''),
@@ -111,6 +123,8 @@ export async function regeneratePackAction(formData: FormData): Promise<void> {
 }
 
 export async function deletePackAction(formData: FormData): Promise<void> {
+  refuseInTeamHosted('deletePackAction');
+  await assertActorRole('admin');
   const raw = {
     projectSlug: String(formData.get('projectSlug') ?? ''),
     packSlug: String(formData.get('packSlug') ?? ''),
@@ -155,6 +169,8 @@ export async function deletePackAction(formData: FormData): Promise<void> {
 const PROJECT_RETURN_TO_RE = /^\/projects\/[a-z0-9_-]+$/;
 
 export async function installTemplateAction(formData: FormData): Promise<void> {
+  refuseInTeamHosted('installTemplateAction');
+  await assertActorRole('admin');
   const raw = {
     projectSlug: String(formData.get('projectSlug') ?? ''),
     packSlug: String(formData.get('packSlug') ?? ''),
@@ -274,6 +290,8 @@ const SAVE_SCHEMA = COMMON_FIELDS.extend({
 });
 
 export async function saveFeaturePackAction(formData: FormData): Promise<void> {
+  refuseInTeamHosted('saveFeaturePackAction');
+  await assertActorRole('member');
   const raw = {
     projectSlug: String(formData.get('projectSlug') ?? ''),
     packSlug: String(formData.get('packSlug') ?? ''),
@@ -293,7 +311,7 @@ export async function saveFeaturePackAction(formData: FormData): Promise<void> {
   // Pack lookup. Per S5/S6 we trust the project ownership check on the
   // editor page; here we re-read the pack so we have the on-disk source
   // for marker validation.
-  const pack = getPack(packSlug, cwd);
+  const pack = await getPack(packSlug, cwd);
   if (pack === null) {
     redirect(
       editHref(projectSlug, packSlug, fileName, 'pack_not_found', `No pack at docs/feature-packs/${packSlug}/.`),
@@ -441,6 +459,25 @@ const UPLOAD_SCHEMA = z
   });
 
 export async function uploadPackAction(formData: FormData): Promise<void> {
+  // Phase F.6+ (2026-05-11) — uploadPackAction now works in BOTH
+  // local-team AND team-hosted modes. The split was leaky implementation
+  // detail (user complaint, 2026-05-11): an admin opening the web wants
+  // to upload a pack regardless of where the web is hosted.
+  //
+  // Mode behaviour:
+  //   - local-solo:  writes FS only (no cloud, no Postgres dependency)
+  //   - local-team:  writes FS (instant local feedback) + cloud (via sync queue)
+  //                  → teammate laptops pull cloud → their FS materializes
+  //   - team-hosted: writes cloud DIRECTLY (server has no project FS to write to)
+  //                  → every laptop's sync-daemon pulls cloud → their FS
+  //                    materializes (including the admin's own laptop)
+  //
+  // Source of truth: in team mode, cloud Postgres `feature_packs.content_json`.
+  // FS files are derived/cached views materialized by the sync-daemon.
+  const actor = await assertActorRole('member');
+  const deploymentMode = resolveDeploymentMode();
+  const isTeamHosted = deploymentMode === 'team-hosted';
+  void actor;
   // Either a file is attached OR markdown is pasted into the textarea.
   // File wins when both are present.
   let content = String(formData.get('content') ?? '');
@@ -528,7 +565,7 @@ export async function uploadPackAction(formData: FormData): Promise<void> {
   let allowOverwrite = forceWrite;
   let stubReplaced = false;
   if (existsSync(dir) && !forceWrite) {
-    const existing = listPacks(projectCwd).find((p) => p.slug === slug);
+    const existing = (await listPacks(projectCwd)).find((p) => p.slug === slug);
     if (existing !== undefined && existing.isTemplateStub) {
       allowOverwrite = true;
       stubReplaced = true;
@@ -546,24 +583,68 @@ export async function uploadPackAction(formData: FormData): Promise<void> {
   // future readers don't think the variable is dead.
   void allowOverwrite;
 
-  // -- Write the new/overwritten pack ----------------------------------------
+  // -- Phase F.6+ — persist the pack (mode-aware) ----------------------------
+  // local-solo + local-team: write FS for instant local feedback.
+  // team-hosted: skip FS — server has no project FS; sync-daemon on every
+  // teammate's laptop will materialize the file on next pull.
+  if (!isTeamHosted) {
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(specPath, body, 'utf8');
+      const meta = {
+        slug,
+        parentSlug: parentSlug ?? null,
+        sourceFiles: [] as string[],
+        isActive: true,
+        kind: 'freeform' as const,
+        status: 'published' as const,
+      };
+      writeFileSync(metaPath, `${JSON.stringify(meta, null, 2)}\n`, 'utf8');
+    } catch (err) {
+      redirect(uploadHref(projectSlug, 'write_failed', (err as Error).message));
+    }
+  }
+
+  // -- Persist to the DB layer (cloud Postgres or local SQLite) --------------
+  // mirrorPackToDbAndEnqueue handles both:
+  //   - sqlite handle (local-team/local-solo): upsert row + enqueue
+  //     sync_to_cloud job; the sync-daemon pushes to cloud Postgres
+  //   - postgres handle (team-hosted): upsert cloud row directly; every
+  //     teammate's sync-daemon (including the admin's) pulls + writes FS
   try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(specPath, body, 'utf8');
-    const meta = {
+    await mirrorPackToDbAndEnqueue({
       slug,
       parentSlug: parentSlug ?? null,
-      sourceFiles: [] as string[],
-      isActive: true,
-      kind: 'freeform' as const,
-    };
-    writeFileSync(metaPath, `${JSON.stringify(meta, null, 2)}\n`, 'utf8');
+      content: {
+        spec: body,
+        implementation: '',
+        techstack: '',
+        meta: {
+          slug,
+          parentSlug: parentSlug ?? null,
+          sourceFiles: [] as string[],
+          isActive: true,
+          kind: 'freeform' as const,
+        },
+        sourceFiles: [],
+      },
+    });
   } catch (err) {
-    redirect(uploadHref(projectSlug, 'write_failed', (err as Error).message));
+    if (isTeamHosted) {
+      // team-hosted has no FS fallback — if the cloud write fails, the pack
+      // is genuinely lost. Surface the error instead of silently passing.
+      redirect(uploadHref(projectSlug, 'cloud_write_failed', (err as Error).message));
+    }
+    // local modes: FS succeeded above, so the local user has the pack;
+    // sync-daemon will retry the cloud push on backoff. Log + carry on.
+    console.warn('uploadPackAction: cloud-sync mirror failed', err);
   }
 
   // -- Patch the project's primary pack to point at the upload ---------------
-  if (willLink && projectSlug !== undefined) {
+  // FS-only step: in team-hosted there's no primary meta.json on disk to
+  // patch. The cloud parent-slug update is handled by mirrorPackToDbAndEnqueue
+  // via the row's parentSlug column.
+  if (willLink && projectSlug !== undefined && !isTeamHosted) {
     const primaryMetaPath = join(root, projectSlug, 'meta.json');
     try {
       const raw = readFileSync(primaryMetaPath, 'utf8');
@@ -600,6 +681,140 @@ export async function uploadPackAction(formData: FormData): Promise<void> {
  * project-scoped page, error banners stay on the project's `packs/new`
  * route so the operator can fix and re-submit without losing context.
  */
+/**
+ * Phase F.3.b — toggle a feature_pack's status between 'draft' and
+ * 'published'. Admin-only — pack drafts gate agent visibility, so a
+ * member shouldn't be able to hide their teammates' published packs.
+ *
+ * The action:
+ *   1. Asserts admin role (assertCanEditKnowledge with allowOwner=false).
+ *   2. Reads the existing pack row to determine current status.
+ *   3. Flips status. Updates updated_at.
+ *   4. Enqueues sync_to_cloud in team mode.
+ *   5. Redirects back to the pack detail page with a banner.
+ *
+ * Side effect: when transitioning published → draft, the existing
+ * filesystem files are NOT deleted (Phase F.4 known limitation; the
+ * MCP-side filter is what gates the agent). Promoting draft →
+ * published re-writes nothing locally either; the puller on remote
+ * machines is what materialises the FS files there.
+ */
+export async function togglePackStatusAction(formData: FormData): Promise<void> {
+  // Phase F.6+ — works in BOTH local-team and team-hosted (cloud-direct write).
+  const { assertCanEditKnowledge } = await import('@coodra/contextos-shared/auth');
+  const actor = await (await import('@/lib/auth')).getActor();
+  assertCanEditKnowledge(actor, { createdByUserId: null }, { allowOwner: false });
+
+  const slugRaw = String(formData.get('slug') ?? '').trim();
+  if (slugRaw.length === 0 || !FREEFORM_SLUG_RE.test(slugRaw)) {
+    redirect('/packs?error=invalid_slug');
+  }
+  const handle = createWebDb();
+
+  // Mode-aware row read + update. Both branches do the same logical
+  // thing (read current status, flip, write); the dialect difference
+  // is just which Drizzle schema we use.
+  let nextStatus: 'draft' | 'published';
+  if (handle.kind === 'sqlite') {
+    const row = (
+      await handle.db
+        .select()
+        .from(sqliteSchema.featurePacks)
+        .where(eq(sqliteSchema.featurePacks.slug, slugRaw))
+        .limit(1)
+    )[0];
+    if (row === undefined) {
+      redirect(`/packs/${encodeURIComponent(slugRaw)}?error=pack_not_found`);
+    }
+    nextStatus = row.status === 'published' ? 'draft' : 'published';
+    await handle.db
+      .update(sqliteSchema.featurePacks)
+      .set({ status: nextStatus, updatedAt: new Date() })
+      .where(eq(sqliteSchema.featurePacks.slug, slugRaw));
+  } else {
+    const row = (
+      await handle.db
+        .select()
+        .from(postgresSchema.featurePacks)
+        .where(eq(postgresSchema.featurePacks.slug, slugRaw))
+        .limit(1)
+    )[0];
+    if (row === undefined) {
+      redirect(`/packs/${encodeURIComponent(slugRaw)}?error=pack_not_found`);
+    }
+    nextStatus = row.status === 'published' ? 'draft' : 'published';
+    await handle.db
+      .update(postgresSchema.featurePacks)
+      .set({ status: nextStatus, updatedAt: new Date() })
+      .where(eq(postgresSchema.featurePacks.slug, slugRaw));
+  }
+
+  // Phase F.6 — patch on-disk meta.json::status so the bridge
+  // SessionStart loader (which is FS-only by design — see
+  // `apps/hooks-bridge/src/lib/feature-pack-loader.ts`) respects the
+  // gate. Without this, the admin's own agent sessions would still
+  // see a "demoted" pack via additionalContext until the MCP-side
+  // filter kicks in.
+  //
+  // Multi-project resolution: the dev's pack lives at the project's
+  // cwd, not process.cwd() of the web server. Resolve via the
+  // projects table — every registered non-sentinel project's
+  // `<cwd>/docs/feature-packs/<slug>/meta.json` is a candidate, plus
+  // the walk-up fallback for monorepo-style layouts. Patch every
+  // matching meta.json found (a pack can legitimately exist under
+  // multiple project roots; keeping them in lockstep prevents
+  // drift). Best-effort write — failures don't roll back the DB
+  // flip because the DB row + MCP filter remain authoritative.
+  // Patch on-disk meta.json::status (local modes only — team-hosted has no FS).
+  // Sync-daemons on every machine will pull the new status from cloud and
+  // patch their own meta.json on the next tick.
+  if (handle.kind === 'sqlite') {
+    try {
+      const candidates: string[] = [];
+      const rows = handle.raw
+        .prepare("SELECT cwd FROM projects WHERE cwd IS NOT NULL AND slug NOT LIKE '\\_\\_%' ESCAPE '\\'")
+        .all() as Array<{ cwd: string }>;
+      for (const r of rows) {
+        candidates.push(join(packsRoot(r.cwd), slugRaw, 'meta.json'));
+      }
+      candidates.push(join(packsRoot(process.cwd()), slugRaw, 'meta.json'));
+
+      const seen = new Set<string>();
+      for (const metaPath of candidates) {
+        if (seen.has(metaPath)) continue;
+        seen.add(metaPath);
+        if (!existsSync(metaPath)) continue;
+        try {
+          const rawMeta = readFileSync(metaPath, 'utf8');
+          const meta = JSON.parse(rawMeta) as Record<string, unknown>;
+          meta.status = nextStatus;
+          writeFileSync(metaPath, `${JSON.stringify(meta, null, 2)}\n`, 'utf8');
+        } catch (err) {
+          console.warn('togglePackStatusAction: meta.json parse/write failed at', metaPath, err);
+        }
+      }
+    } catch (err) {
+      console.warn('togglePackStatusAction: meta.json sync skipped', err);
+    }
+  }
+
+  if (handle.kind === 'sqlite' && process.env.CONTEXTOS_MODE === 'team') {
+    try {
+      await scheduleDurableWrite(handle, {
+        queue: 'sync_to_cloud',
+        payload: {
+          v: 1 as const,
+          table: 'feature_packs',
+          lookup: { kind: 'idempotency_key', value: slugRaw },
+        },
+      });
+    } catch (err) {
+      console.warn('togglePackStatusAction: sync enqueue failed', err);
+    }
+  }
+  redirect(`/packs/${encodeURIComponent(slugRaw)}?statusFlipped=${nextStatus}`);
+}
+
 function uploadHref(projectSlug: string | undefined, errorCode: string, message: string): string {
   const search = new URLSearchParams();
   search.set('error', errorCode);
@@ -608,4 +823,140 @@ function uploadHref(projectSlug: string | undefined, errorCode: string, message:
     return `/projects/${encodeURIComponent(projectSlug)}/packs/new?${search.toString()}`;
   }
   return `/packs/new?${search.toString()}`;
+}
+
+/**
+ * Phase F.2.b + F.6+ — mirror a just-written pack into the DB layer.
+ *
+ *   - team-hosted (postgres handle): writes directly to cloud Postgres.
+ *     Every teammate's sync-daemon (including the admin's own laptop)
+ *     pulls + materializes the .md files within ~10s.
+ *
+ *   - local-team / local-solo (sqlite handle): writes to local SQLite +
+ *     enqueues sync_to_cloud. The local sync-daemon pushes to cloud;
+ *     other teammates pull from there.
+ *
+ * Single source of truth for pack content: cloud Postgres
+ * `feature_packs.content_json`. Filesystem .md files are derived /
+ * cached views that sync-daemons materialize on every machine.
+ */
+async function mirrorPackToDbAndEnqueue(args: {
+  readonly slug: string;
+  readonly parentSlug: string | null;
+  readonly content: {
+    readonly spec: string;
+    readonly implementation: string;
+    readonly techstack: string;
+    readonly meta: object;
+    readonly sourceFiles: ReadonlyArray<string>;
+  };
+}): Promise<void> {
+  const handle = createWebDb();
+  const checksum = `sha256:${createHash('sha256')
+    .update(args.content.spec)
+    .update(args.content.implementation)
+    .update(args.content.techstack)
+    .digest('hex')}`;
+  const contentJson = JSON.stringify({
+    spec: args.content.spec,
+    implementation: args.content.implementation,
+    techstack: args.content.techstack,
+    meta: args.content.meta,
+    sourceFiles: [...args.content.sourceFiles],
+  });
+  const now = new Date();
+
+  // Phase F.6+ (2026-05-11) — dialect-aware upsert. Both branches do
+  // the same logical thing; the difference is which Drizzle schema we
+  // bind to. In team-hosted (postgres handle), the write goes directly
+  // to cloud — no sync queue needed. In local modes (sqlite handle),
+  // we write to local SQLite + enqueue sync_to_cloud which the local
+  // sync-daemon dispatches.
+  if (handle.kind === 'postgres') {
+    const existing = (
+      await handle.db
+        .select()
+        .from(postgresSchema.featurePacks)
+        .where(eq(postgresSchema.featurePacks.slug, args.slug))
+        .limit(1)
+    )[0];
+    const id = existing?.id ?? `fp_${randomUUID()}`;
+    const isActive = existing?.isActive ?? true;
+    await handle.db
+      .insert(postgresSchema.featurePacks)
+      .values({
+        id,
+        slug: args.slug,
+        parentSlug: args.parentSlug,
+        isActive,
+        checksum,
+        contentJson,
+        status: existing?.status ?? 'published',
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: postgresSchema.featurePacks.slug,
+        set: {
+          parentSlug: args.parentSlug,
+          checksum,
+          contentJson,
+          updatedAt: now,
+        },
+      });
+    // No sync queue — we just wrote to cloud directly. Every
+    // teammate's local sync-daemon (including the admin's own laptop)
+    // will pull this row on its next tick.
+    return;
+  }
+
+  // local-solo / local-team — write to local SQLite.
+  const existing = (
+    await handle.db
+      .select()
+      .from(sqliteSchema.featurePacks)
+      .where(eq(sqliteSchema.featurePacks.slug, args.slug))
+      .limit(1)
+  )[0];
+  const id = existing?.id ?? `fp_${randomUUID()}`;
+  const isActive = existing?.isActive ?? true;
+
+  await handle.db
+    .insert(sqliteSchema.featurePacks)
+    .values({
+      id,
+      slug: args.slug,
+      parentSlug: args.parentSlug,
+      isActive,
+      checksum,
+      contentJson,
+      status: existing?.status ?? 'published',
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: sqliteSchema.featurePacks.slug,
+      set: {
+        parentSlug: args.parentSlug,
+        checksum,
+        contentJson,
+        updatedAt: now,
+      },
+    });
+
+  if (process.env.CONTEXTOS_MODE === 'team') {
+    try {
+      await scheduleDurableWrite(handle, {
+        queue: 'sync_to_cloud',
+        // feature_packs is keyed by slug globally; the dispatch case
+        // accepts kind: 'idempotency_key' with value=slug (see
+        // apps/sync-daemon/src/lib/dispatch.ts::syncFeaturePacks).
+        payload: {
+          v: 1 as const,
+          table: 'feature_packs',
+          lookup: { kind: 'idempotency_key', value: args.slug },
+        },
+      });
+    } catch (err) {
+      console.warn('mirrorPackToDbAndEnqueue: sync_to_cloud enqueue failed (will retry on next pack mutation)', err);
+    }
+  }
 }

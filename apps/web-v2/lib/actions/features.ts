@@ -13,6 +13,7 @@ import {
 import { notFound, redirect } from 'next/navigation';
 import { z } from 'zod';
 
+import { assertActorRole, refuseInTeamHosted } from '@/lib/action-guards';
 import { getProject } from '@/lib/queries/projects';
 
 /**
@@ -145,6 +146,14 @@ const CREATE_SCHEMA = z.object({
 });
 
 export async function createFeatureAction(formData: FormData): Promise<void> {
+  // Features write to <repo>/docs/features/<slug>/ on local disk. In
+  // team-hosted mode the deployment server has no repo to write to.
+  // Refuse with a redirect; CLI users still scaffold via `contextos
+  // feature add`. The Phase 2 invite + Phase 3 deployment plans put
+  // feature content into Supabase Storage so the web can author them
+  // from any deployment, but that's not Phase 1.
+  refuseInTeamHosted('feature action');
+  await assertActorRole('member');
   const projectSlug = String(formData.get('projectSlug') ?? '').trim();
   const slug = String(formData.get('slug') ?? '').trim();
 
@@ -240,6 +249,14 @@ const UPLOAD_FILE_SCHEMA = z.object({
 });
 
 export async function uploadFeatureFileAction(formData: FormData): Promise<void> {
+  // Features write to <repo>/docs/features/<slug>/ on local disk. In
+  // team-hosted mode the deployment server has no repo to write to.
+  // Refuse with a redirect; CLI users still scaffold via `contextos
+  // feature add`. The Phase 2 invite + Phase 3 deployment plans put
+  // feature content into Supabase Storage so the web can author them
+  // from any deployment, but that's not Phase 1.
+  refuseInTeamHosted('feature action');
+  await assertActorRole('member');
   const projectSlug = String(formData.get('projectSlug') ?? '').trim();
   const fslug = String(formData.get('fslug') ?? '').trim();
   const parsed = UPLOAD_FILE_SCHEMA.safeParse({ projectSlug, fslug });
@@ -321,6 +338,14 @@ const EDIT_META_SCHEMA = z.object({
 });
 
 export async function editFeatureMetaAction(formData: FormData): Promise<void> {
+  // Features write to <repo>/docs/features/<slug>/ on local disk. In
+  // team-hosted mode the deployment server has no repo to write to.
+  // Refuse with a redirect; CLI users still scaffold via `contextos
+  // feature add`. The Phase 2 invite + Phase 3 deployment plans put
+  // feature content into Supabase Storage so the web can author them
+  // from any deployment, but that's not Phase 1.
+  refuseInTeamHosted('feature action');
+  await assertActorRole('member');
   const projectSlug = String(formData.get('projectSlug') ?? '').trim();
   const fslug = String(formData.get('fslug') ?? '').trim();
   const raw = {
@@ -418,6 +443,14 @@ const REMOVE_SCHEMA = z.object({
 });
 
 export async function removeFeatureAction(formData: FormData): Promise<void> {
+  // Features write to <repo>/docs/features/<slug>/ on local disk. In
+  // team-hosted mode the deployment server has no repo to write to.
+  // Refuse with a redirect; CLI users still scaffold via `contextos
+  // feature add`. The Phase 2 invite + Phase 3 deployment plans put
+  // feature content into Supabase Storage so the web can author them
+  // from any deployment, but that's not Phase 1.
+  refuseInTeamHosted('feature action');
+  await assertActorRole('member');
   const projectSlug = String(formData.get('projectSlug') ?? '').trim();
   const fslug = String(formData.get('fslug') ?? '').trim();
   const raw = {
@@ -513,6 +546,14 @@ const IMPORT_ITEM_SCHEMA = z.array(
  * query string so the wizard can re-show them.
  */
 export async function importFeaturesAction(formData: FormData): Promise<void> {
+  // Features write to <repo>/docs/features/<slug>/ on local disk. In
+  // team-hosted mode the deployment server has no repo to write to.
+  // Refuse with a redirect; CLI users still scaffold via `contextos
+  // feature add`. The Phase 2 invite + Phase 3 deployment plans put
+  // feature content into Supabase Storage so the web can author them
+  // from any deployment, but that's not Phase 1.
+  refuseInTeamHosted('feature action');
+  await assertActorRole('member');
   const projectSlug = String(formData.get('projectSlug') ?? '').trim();
   const payload = String(formData.get('payload') ?? '').trim();
   const parsed = IMPORT_SCHEMA.safeParse({ projectSlug, payload });
@@ -608,6 +649,14 @@ export async function importFeaturesAction(formData: FormData): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function reindexFeaturesAction(formData: FormData): Promise<void> {
+  // Features write to <repo>/docs/features/<slug>/ on local disk. In
+  // team-hosted mode the deployment server has no repo to write to.
+  // Refuse with a redirect; CLI users still scaffold via `contextos
+  // feature add`. The Phase 2 invite + Phase 3 deployment plans put
+  // feature content into Supabase Storage so the web can author them
+  // from any deployment, but that's not Phase 1.
+  refuseInTeamHosted('feature action');
+  await assertActorRole('member');
   const projectSlug = String(formData.get('projectSlug') ?? '').trim();
   if (!PROJECT_SLUG_RE.test(projectSlug)) {
     redirect(`/projects?error=invalid_project_slug`);

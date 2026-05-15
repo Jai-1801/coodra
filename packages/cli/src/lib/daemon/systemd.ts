@@ -46,6 +46,20 @@ export class SystemdDaemonManager implements DaemonManager {
     const body = renderServiceUnit(unit);
     await writeFile(this.unitPath(unit.name), body, 'utf8');
     await this.run('systemctl', ['--user', 'daemon-reload'], { reject: false, timeout: 3000 });
+    // W5 / beta.5 (2026-05-13) — clear any prior failure / rate-limit
+    // state for this unit. systemd's restart rate-limiter (StartLimitBurst,
+    // default 5 starts / 10s) latches a unit into `failed` after a
+    // crash-loop and then REFUSES every subsequent `systemctl restart`
+    // until `reset-failed` runs. Because `start()` calls restart with
+    // `reject: false`, that refusal was silently swallowed: the unit
+    // file got fixed (e.g. DATABASE_URL added by `team init`) but the
+    // daemon never actually came back up. Running `reset-failed` on
+    // every install makes `contextos start` a genuine clean slate.
+    // No-op on a healthy unit; idempotent.
+    await this.run('systemctl', ['--user', 'reset-failed', this.unitName(unit.name)], {
+      reject: false,
+      timeout: 3000,
+    });
   }
 
   async uninstall(unitName: string): Promise<void> {
@@ -113,7 +127,7 @@ export class SystemdDaemonManager implements DaemonManager {
 }
 
 function renderServiceUnit(unit: DaemonUnit): string {
-  const envLines = Object.entries(unit.env).map(([k, v]) => `Environment=${k}=${escapeForUnit(v)}`);
+  const envLines = Object.entries(unit.env).map(([k, v]) => renderEnvLine(k, v));
   const lines = [
     '[Unit]',
     `Description=ContextOS managed unit (${unit.name})`,
@@ -141,6 +155,27 @@ function quoteArg(value: string): string {
   return `"${value.replace(/"/g, '\\"')}"`;
 }
 
-function escapeForUnit(value: string): string {
-  return value.replace(/\n/g, ' ').replace(/'/g, "\\'");
+/**
+ * Render a single `Environment="KEY=VALUE"` line for a systemd unit.
+ *
+ * beta.8 (2026-05-14) — the critical escape is `%` → `%%`. systemd does
+ * **specifier expansion** on `Environment=` values (`%n`, `%u`, `%i`,
+ * …). A URL-encoded Postgres password like `Abi%4029250204` (`%40` is
+ * an encoded `@`) contains `%4`, which systemd tries to expand as a
+ * specifier — it isn't one, so systemd mangles or drops the whole
+ * value. The sync-daemon then boots with `DATABASE_URL=undefined` and
+ * crash-loops. The pre-beta.8 `escapeForUnit` handled `\n` and `'` but
+ * NOT `%`, so any DATABASE_URL with a percent-encoded character in the
+ * password silently broke team mode on Linux. launchd (macOS) never
+ * hit this — plist `<string>` values do no specifier expansion.
+ *
+ * Full escaping, applied in order:
+ *   - newlines → space (a newline would split the unit line)
+ *   - `\` → `\\`, `"` → `\"`  (we wrap the whole assignment in quotes
+ *     so values with spaces — e.g. a home dir with spaces — survive)
+ *   - `%` → `%%`  (literal percent; the load-bearing fix)
+ */
+function renderEnvLine(key: string, value: string): string {
+  const escaped = value.replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/%/g, '%%');
+  return `Environment="${key}=${escaped}"`;
 }

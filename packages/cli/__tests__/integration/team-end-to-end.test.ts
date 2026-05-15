@@ -16,13 +16,8 @@ import {
 } from '@coodra/contextos-db';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-
-import {
-  buildMigrationPlan,
-  executeMigration,
-  snapshotLocalDb,
-} from '../../src/lib/team-migrate/index.js';
 import { readTeamConfig, upgradeToTeamConfig } from '../../src/lib/team-config.js';
+import { buildMigrationPlan, executeMigration, snapshotLocalDb } from '../../src/lib/team-migrate/index.js';
 
 /**
  * Module 04 Phase 4 — end-to-end smoke test for the full team-mode
@@ -227,15 +222,14 @@ const HOOK_SECRET = 'a'.repeat(64);
     snapshotLocalDb(join(adminTmp, 'data.db'), snapshot);
     const migrateResult = await executeMigration({ local: adminLocal, cloud, plan, snapshotPath: snapshot });
     if (migrateResult.status !== 'completed') {
-      throw new Error(`migration did not complete: status=${migrateResult.status} error=${migrateResult.error ?? '(none)'}`);
+      throw new Error(
+        `migration did not complete: status=${migrateResult.status} error=${migrateResult.error ?? '(none)'}`,
+      );
     }
     expect(migrateResult.status).toBe('completed');
 
     // Verify cloud has the rows with correct stamping.
-    const cloudRuns = await cloud.db
-      .select()
-      .from(postgresSchema.runs)
-      .where(eq(postgresSchema.runs.id, localRunId));
+    const cloudRuns = await cloud.db.select().from(postgresSchema.runs).where(eq(postgresSchema.runs.id, localRunId));
     expect(cloudRuns).toHaveLength(1);
     expect(cloudRuns[0]?.projectId).toBe(newProjectId as string);
     expect(cloudRuns[0]?.createdByUserId).toBe(ADMIN_USER);
@@ -245,15 +239,13 @@ const HOOK_SECRET = 'a'.repeat(64);
     expect(cloudDecs.every((d) => d.createdByUserId === ADMIN_USER)).toBe(true);
 
     // Verify local rewritten — project_id matches cloud.
-    const localProjAfter = adminLocal.raw
-      .prepare('SELECT id FROM projects WHERE slug = ?')
-      .get('acme-app') as { id: string };
+    const localProjAfter = adminLocal.raw.prepare('SELECT id FROM projects WHERE slug = ?').get('acme-app') as {
+      id: string;
+    };
     expect(localProjAfter.id).toBe(newProjectId as string);
 
     // Verify idempotency: re-run does NOTHING new.
-    const cloudRunCountBefore = (
-      await cloud.db.select({ n: sql<number>`COUNT(*)` }).from(postgresSchema.runs)
-    )[0]!.n;
+    const cloudRunCountBefore = (await cloud.db.select({ n: sql<number>`COUNT(*)` }).from(postgresSchema.runs))[0]!.n;
     const planAgain = await buildMigrationPlan({
       local: adminLocal,
       cloud,
@@ -262,9 +254,7 @@ const HOOK_SECRET = 'a'.repeat(64);
     });
     const r2 = await executeMigration({ local: adminLocal, cloud, plan: planAgain, snapshotPath: snapshot });
     expect(r2.status).toBe('completed');
-    const cloudRunCountAfter = (
-      await cloud.db.select({ n: sql<number>`COUNT(*)` }).from(postgresSchema.runs)
-    )[0]!.n;
+    const cloudRunCountAfter = (await cloud.db.select({ n: sql<number>`COUNT(*)` }).from(postgresSchema.runs))[0]!.n;
     expect(Number(cloudRunCountAfter)).toBe(Number(cloudRunCountBefore));
 
     // STEP 5 — Member B's machine joins.
@@ -374,9 +364,7 @@ const HOOK_SECRET = 'a'.repeat(64);
     expect(memberSeesNewDec?.created_by_user_id).toBe(ADMIN_USER);
 
     // And Member B sees the original migrated rows too.
-    const memberAllDecs = memberLocal.raw
-      .prepare('SELECT COUNT(*) as n FROM decisions')
-      .get() as { n: number };
+    const memberAllDecs = memberLocal.raw.prepare('SELECT COUNT(*) as n FROM decisions').get() as { n: number };
     expect(memberAllDecs.n).toBe(3); // 2 migrated + 1 new
   });
 });

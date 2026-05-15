@@ -23,11 +23,20 @@ describe('contextos --help (snapshot-locked surface)', () => {
       Commands:
         init [options]            Initialise ContextOS in the current project (writes
                                   ~/.contextos/, .mcp.json, .contextos.json, .env).
-        start [options]           Start MCP Server + Hooks Bridge (+ Sync Daemon in
-                                  team mode) as background daemons.
+        start [options]           Start MCP Server + Hooks Bridge + Web Dashboard (+
+                                  Sync Daemon in team mode) as background daemons.
         stop [options]            Stop ContextOS daemons. Idempotent.
         status [options]          Print unified project + service state for the
                                   current cwd.
+        login [options]           Browser-handoff Clerk login. Writes
+                                  ~/.contextos/clerk-token.json and switches mode to
+                                  team.
+        org                       Multi-org user commands. Status + switch the active
+                                  Clerk org bound to this laptop.
+        logout [options]          Log out of team mode. Deletes clerk-token.json,
+                                  demotes config to solo, strips team env keys.
+        invite [options] <email>  Mint a team invite from the CLI. Prints a single
+                                  shareable /install/<token> URL.
         doctor [options]          Run health checks (read-only). Defaults to the 11
                                   essential checks for the Claude Code + solo-mode
                                   path; use --full for the complete 35-check registry
@@ -66,7 +75,7 @@ describe('contextos --help (snapshot-locked surface)', () => {
         logs [options] <service>  Tail or print recent lines from
                                   ~/.contextos/logs/<service>.log. Pure file-read; no
                                   DB. Service ∈ {mcp-server, hooks-bridge,
-                                  sync-daemon}.
+                                  sync-daemon, web}.
         pause [options]           Pause ContextOS enforcement on the local machine via
                                   a row in \`kill_switches\`. Hard mode (default)
                                   denies; soft mode allows + audits. Local-only (M08b
@@ -75,6 +84,8 @@ describe('contextos --help (snapshot-locked surface)', () => {
                                   --all, or --scope[/--target].
         team                      Team-mode commands. Bodies land when team mode is
                                   reachable end-to-end (post-Module 04).
+        ui                        Launch the interactive ContextOS terminal UI (tabs:
+                                  terminal · commands · status).
         help [command]            display help for command
       "
     `);
@@ -103,7 +114,7 @@ describe('contextos --help (snapshot-locked surface)', () => {
     expect(help).toContain('Run health checks (read-only)');
   });
 
-  it('renders team login subcommand help with [token] and --server', () => {
+  it('renders team login subcommand help with deprecated [token] and --server flags (Phase G alias)', () => {
     const program = buildProgram();
     const team = program.commands.find((c) => c.name() === 'team');
     const login = team?.commands.find((c) => c.name() === 'login');
@@ -111,8 +122,21 @@ describe('contextos --help (snapshot-locked surface)', () => {
     const help = login?.helpInformation() ?? '';
     expect(help).toContain('[token]');
     expect(help).toContain('--server <url>');
-    // Commander wraps long descriptions, so match across whitespace.
-    expect(help).toMatch(/Stub\s+in\s+08a/);
+    // Phase G — `team login` is now an alias for `contextos login`. The
+    // help text marks the legacy args as deprecated.
+    expect(help).toMatch(/alias for `contextos login`/);
+    expect(help).toMatch(/deprecated/);
+  });
+
+  it('renders top-level login subcommand help (Phase G slice G.3)', () => {
+    const program = buildProgram();
+    const login = program.commands.find((c) => c.name() === 'login');
+    expect(login).toBeDefined();
+    const help = login?.helpInformation() ?? '';
+    expect(help).toMatch(/Browser-handoff Clerk login/);
+    expect(help).toContain('--web-url <url>');
+    expect(help).toContain('--no-open');
+    expect(help).toContain('--timeout-ms <ms>');
   });
 });
 

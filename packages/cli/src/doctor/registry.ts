@@ -34,6 +34,8 @@ import { staleBackupsCheck } from './checks/33-stale-backups.js';
 import { bundledTemplatesCheck } from './checks/34-bundled-templates.js';
 import { autoMarkerSmokeCheck } from './checks/35-auto-marker-smoke.js';
 import { teamConfigCheck } from './checks/36-team-config.js';
+import { webHealthzCheck } from './checks/37-web-healthz.js';
+import { tunnelReachabilityCheck } from './checks/38-tunnel-reachability.js';
 import type { Check } from './types.js';
 
 /**
@@ -109,6 +111,11 @@ export const ALL_CHECKS: readonly Check[] = tagEssential([
   autoMarkerSmokeCheck,
   // Module 04 Phase 4 — team-mode bootstrap state.
   teamConfigCheck,
+  // Web Bundle W1 (2026-05-13) — bundled Next.js standalone /api/healthz.
+  webHealthzCheck,
+  // Web Bundle W4 (2026-05-13) — Cloudflare tunnel reachability when
+  // CONTEXTOS_PUBLIC_URL is set.
+  tunnelReachabilityCheck,
 ]);
 
 /**

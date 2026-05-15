@@ -37,6 +37,11 @@ describe('mapAgentType', () => {
     expect(mapAgentType('windsurf')).toBe<KnownAgentType>('windsurf');
   });
 
+  it('maps Codex handshake names to codex (beta.95)', () => {
+    expect(mapAgentType('codex')).toBe<KnownAgentType>('codex');
+    expect(mapAgentType('codex-cli')).toBe<KnownAgentType>('codex');
+  });
+
   it('maps VS Code Copilot Chat to vscode_copilot', () => {
     expect(mapAgentType('github-copilot-chat-vscode')).toBe<KnownAgentType>('vscode_copilot');
   });

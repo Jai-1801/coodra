@@ -1,8 +1,9 @@
-import pc from 'picocolors';
 import { EXIT_OK } from '../exit-codes.js';
 import { resolveContextosHome } from '../lib/contextos-home.js';
 import { selectDaemonManager } from '../lib/daemon/index.js';
 import { SERVICES, type ServiceName } from '../lib/services.js';
+import { clearTunnelUrlFromHomeEnv, stopTunnelByPid } from '../lib/tunnel.js';
+import { commandTitle, pc, terminalWidth } from '../ui/index.js';
 
 export interface StopOptions {
   readonly service?: string;
@@ -30,6 +31,7 @@ export const DEFAULT_STOP_IO: StopIO = {
 };
 
 export async function runStopCommand(options: StopOptions = {}, io: StopIO = DEFAULT_STOP_IO): Promise<never> {
+  io.writeStdout(`${commandTitle('Stop', 'halt ContextOS daemons', { width: terminalWidth() })}\n`);
   const env = options.env ?? process.env;
   const contextosHome = resolveContextosHome({
     ...(options.home !== undefined ? { override: options.home } : {}),
@@ -56,5 +58,30 @@ export async function runStopCommand(options: StopOptions = {}, io: StopIO = DEF
       io.writeStderr(`${pc.yellow('⚠')} ${name} stop reported: ${(err as Error).message}\n`);
     }
   }
+
+  // W4 (2026-05-13) — tear down the Cloudflare quick-tunnel if one is
+  // running. The tunnel state pointer lives in `~/.contextos/tunnel.json`;
+  // `start --tunnel` wrote it (PID + URL + startedAt). Stop runs in a
+  // different process so we can't share the QuickTunnel object; the
+  // PID file is the handoff.
+  //
+  // Also unwind CONTEXTOS_PUBLIC_URL from `~/.contextos/.env` — quick-
+  // tunnel URLs are ephemeral, leaving the dead hostname there would
+  // make future `contextos invite` mint URLs that 404 the moment a
+  // teammate clicks them.
+  //
+  // Only fires when stop is called without `--service <name>` (i.e.,
+  // the full stop), since `--service web` is a targeted op that may
+  // leave the tunnel orphaned by user choice.
+  if (target === undefined) {
+    const result = stopTunnelByPid(contextosHome);
+    if (result.stopped) {
+      io.writeStdout(`${pc.green('✓')} Stopped cloudflared tunnel (pid ${result.pid})\n`);
+    } else if (result.pid !== null) {
+      io.writeStdout(`${pc.gray('·')} cloudflared tunnel pid ${result.pid} already gone; cleaned up state\n`);
+    }
+    clearTunnelUrlFromHomeEnv(contextosHome);
+  }
+
   return io.exit(EXIT_OK);
 }

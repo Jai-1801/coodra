@@ -14,7 +14,7 @@ describe('buildProgram — full surface (post-S8)', () => {
     exitSpy.mockRestore();
   });
 
-  it('registers all 21 top-level subcommands (M08a 8 + M08b S3-S17 + features 2026-05-08: pause/resume/logs/db/upgrade/uninstall/policy/project/run/export/pack/template/feature)', () => {
+  it('registers all top-level subcommands (M08a 8 + M08b S3-S17 + features 2026-05-08: pause/resume/logs/db/upgrade/uninstall/policy/project/run/export/pack/template/feature + Phase G login + Phase H invite + terminal-UI ui)', () => {
     const program = buildProgram();
     const top = program.commands.map((c) => c.name()).sort();
     expect(top).toEqual([
@@ -24,7 +24,11 @@ describe('buildProgram — full surface (post-S8)', () => {
       'export',
       'feature',
       'init',
+      'invite',
+      'login',
+      'logout',
       'logs',
+      'org',
       'pack',
       'pause',
       'policy',
@@ -36,6 +40,8 @@ describe('buildProgram — full surface (post-S8)', () => {
       'stop',
       'team',
       'template',
+      // Terminal-UI redesign — `contextos ui` launches the interactive TUI.
+      'ui',
       'uninstall',
       'upgrade',
     ]);
@@ -43,7 +49,7 @@ describe('buildProgram — full surface (post-S8)', () => {
     const team = program.commands.find((c) => c.name() === 'team');
     expect(team).toBeDefined();
     const sub = team?.commands.map((c) => c.name()).sort() ?? [];
-    expect(sub).toEqual(['join', 'leave', 'login', 'logout', 'migrate', 'setup']);
+    expect(sub).toEqual(['init', 'install', 'join', 'leave', 'login', 'logout', 'migrate', 'setup']);
 
     const db = program.commands.find((c) => c.name() === 'db');
     expect(db).toBeDefined();
@@ -58,7 +64,8 @@ describe('buildProgram — full surface (post-S8)', () => {
     const projectCmd = program.commands.find((c) => c.name() === 'project');
     expect(projectCmd).toBeDefined();
     const projectSub = projectCmd?.commands.map((c) => c.name()).sort() ?? [];
-    expect(projectSub).toEqual(['list', 'reset', 'show']);
+    // W5 / beta.5 — `promote` (solo→team). W6 / beta.6 — `demote` (team→solo, cloud-gated).
+    expect(projectSub).toEqual(['demote', 'list', 'promote', 'reset', 'show']);
 
     const runCmd = program.commands.find((c) => c.name() === 'run');
     expect(runCmd).toBeDefined();
@@ -168,29 +175,47 @@ describe('buildProgram — full surface (post-S8)', () => {
     expect(calls[0]).toMatchObject({ json: true });
   });
 
-  it('wires `team login` to the real handler (S8 stub) — passes token + --server', async () => {
+  it('wires `team login` to the Phase G login runner (legacy token+server flags accepted but token ignored)', async () => {
+    // Phase G replaced the stub-based team-login with `runLoginCommand`.
+    // `team login` is now a backward-compat alias for `contextos login` —
+    // the legacy `[token]` argument is silently dropped (Phase G captures
+    // the token via browser handoff). `--server` maps to `webUrl`.
     const calls: Array<unknown> = [];
-    const fakeRunTeamLogin = async (opts: unknown) => {
+    const fakeRunLogin = async (opts: unknown) => {
       calls.push(opts);
       throw new Error('__exit__:2');
     };
-    const program = buildProgram({ runTeamLogin: fakeRunTeamLogin });
+    const program = buildProgram({ runLogin: fakeRunLogin });
     await expect(
-      program.parseAsync(['node', 'contextos', 'team', 'login', 'tok-abc', '--server', 'https://x.example']),
+      program.parseAsync(['node', 'contextos', 'team', 'login', 'legacy-tok', '--server', 'https://x.example']),
     ).rejects.toThrow('__exit__:2');
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ token: 'tok-abc', server: 'https://x.example' });
+    expect(calls[0]).toMatchObject({ webUrl: 'https://x.example' });
+    // The legacy positional token argument is intentionally dropped — not
+    // round-tripped into LoginOptions.
+    expect(calls[0]).not.toHaveProperty('token');
   });
 
-  it('wires `team logout` to the real handler (S8 stub)', async () => {
+  it('wires `team logout` to the Phase G logout runner (alias for `contextos logout`)', async () => {
     let called = false;
-    const fakeRunTeamLogout = async () => {
+    const fakeRunLogout = async () => {
       called = true;
       throw new Error('__exit__:2');
     };
-    const program = buildProgram({ runTeamLogout: fakeRunTeamLogout });
+    const program = buildProgram({ runLogout: fakeRunLogout });
     await expect(program.parseAsync(['node', 'contextos', 'team', 'logout'])).rejects.toThrow('__exit__:2');
     expect(called).toBe(true);
+  });
+
+  it('wires top-level `logout` to the Phase G logout runner', async () => {
+    const calls: Array<unknown> = [];
+    const fakeRunLogout = async (opts: unknown) => {
+      calls.push(opts);
+      throw new Error('__exit__:0');
+    };
+    const program = buildProgram({ runLogout: fakeRunLogout });
+    await expect(program.parseAsync(['node', 'contextos', 'logout'])).rejects.toThrow('__exit__:0');
+    expect(calls).toHaveLength(1);
   });
 
   it('exposes `--version` (placeholder VERSION until S2 prebuild lands)', () => {

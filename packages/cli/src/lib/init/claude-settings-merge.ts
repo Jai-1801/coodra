@@ -130,6 +130,25 @@ export interface ClaudeSettingsMergeOptions {
   readonly force: boolean;
   /** When true, compute the merge but do not write to disk. */
   readonly dryRun: boolean;
+  /**
+   * Phase F.6+ (2026-05-12) — literal LOCAL_HOOK_SECRET to inline into
+   * the `X-Local-Hook-Secret` header. Pre-Phase-F.6+ init wrote
+   * `"$LOCAL_HOOK_SECRET"` and relied on Claude Code substituting the
+   * value from its process env at hook-fire time. That mechanism only
+   * works if the user has the var exported in their shell — which
+   * shells don't auto-load from .env files. The default user flow
+   * (`cd ~/proj && claude`) leaves the var unset → header sends empty
+   * string → bridge 401s on every hook event.
+   *
+   * Solution: bake the literal secret into settings.json so the
+   * dependency on shell env disappears. Tradeoff: secret lives in
+   * ~/.claude/settings.json (already a sensitive file) instead of
+   * being deferred to env. Net: same risk surface, working flow.
+   *
+   * When omitted, the legacy `$LOCAL_HOOK_SECRET` template is written
+   * (back-compat for callers that haven't been updated).
+   */
+  readonly localHookSecret?: string;
 }
 
 interface ClaudeHttpHookSpec {
@@ -174,10 +193,17 @@ export function defaultClaudeSettingsPath(home: string = homedir(), env: NodeJS.
 
 export function buildContextosHookSpec(options: ClaudeSettingsMergeOptions): ClaudeHttpHookSpec {
   const host = options.bridgeHost ?? '127.0.0.1';
+  // Phase F.6+ — prefer literal secret over $LOCAL_HOOK_SECRET env
+  // template. See ClaudeSettingsMergeOptions.localHookSecret docblock
+  // for why.
+  const secretValue =
+    typeof options.localHookSecret === 'string' && options.localHookSecret.length > 0
+      ? options.localHookSecret
+      : '$LOCAL_HOOK_SECRET';
   return {
     type: 'http',
     url: `http://${host}:${options.bridgePort}/v1/hooks/claude-code`,
-    headers: { 'X-Local-Hook-Secret': '$LOCAL_HOOK_SECRET' },
+    headers: { 'X-Local-Hook-Secret': secretValue },
     allowedEnvVars: ['LOCAL_HOOK_SECRET'],
     timeout: options.timeoutSec ?? 10,
   };

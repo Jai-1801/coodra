@@ -26,6 +26,8 @@ export interface CheckContext {
   readonly mcpPort: number;
   /** Hooks bridge port (from env or 3101 default). */
   readonly bridgePort: number;
+  /** Web dashboard port (from CONTEXTOS_WEB_PORT or 3001 default). W1 (2026-05-13). */
+  readonly webPort: number;
   /** Stable clock for tests. */
   readonly now: () => Date;
   /** Per-check timeout in ms (set by `--timeout-ms`, default 2000). */

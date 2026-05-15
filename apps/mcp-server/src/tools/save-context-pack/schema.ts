@@ -77,7 +77,23 @@ const runNotFoundBranch = z
   })
   .strict();
 
-export const saveContextPackOutputSchema = z.union([successBranch, runNotFoundBranch]);
+/**
+ * Phase G slice G.6 — auth_required soft-failure.
+ *
+ * Returned in team mode when no verified Clerk JWT is available on
+ * this machine (no `~/.contextos/clerk-token.json`, or the token is
+ * expired/tampered). The agent surfaces `howToFix` to the user, who
+ * runs `contextos login` and retries.
+ */
+const authRequiredBranch = z
+  .object({
+    ok: z.literal(false),
+    error: z.literal('auth_required'),
+    howToFix: z.string().min(1),
+  })
+  .strict();
+
+export const saveContextPackOutputSchema = z.union([successBranch, runNotFoundBranch, authRequiredBranch]);
 
 export type SaveContextPackInput = z.infer<typeof saveContextPackInputSchema>;
 export type SaveContextPackOutput = z.infer<typeof saveContextPackOutputSchema>;

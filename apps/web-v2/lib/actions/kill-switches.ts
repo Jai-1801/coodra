@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
-import { getActor } from '@/lib/auth';
+import { assertActorRole } from '@/lib/action-guards';
 import {
   findDuplicateActive,
   insertKillSwitchWithSync,
@@ -29,6 +29,9 @@ const PAUSE_FORM_SCHEMA = z.object({
 });
 
 export async function pauseAction(formData: FormData): Promise<void> {
+  // Pause is admin-or-member. The role check just gates viewer (read-only).
+  const actor = await assertActorRole('member');
+
   const parsed = PAUSE_FORM_SCHEMA.safeParse({
     scope: formData.get('scope') ?? 'global',
     target: formData.get('target') ?? undefined,
@@ -66,7 +69,6 @@ export async function pauseAction(formData: FormData): Promise<void> {
     if (!Number.isNaN(parsedDate.getTime())) expiresAt = parsedDate;
   }
 
-  const actor = await getActor();
   const inserted = await insertKillSwitchWithSync({
     scope: args.scope,
     target,
@@ -83,11 +85,17 @@ export async function pauseAction(formData: FormData): Promise<void> {
 export async function resumeAction(formData: FormData): Promise<void> {
   const id = String(formData.get('id') ?? '');
   if (id.length === 0) redirect('/kill-switches?error=missing_id');
-  const actor = await getActor();
-  const row = await softResumeWithSync({ id, resumedBySessionId: `web:${actor.userId}` });
+
+  // RBAC: members can resume; viewers can't. Per-user "you can only
+  // resume your own pause" gating needs `kill_switches.paused_by_user_id`
+  // (the schema today has `paused_by_session_id` only). Tracked as a
+  // Phase-2 follow-up; for now any member-or-higher can resume any pause.
+  const actor = await assertActorRole('member');
+
+  const result = await softResumeWithSync({ id, resumedBySessionId: `web:${actor.userId}` });
   revalidatePath('/kill-switches');
   revalidatePath('/');
-  if (row === null) {
+  if (result === null) {
     redirect(
       `/kill-switches?error=${encodeURIComponent(`No active kill-switch with id '${id}' (already resumed or never existed)`)}`,
     );

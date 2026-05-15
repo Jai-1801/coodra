@@ -11,11 +11,21 @@ import {
   type RunRow,
   type RunWithEverything,
 } from '@coodra/contextos-db';
-import pc from 'picocolors';
-
 import { EXIT_OK, EXIT_USER_ACTION_REQUIRED, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosDataDb, resolveContextosHome } from '../lib/contextos-home.js';
 import { openLocalDb } from '../lib/open-local-db.js';
+import {
+  commandTitle,
+  errorLine,
+  hintLine,
+  kvBlock,
+  okLine,
+  paint,
+  sectionHead,
+  terminalWidth,
+  timelineRow,
+  type Verdict,
+} from '../ui/index.js';
 
 /**
  * `contextos run {list|show|cancel}` — admin surface for the `runs`
@@ -109,7 +119,7 @@ export async function runRunListCommand(options: RunListOptions, ioOverride?: Ru
     if (json) {
       io.writeStdout(`${JSON.stringify({ ok: true, runs: rows.map(serializeRun) }, null, 2)}\n`);
     } else if (rows.length === 0) {
-      io.writeStdout(`${pc.dim('—')} no runs match the filter.\n`);
+      io.writeStdout(`${hintLine('— no runs match the filter.')}\n`);
     } else {
       for (const r of rows) {
         printRunHumanShort(io, r);
@@ -175,9 +185,9 @@ export async function runRunCancelCommand(runId: string, options: RunCancelOptio
     if (json) {
       io.writeStdout(`${JSON.stringify({ ok: true, status: 'cancelled', run: serializeRun(result.run) }, null, 2)}\n`);
     } else {
-      io.writeStdout(`${pc.green('✓')} Cancelled run ${result.run.id}.\n`);
+      io.writeStdout(`${okLine(`Cancelled run ${result.run.id}.`)}\n`);
       io.writeStdout(
-        `  ${pc.dim('Note: cancellation is informational; the bridge keeps recording any post-cancel events for audit.')}\n`,
+        `  ${hintLine('Note: cancellation is informational; the bridge keeps recording any post-cancel events for audit.')}\n`,
       );
     }
     io.exit(EXIT_OK);
@@ -280,70 +290,112 @@ function serializeRunWithEverything(r: RunWithEverything): {
   };
 }
 
+/** Map a `runs.status` value onto an axis verdict. */
+function runVerdict(status: string): Verdict {
+  switch (status) {
+    case 'completed':
+      return 'ok';
+    case 'failed':
+      return 'fail';
+    case 'in_progress':
+      return 'warn';
+    default:
+      // cancelled · abandoned
+      return 'idle';
+  }
+}
+
 function printRunHumanShort(io: RunIO, r: RunRow): void {
-  const statusColor =
-    r.status === 'completed'
-      ? pc.green
-      : r.status === 'cancelled'
-        ? pc.red
-        : r.status === 'in_progress'
-          ? pc.cyan
-          : pc.yellow;
+  // Each run is a node observed on the context axis.
   io.writeStdout(
-    `${r.id} ${statusColor(r.status.padEnd(11, ' '))} ${r.agentType.padEnd(12, ' ')} started ${r.startedAt.toISOString()} session=${r.sessionId}\n`,
+    `${timelineRow(
+      {
+        verdict: runVerdict(r.status),
+        when: r.startedAt.toISOString(),
+        id: r.id,
+        status: r.status,
+        meta: `${r.agentType} · ${r.sessionId}`,
+      },
+      { whenWidth: 26, idWidth: 40, statusWidth: 12 },
+    )}\n`,
   );
 }
 
 function printRunWithEverythingHuman(io: RunIO, x: RunWithEverything): void {
   const r = x.run;
-  io.writeStdout(`${pc.bold('Run')} ${r.id}\n`);
-  io.writeStdout(`  status: ${r.status}\n`);
-  io.writeStdout(`  project: ${r.projectId}\n`);
-  io.writeStdout(`  session: ${r.sessionId}\n`);
-  io.writeStdout(`  agent: ${r.agentType} (mode: ${r.mode})\n`);
-  io.writeStdout(`  started: ${r.startedAt.toISOString()}\n`);
-  io.writeStdout(`  ended:   ${r.endedAt?.toISOString() ?? '(in progress)'}\n`);
-  if (r.issueRef !== null) io.writeStdout(`  issue: ${r.issueRef}\n`);
-  if (r.prRef !== null) io.writeStdout(`  pr: ${r.prRef}\n`);
+  const width = terminalWidth();
+  io.writeStdout(`${commandTitle('Run', r.id, { width, indent: 0 })}\n`);
+  io.writeStdout(
+    `${kvBlock(
+      [
+        { key: 'status', value: r.status, valueTone: 'ink' },
+        { key: 'project', value: r.projectId },
+        { key: 'session', value: r.sessionId },
+        { key: 'agent', value: `${r.agentType} (mode: ${r.mode})` },
+        { key: 'started', value: r.startedAt.toISOString() },
+        { key: 'ended', value: r.endedAt?.toISOString() ?? '(in progress)' },
+        ...(r.issueRef !== null ? [{ key: 'issue', value: r.issueRef } as const] : []),
+        ...(r.prRef !== null ? [{ key: 'pr', value: r.prRef } as const] : []),
+      ],
+      { keyWidth: 12, indent: 2 },
+    )}\n`,
+  );
 
-  io.writeStdout(`\n${pc.bold('Events')} (${x.events.length}):\n`);
+  io.writeStdout(`\n${sectionHead('01', `events (${x.events.length})`, { width })}\n`);
   if (x.events.length === 0) {
-    io.writeStdout(`  ${pc.dim('(none)')}\n`);
+    io.writeStdout(`  ${hintLine('(none)')}\n`);
   } else {
     for (const e of x.events) {
-      io.writeStdout(`  [${e.createdAt.toISOString()}] ${e.phase.padEnd(12, ' ')} ${e.toolName} (${e.toolUseId})\n`);
-    }
-  }
-
-  io.writeStdout(`\n${pc.bold('Policy decisions')} (${x.policyDecisions.length}):\n`);
-  if (x.policyDecisions.length === 0) {
-    io.writeStdout(`  ${pc.dim('(none)')}\n`);
-  } else {
-    for (const p of x.policyDecisions) {
-      const c = p.permissionDecision === 'deny' ? pc.red : p.permissionDecision === 'allow' ? pc.green : pc.yellow;
       io.writeStdout(
-        `  [${p.createdAt.toISOString()}] ${c(p.permissionDecision.padEnd(5, ' '))} ${p.toolName} — ${p.reason}\n`,
+        `  ${paint.inkFar(`[${e.createdAt.toISOString()}]`)} ${paint.inkDim(e.phase.padEnd(12, ' '))} ${paint.ink(e.toolName)} ${paint.inkFar(`(${e.toolUseId})`)}\n`,
       );
     }
   }
 
-  io.writeStdout(`\n${pc.bold('Decisions (record_decision)')} (${x.decisions.length}):\n`);
-  if (x.decisions.length === 0) {
-    io.writeStdout(`  ${pc.dim('(none)')}\n`);
+  io.writeStdout(`\n${sectionHead('02', `policy decisions (${x.policyDecisions.length})`, { width })}\n`);
+  if (x.policyDecisions.length === 0) {
+    io.writeStdout(`  ${hintLine('(none)')}\n`);
   } else {
-    for (const d of x.decisions) {
-      io.writeStdout(`  [${d.createdAt.toISOString()}] ${d.description}\n    rationale: ${d.rationale}\n`);
+    for (const p of x.policyDecisions) {
+      const tint =
+        p.permissionDecision === 'deny'
+          ? paint.crimson
+          : p.permissionDecision === 'allow'
+            ? paint.phosphor
+            : paint.amber;
+      io.writeStdout(
+        `  ${paint.inkFar(`[${p.createdAt.toISOString()}]`)} ${tint(p.permissionDecision.padEnd(5, ' '))} ${paint.ink(p.toolName)} ${paint.inkFar('—')} ${paint.inkDim(p.reason)}\n`,
+      );
     }
   }
 
-  io.writeStdout(`\n${pc.bold('Context Pack')}:\n`);
-  if (x.contextPack === null) {
-    io.writeStdout(`  ${pc.dim('(none — no context pack saved for this run)')}\n`);
+  io.writeStdout(`\n${sectionHead('03', `decisions (${x.decisions.length})`, { width })}\n`);
+  if (x.decisions.length === 0) {
+    io.writeStdout(`  ${hintLine('(none)')}\n`);
   } else {
-    io.writeStdout(`  id: ${x.contextPack.id}\n`);
-    io.writeStdout(`  title: ${x.contextPack.title}\n`);
+    for (const d of x.decisions) {
+      io.writeStdout(
+        `  ${paint.inkFar(`[${d.createdAt.toISOString()}]`)} ${paint.ink(d.description)}\n    ${paint.inkFar('rationale:')} ${paint.inkDim(d.rationale)}\n`,
+      );
+    }
+  }
+
+  io.writeStdout(`\n${sectionHead('04', 'context pack', { width })}\n`);
+  if (x.contextPack === null) {
+    io.writeStdout(`  ${hintLine('(none — no context pack saved for this run)')}\n`);
+  } else {
     io.writeStdout(
-      `  excerpt: ${x.contextPack.contentExcerpt.slice(0, 200)}${x.contextPack.contentExcerpt.length > 200 ? '…' : ''}\n`,
+      `${kvBlock(
+        [
+          { key: 'id', value: x.contextPack.id },
+          { key: 'title', value: x.contextPack.title },
+          {
+            key: 'excerpt',
+            value: `${x.contextPack.contentExcerpt.slice(0, 200)}${x.contextPack.contentExcerpt.length > 200 ? '…' : ''}`,
+          },
+        ],
+        { keyWidth: 10, indent: 2 },
+      )}\n`,
     );
   }
 }
@@ -352,7 +404,7 @@ function surfaceError(io: RunIO, json: boolean, exitCode: number, message: strin
   if (json) {
     io.writeStdout(`${JSON.stringify({ ok: false, error: message }, null, 2)}\n`);
   } else {
-    io.writeStderr(`${pc.red('error')}: ${message}\n`);
+    io.writeStderr(`${errorLine(message)}\n`);
   }
   io.exit(exitCode);
 }

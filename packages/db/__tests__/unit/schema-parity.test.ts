@@ -50,6 +50,13 @@ const tablePairs = [
   ['decisions', sq.decisions, pg.decisions],
   ['kill_switches', sq.killSwitches, pg.killSwitches],
   ['run_diffs', sq.runDiffs, pg.runDiffs],
+  // M04 Phase 2 — team_invites (2026-05-11). Postgres-only at runtime
+  // but dual-dialect for structural parity (see schema header comments).
+  ['team_invites', sq.teamInvites, pg.teamInvites],
+  // Phase F.1 — features (2026-05-11). Both dialects hold rows:
+  // solo writes to local SQLite from filesystem walks; team mode keeps
+  // both in sync via the sync-daemon's syncFeatures dispatch.
+  ['features', sq.features, pg.features],
 ] as const;
 
 /** Columns whose dialect-specific type difference is architecturally intentional. */
@@ -61,8 +68,8 @@ function columnsOf(table: unknown): Record<string, Column> {
   return getTableColumns(table as Parameters<typeof getTableColumns>[0]) as Record<string, Column>;
 }
 
-describe('twelve-table schema is present in both dialects', () => {
-  it('SQLite exports all twelve tables', () => {
+describe('fourteen-table schema is present in both dialects', () => {
+  it('SQLite exports all fourteen tables', () => {
     expect(sq.projects).toBeDefined();
     expect(sq.runs).toBeDefined();
     expect(sq.runEvents).toBeDefined();
@@ -75,9 +82,11 @@ describe('twelve-table schema is present in both dialects', () => {
     expect(sq.decisions).toBeDefined();
     expect(sq.killSwitches).toBeDefined();
     expect(sq.runDiffs).toBeDefined();
+    expect(sq.teamInvites).toBeDefined();
+    expect(sq.features).toBeDefined();
   });
 
-  it('Postgres exports all twelve tables', () => {
+  it('Postgres exports all fourteen tables', () => {
     expect(pg.projects).toBeDefined();
     expect(pg.runs).toBeDefined();
     expect(pg.runEvents).toBeDefined();
@@ -90,6 +99,8 @@ describe('twelve-table schema is present in both dialects', () => {
     expect(pg.decisions).toBeDefined();
     expect(pg.killSwitches).toBeDefined();
     expect(pg.runDiffs).toBeDefined();
+    expect(pg.teamInvites).toBeDefined();
+    expect(pg.features).toBeDefined();
   });
 });
 

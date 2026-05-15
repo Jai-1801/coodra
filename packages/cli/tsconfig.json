@@ -5,8 +5,9 @@
     "outDir": "dist",
     "tsBuildInfoFile": ".tsbuildinfo",
     "composite": false,
-    "types": ["node"]
+    "types": ["node"],
+    "jsx": "react-jsx"
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["dist", "node_modules", "__tests__", "vitest.config.ts"]
 }

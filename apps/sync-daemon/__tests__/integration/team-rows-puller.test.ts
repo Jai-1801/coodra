@@ -78,6 +78,11 @@ let cloud: PostgresHandle;
       await cloud.raw.unsafe('DELETE FROM policy_decisions');
       await cloud.raw.unsafe('DELETE FROM decisions');
       await cloud.raw.unsafe('DELETE FROM context_packs');
+      // Phase F.1 — features rows must clear too; otherwise prior-test
+      // cloud rows leak into the next test's "cloud-empty" assertion.
+      await cloud.raw.unsafe('DELETE FROM features');
+      // Phase F.2 — same for feature_packs.
+      await cloud.raw.unsafe('DELETE FROM feature_packs');
       await cloud.raw.unsafe('DELETE FROM runs');
       await cloud.raw.unsafe(`DELETE FROM projects WHERE id <> '__global__'`);
     }
@@ -130,7 +135,7 @@ let cloud: PostgresHandle;
       createdByUserId: 'user_alice',
     });
 
-    const puller = createTeamRowsPuller({ localDb: local, cloudDb: cloud, intervalMs: 60_000 });
+    const puller = createTeamRowsPuller({ localDb: local, cloudDb: cloud, intervalMs: 60_000, skipInitialTick: true });
     try {
       // Trigger a single tick (initial tick fires on construction; await it).
       const summary = await puller.tickOnce();
@@ -172,12 +177,13 @@ let cloud: PostgresHandle;
       createdByUserId: 'user_alice',
     });
 
-    const puller = createTeamRowsPuller({ localDb: local, cloudDb: cloud, intervalMs: 60_000 });
+    const puller = createTeamRowsPuller({ localDb: local, cloudDb: cloud, intervalMs: 60_000, skipInitialTick: true });
     try {
       const first = await puller.tickOnce();
       expect(first.runs).toBeGreaterThanOrEqual(1);
 
       const second = await puller.tickOnce();
+      expect(second.projects).toBe(0);
       expect(second.runs).toBe(0);
       expect(second.decisions).toBe(0);
       expect(second.contextPacks).toBe(0);
@@ -187,14 +193,88 @@ let cloud: PostgresHandle;
     }
   });
 
-  it('returns zero summary when cloud has no new rows', async () => {
-    const puller = createTeamRowsPuller({ localDb: local, cloudDb: cloud, intervalMs: 60_000 });
+  it('pulls projects from cloud — fresh teammate machine inherits the org\'s project list', async () => {
+    // Simulate Bob's first sync. Cloud has a project Alice created;
+    // Bob's local has only the __global__ sentinel. Pre-fix the puller
+    // never pulled projects, so every subsequent runs/decisions row
+    // referencing that project hit a local FK violation forever.
+    await ensureProject(cloud, { slug: 'alice-project', orgId: 'org-acme', name: 'alice-project' });
+    const cloudProject = (
+      await cloud.db.select().from(postgresSchema.projects).where(eq(postgresSchema.projects.slug, 'alice-project'))
+    )[0];
+    if (cloudProject === undefined) throw new Error('seeded project vanished');
+
+    // Bob's local does NOT have this project — only __global__.
+    const beforeRows = local.raw.prepare('SELECT id FROM projects').all();
+    expect(beforeRows.map((r: any) => r.id)).toEqual(['__global__']);
+
+    // Seed a runs row that references the project so we can confirm the
+    // FK chain unblocks once projects pull lands.
+    await cloud.db.insert(postgresSchema.runs).values({
+      id: 'run_alice_seed',
+      projectId: cloudProject.id,
+      sessionId: 'sess_alice_seed',
+      agentType: 'claude_code',
+      mode: 'team',
+      status: 'completed',
+      createdByUserId: 'user_alice',
+    });
+
+    const puller = createTeamRowsPuller({ localDb: local, cloudDb: cloud, intervalMs: 60_000, skipInitialTick: true });
     try {
       const summary = await puller.tickOnce();
+      expect(summary.projects).toBeGreaterThanOrEqual(1);
+      expect(summary.runs).toBeGreaterThanOrEqual(1);
+
+      // Bob's local now has the project AND the run.
+      const localProject = local.raw
+        .prepare('SELECT id, slug, org_id FROM projects WHERE slug = ?')
+        .get('alice-project') as { id: string; slug: string; org_id: string } | undefined;
+      expect(localProject?.id).toBe(cloudProject.id);
+      expect(localProject?.org_id).toBe('org-acme');
+
+      const localRun = local.raw
+        .prepare('SELECT id, project_id FROM runs WHERE id = ?')
+        .get('run_alice_seed') as { id: string; project_id: string } | undefined;
+      expect(localRun?.project_id).toBe(cloudProject.id);
+    } finally {
+      await puller.stop();
+    }
+  });
+
+  it('skips __global__ + __solo__ rows when pulling projects', async () => {
+    // The __global__ sentinel exists everywhere — re-pulling it would
+    // break any local-side org-id customisation. Solo-mode projects
+    // (org_id = '__solo__') belong to nobody's team and would pollute.
+    // Both must be filtered out at pull time.
+    await cloud.raw.unsafe(`UPDATE projects SET org_id = '__global__' WHERE id = '__global__'`);
+    await ensureProject(cloud, { slug: 'orphan-solo-1', orgId: '__solo__', name: 'orphan-solo-1' });
+
+    const puller = createTeamRowsPuller({ localDb: local, cloudDb: cloud, intervalMs: 60_000, skipInitialTick: true });
+    try {
+      await puller.tickOnce();
+      const localOrphan = local.raw
+        .prepare('SELECT id FROM projects WHERE slug = ?')
+        .get('orphan-solo-1') as { id: string } | undefined;
+      expect(localOrphan).toBeUndefined();
+    } finally {
+      await puller.stop();
+    }
+  });
+
+  it('returns zero summary when cloud has no new rows', async () => {
+    const puller = createTeamRowsPuller({ localDb: local, cloudDb: cloud, intervalMs: 60_000, skipInitialTick: true });
+    try {
+      const summary = await puller.tickOnce();
+      expect(summary.projects).toBe(0);
       expect(summary.runs).toBe(0);
       expect(summary.decisions).toBe(0);
       expect(summary.contextPacks).toBe(0);
       expect(summary.runEvents).toBe(0);
+      // Phase F.1 — features field exists on the summary.
+      expect(summary.features).toBe(0);
+      // Phase F.2 — feature_packs pull integrated into the same tick.
+      expect(summary.featurePacks).toBe(0);
     } finally {
       await puller.stop();
     }

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-db';
+import { type DbHandle, postgresSchema, scheduleDurableWrite, sqliteSchema } from '@coodra/contextos-db';
 import { type Logger, ValidationError } from '@coodra/contextos-shared';
 import {
   contextPackFilename as sharedContextPackFilename,
@@ -347,6 +347,28 @@ export function createContextPackStore(deps: CreateContextPackStoreDeps): Contex
         metaJson,
         createdByUserId: writeOptions.createdByUserId ?? null,
       });
+
+      // M04 Phase 4: in team mode, enqueue a sync_to_cloud job so the
+      // sync-daemon pushes the context pack to cloud Postgres. Without
+      // this, the row only ever lives in local SQLite and teammates
+      // never see it via the team-rows-puller. Solo mode skips.
+      if (process.env.CONTEXTOS_MODE === 'team') {
+        try {
+          await scheduleDurableWrite(deps.db, {
+            queue: 'sync_to_cloud',
+            payload: { v: 1 as const, table: 'context_packs', lookup: { kind: 'id', value: id } },
+          });
+        } catch (err) {
+          log.warn(
+            {
+              event: 'context_pack_sync_enqueue_failed',
+              contextPackId: id,
+              err: err instanceof Error ? err.message : String(err),
+            },
+            'sync_to_cloud enqueue threw after context_pack insert — row will not reach cloud until next save',
+          );
+        }
+      }
 
       // Materialise FS view. Failure is non-fatal — DB is source of truth.
       let filePath: string | null = null;

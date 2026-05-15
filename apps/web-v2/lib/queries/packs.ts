@@ -1,6 +1,12 @@
+import 'server-only';
+
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
+
+import { postgresSchema, sqliteSchema } from '@coodra/contextos-db';
+
+import { createWebDb } from '@/lib/db';
 
 /**
  * `apps/web/lib/queries/packs.ts` — server-only filesystem scanner for
@@ -203,37 +209,243 @@ function buildRow(slug: string, dir: string): PackListRow {
   };
 }
 
-export function listPacks(cwd: string = process.cwd()): PackListRow[] {
-  const root = packsRoot(cwd);
-  if (!existsSync(root)) return [];
-  const out: PackListRow[] = [];
-  for (const entry of readdirSync(root)) {
-    const dir = join(root, entry);
+/**
+ * Phase F.6 — collect every registered project's cwd from the local
+ * SQLite. Used by `listPacks` to union packs across projects (Next.js
+ * runs from one dir, but the user has many projects) and by
+ * `getPack(slug)` to short-circuit straight to the slug's project cwd.
+ *
+ * Sentinel orgs (`__solo__` / `__global__`) ARE included — a solo
+ * developer's projects all live under `__solo__`. Team-mode rows
+ * have real Clerk org_ids and also get walked. The query filters
+ * sentinel SLUGS (`__global__`) so we don't try to read packs from
+ * the global sentinel row's cwd.
+ */
+function getRegisteredProjectCwds(): Map<string, string> {
+  try {
+    const handle = createWebDb();
+    const out = new Map<string, string>();
+    if (handle.kind === 'sqlite') {
+      const rows = handle.raw
+        .prepare("SELECT slug, cwd FROM projects WHERE cwd IS NOT NULL AND slug NOT LIKE '\\_\\_%' ESCAPE '\\'")
+        .all() as Array<{ slug: string; cwd: string }>;
+      for (const r of rows) {
+        if (typeof r.cwd === 'string' && r.cwd.length > 0) out.set(r.slug, r.cwd);
+      }
+    }
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * Phase F.6+ — synthesize a PackListRow from a cloud feature_packs row.
+ * Used when the FS has no copy yet (team-hosted web just wrote to cloud,
+ * sync-daemon hasn't materialized FS yet OR machine has no FS at all).
+ */
+function buildRowFromCloudJson(
+  slug: string,
+  contentJson: string | null,
+  parentSlug: string | null,
+  isActive: boolean,
+): PackListRow {
+  let hasSpec = false;
+  let hasImplementation = false;
+  let hasTechstack = false;
+  let hasMeta = false;
+  if (contentJson !== null) {
+    try {
+      const parsed = JSON.parse(contentJson) as Record<string, unknown>;
+      hasSpec = typeof parsed.spec === 'string' && (parsed.spec as string).length > 0;
+      hasImplementation = typeof parsed.implementation === 'string' && (parsed.implementation as string).length > 0;
+      hasTechstack = typeof parsed.techstack === 'string' && (parsed.techstack as string).length > 0;
+      hasMeta = parsed.meta !== undefined && parsed.meta !== null;
+    } catch {
+      // ignore
+    }
+  }
+  return {
+    slug,
+    dir: `(cloud) feature_packs.slug='${slug}'`,
+    parentSlug,
+    isActive,
+    hasMeta,
+    hasSpec,
+    hasImplementation,
+    hasTechstack,
+    fileCount: [hasMeta, hasSpec, hasImplementation, hasTechstack].filter(Boolean).length,
+    isTemplateStub: false,
+  };
+}
+
+/**
+ * Phase F.6+ — read cloud feature_packs (postgres or sqlite mirror)
+ * for completeness. Returns a Map of slug → row data, including null
+ * for unknown/missing fields. Used as the cross-mode fallback when
+ * FS-based scans miss a slug.
+ */
+async function readDbPackRows(): Promise<
+  Map<
+    string,
+    {
+      readonly contentJson: string | null;
+      readonly parentSlug: string | null;
+      readonly isActive: boolean;
+      readonly status: string;
+    }
+  >
+> {
+  const out = new Map<
+    string,
+    { contentJson: string | null; parentSlug: string | null; isActive: boolean; status: string }
+  >();
+  try {
+    const handle = createWebDb();
+    if (handle.kind === 'postgres') {
+      const rows = await handle.db
+        .select({
+          slug: postgresSchema.featurePacks.slug,
+          contentJson: postgresSchema.featurePacks.contentJson,
+          parentSlug: postgresSchema.featurePacks.parentSlug,
+          isActive: postgresSchema.featurePacks.isActive,
+          status: postgresSchema.featurePacks.status,
+        })
+        .from(postgresSchema.featurePacks)
+        .limit(500);
+      for (const r of rows) {
+        out.set(r.slug, {
+          contentJson: r.contentJson,
+          parentSlug: r.parentSlug,
+          isActive: r.isActive,
+          status: r.status,
+        });
+      }
+    } else {
+      const rows = await handle.db
+        .select({
+          slug: sqliteSchema.featurePacks.slug,
+          contentJson: sqliteSchema.featurePacks.contentJson,
+          parentSlug: sqliteSchema.featurePacks.parentSlug,
+          isActive: sqliteSchema.featurePacks.isActive,
+          status: sqliteSchema.featurePacks.status,
+        })
+        .from(sqliteSchema.featurePacks)
+        .limit(500);
+      for (const r of rows) {
+        out.set(r.slug, {
+          contentJson: r.contentJson,
+          parentSlug: r.parentSlug,
+          isActive: r.isActive,
+          status: r.status,
+        });
+      }
+    }
+  } catch {
+    // DB unreachable — fall through with empty map. FS path still works.
+  }
+  return out;
+}
+
+export async function listPacks(cwd: string = process.cwd()): Promise<PackListRow[]> {
+  // Phase F.6+ — union FS-scanned rows + DB rows. Dedupe by slug
+  // (DB row takes precedence if both exist; FS may be stale).
+  const seenDirs = new Set<string>();
+  const fsRows: PackListRow[] = [];
+
+  const addFromRoot = (root: string): void => {
+    if (!existsSync(root)) return;
+    let entries: string[];
+    try {
+      entries = readdirSync(root);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const dir = join(root, entry);
+      if (seenDirs.has(dir)) continue;
+      try {
+        if (!statSync(dir).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      seenDirs.add(dir);
+      fsRows.push(buildRow(entry, dir));
+    }
+  };
+
+  addFromRoot(packsRoot(cwd));
+  for (const projectCwd of getRegisteredProjectCwds().values()) {
+    addFromRoot(packsRoot(projectCwd));
+  }
+
+  // Cloud / DB rows: include any slug not present on disk.
+  const dbRows = await readDbPackRows();
+  const seenSlugs = new Set(fsRows.map((r) => r.slug));
+  for (const [slug, dbRow] of dbRows) {
+    if (seenSlugs.has(slug)) continue;
+    fsRows.push(buildRowFromCloudJson(slug, dbRow.contentJson, dbRow.parentSlug, dbRow.isActive));
+  }
+
+  return fsRows.sort((a, b) => a.slug.localeCompare(b.slug));
+}
+
+export async function getPack(slug: string, cwd: string = process.cwd()): Promise<PackDetail | null> {
+  // Phase F.6+ — FS lookup first (instant local feedback). Fall back
+  // to the DB layer (cloud Postgres in team-hosted, local SQLite
+  // mirror otherwise) when FS doesn't have the slug.
+  const projectCwds = getRegisteredProjectCwds();
+  const candidates: string[] = [];
+  const direct = projectCwds.get(slug);
+  if (direct !== undefined) candidates.push(packsRoot(direct));
+  for (const projectCwd of projectCwds.values()) {
+    const r = packsRoot(projectCwd);
+    if (!candidates.includes(r)) candidates.push(r);
+  }
+  const walkUp = packsRoot(cwd);
+  if (!candidates.includes(walkUp)) candidates.push(walkUp);
+
+  for (const root of candidates) {
+    const dir = join(root, slug);
+    if (!existsSync(dir)) continue;
     try {
       if (!statSync(dir).isDirectory()) continue;
     } catch {
       continue;
     }
-    out.push(buildRow(entry, dir));
+    const row = buildRow(slug, dir);
+    return {
+      ...row,
+      spec: readMaybe(join(dir, 'spec.md')),
+      implementation: readMaybe(join(dir, 'implementation.md')),
+      techstack: readMaybe(join(dir, 'techstack.md')),
+      metaRaw: readMaybe(join(dir, 'meta.json')),
+    };
   }
-  return out.sort((a, b) => a.slug.localeCompare(b.slug));
-}
 
-export function getPack(slug: string, cwd: string = process.cwd()): PackDetail | null {
-  const root = packsRoot(cwd);
-  const dir = join(root, slug);
-  if (!existsSync(dir)) return null;
-  try {
-    if (!statSync(dir).isDirectory()) return null;
-  } catch {
-    return null;
+  // FS miss — try DB layer. In team-hosted this is cloud Postgres
+  // (the only place the pack lives); in local-team it's the local
+  // SQLite mirror which the sync-daemon keeps current.
+  const dbRows = await readDbPackRows();
+  const dbRow = dbRows.get(slug);
+  if (dbRow === undefined) return null;
+  let spec: string | null = null;
+  let implementation: string | null = null;
+  let techstack: string | null = null;
+  let metaRaw: string | null = null;
+  if (dbRow.contentJson !== null) {
+    try {
+      const parsed = JSON.parse(dbRow.contentJson) as Record<string, unknown>;
+      spec = typeof parsed.spec === 'string' ? (parsed.spec as string) : null;
+      implementation = typeof parsed.implementation === 'string' ? (parsed.implementation as string) : null;
+      techstack = typeof parsed.techstack === 'string' ? (parsed.techstack as string) : null;
+      if (parsed.meta !== undefined && parsed.meta !== null) {
+        metaRaw = JSON.stringify(parsed.meta, null, 2);
+      }
+    } catch {
+      // malformed content_json — show as empty body but row still renders
+    }
   }
-  const row = buildRow(slug, dir);
-  return {
-    ...row,
-    spec: readMaybe(join(dir, 'spec.md')),
-    implementation: readMaybe(join(dir, 'implementation.md')),
-    techstack: readMaybe(join(dir, 'techstack.md')),
-    metaRaw: readMaybe(join(dir, 'meta.json')),
-  };
+  const listRow = buildRowFromCloudJson(slug, dbRow.contentJson, dbRow.parentSlug, dbRow.isActive);
+  return { ...listRow, spec, implementation, techstack, metaRaw };
 }

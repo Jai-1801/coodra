@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { Topbar } from '@/components/Topbar';
+import { resolveDeploymentMode } from '@/lib/deployment-mode';
 import { fmtRelative } from '@/lib/format';
 import { fetchPickerSnapshot } from '@/lib/queries/picker';
 
@@ -11,6 +12,10 @@ export default async function ProjectsHubPage() {
   const totalActive = snap.projects.reduce((acc, p) => acc + p.activeRuns, 0);
   const totalDenials = snap.projects.reduce((acc, p) => acc + p.denials24h, 0);
   const totalSwitches = snap.projects.reduce((acc, p) => acc + p.activeKillSwitches, 0);
+  // In team-hosted mode the "New project" button leads to /init which
+  // returns 404 (init is a local-laptop operation). Hide the button
+  // and replace the empty-state CTA with the CLI instruction.
+  const isTeamHosted = resolveDeploymentMode() === 'team-hosted';
 
   return (
     <>
@@ -23,9 +28,19 @@ export default async function ProjectsHubPage() {
               Every <em>project</em>, one shelf.
             </h1>
             <p className="head__lede">
-              Each card is a registered project under{' '}
-              <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink)' }}>~/.contextos</span>. Status dot reflects
-              last 24h: <span style={{ color: 'var(--warn)' }}>red</span> for denials,{' '}
+              {isTeamHosted ? (
+                <>
+                  Each card is a registered project from any teammate's local{' '}
+                  <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink)' }}>contextos init</span> — synced
+                  to your cloud Postgres.
+                </>
+              ) : (
+                <>
+                  Each card is a registered project under{' '}
+                  <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink)' }}>~/.contextos</span>.
+                </>
+              )}{' '}
+              Status dot reflects last 24h: <span style={{ color: 'var(--warn)' }}>red</span> for denials,{' '}
               <span style={{ color: 'var(--caution)' }}>amber</span> for active kill switches,{' '}
               <span style={{ color: 'var(--accent)' }}>green</span> for live runs.
             </p>
@@ -38,11 +53,13 @@ export default async function ProjectsHubPage() {
               <br />
               fetched · {fmtRelative(snap.fetchedAt)}
             </div>
-            <div className="head__actions">
-              <Link className="btn btn--accent" href="/init">
-                New project
-              </Link>
-            </div>
+            {isTeamHosted ? null : (
+              <div className="head__actions">
+                <Link className="btn btn--accent" href="/init">
+                  New project
+                </Link>
+              </div>
+            )}
           </div>
         </div>
 
@@ -51,12 +68,23 @@ export default async function ProjectsHubPage() {
             <strong>
               No projects <em>yet</em>.
             </strong>
-            Run <span style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>contextos init</span> in any repo —
-            or click{' '}
-            <Link href="/init" style={{ color: 'var(--accent)' }}>
-              New project
-            </Link>{' '}
-            above — to register one.
+            {isTeamHosted ? (
+              <>
+                {' '}Projects are registered by developers running{' '}
+                <span style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>contextos init</span> on their
+                local laptops. Once a teammate runs it against a repo and that repo's first agent session fires,
+                a project card appears here.
+              </>
+            ) : (
+              <>
+                {' '}Run <span style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>contextos init</span>{' '}
+                in any repo — or click{' '}
+                <Link href="/init" style={{ color: 'var(--accent)' }}>
+                  New project
+                </Link>{' '}
+                above — to register one.
+              </>
+            )}
           </div>
         ) : (
           <div className="pack-grid">

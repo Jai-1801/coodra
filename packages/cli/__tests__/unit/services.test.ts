@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveServices, SERVICES } from '../../src/lib/services.js';
 
 describe('SERVICES descriptor', () => {
-  it('declares mcp-server + hooks-bridge + sync-daemon (M04a S4)', () => {
+  it('declares mcp-server + hooks-bridge + sync-daemon + web (M04a S4 + W1 2026-05-13)', () => {
     const names = SERVICES.map((s) => s.name);
-    expect(names).toEqual(['mcp-server', 'hooks-bridge', 'sync-daemon']);
+    expect(names).toEqual(['mcp-server', 'hooks-bridge', 'sync-daemon', 'web']);
 
     const mcp = SERVICES.find((s) => s.name === 'mcp-server');
     if (mcp?.kind !== 'http') throw new Error('mcp-server should be http kind');
@@ -23,6 +23,13 @@ describe('SERVICES descriptor', () => {
     if (sync?.kind !== 'worker') throw new Error('sync-daemon should be worker kind');
     expect(sync.requiresTeamMode).toBe(true);
     expect(sync.relativeEntry).toBe('apps/sync-daemon/dist/index.js');
+
+    // Web Bundle W1 (2026-05-13) — Next.js standalone bundled inside the
+    // CLI tarball; runs in both modes; /api/healthz is the supervisor probe.
+    const web = SERVICES.find((s) => s.name === 'web');
+    if (web?.kind !== 'http') throw new Error('web should be http kind');
+    expect(web.defaultPort).toBe(3001);
+    expect(web.healthUrl(3001)).toBe('http://127.0.0.1:3001/api/healthz');
   });
 });
 

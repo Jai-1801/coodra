@@ -5,8 +5,6 @@ import { type DbMigrateIO, type DbMigrateOptions, runDbMigrateCommand } from './
 import { type DbRestoreIO, type DbRestoreOptions, runDbRestoreCommand } from './commands/db-restore.js';
 import { type DoctorIO, type DoctorOptions, runDoctorCommand } from './commands/doctor.js';
 import { type ExportIO, type ExportOptions, runExportCommand } from './commands/export.js';
-import { type InitIO, type InitOptions, runInitCommand } from './commands/init.js';
-import { type LogsIO, type LogsOptions, runLogsCommand } from './commands/logs.js';
 import {
   type FeatureAddOptions,
   type FeatureBaseOptions,
@@ -19,6 +17,18 @@ import {
   runFeatureRemoveCommand,
   runFeatureShowCommand,
 } from './commands/feature.js';
+import { type InitIO, type InitOptions, runInitCommand } from './commands/init.js';
+import { type InviteIO, type InviteOptions, runInviteCommand } from './commands/invite.js';
+import { type LoginIO, type LoginOptions, runLoginCommand } from './commands/login.js';
+import { type LogoutIO, type LogoutOptions, runLogoutCommand } from './commands/logout.js';
+import { type LogsIO, type LogsOptions, runLogsCommand } from './commands/logs.js';
+import {
+  type OrgIO,
+  type OrgStatusOptions,
+  type OrgSwitchOptions,
+  runOrgStatusCommand,
+  runOrgSwitchCommand,
+} from './commands/org.js';
 import {
   type PackDeleteOptions,
   type PackIO,
@@ -46,11 +56,15 @@ import {
   runPolicyShowCommand,
 } from './commands/policy.js';
 import {
+  type ProjectDemoteOptions,
   type ProjectIO,
   type ProjectListOptions,
+  type ProjectPromoteOptions,
   type ProjectResetOptions,
   type ProjectShowOptions,
+  runProjectDemoteCommand,
   runProjectListCommand,
+  runProjectPromoteCommand,
   runProjectResetCommand,
   runProjectShowCommand,
 } from './commands/project.js';
@@ -73,6 +87,9 @@ import {
   type TeamCommandIO,
   type TeamLoginOptions,
 } from './commands/team.js';
+import { runTeamInitCommand, type TeamInitOptions } from './commands/team-init.js';
+import { runTeamInstallCommand, type TeamInstallOptions } from './commands/team-install.js';
+import { runTeamJoinInviteCommand, type TeamJoinInviteIO, type TeamJoinInviteOptions } from './commands/team-join.js';
 import {
   runTeamJoinCommand,
   runTeamLeaveCommand,
@@ -117,12 +134,25 @@ interface BuildProgramOptions {
   readonly runTeamJoin?: (options: TeamJoinOptions, io?: TeamCommandIO) => Promise<unknown>;
   readonly runTeamLeave?: (options: TeamLeaveOptions, io?: TeamCommandIO) => Promise<unknown>;
   readonly runTeamSetup?: (options: TeamSetupOptions, io?: TeamCommandIO) => Promise<unknown>;
+  readonly runTeamInstall?: (options: TeamInstallOptions, io?: TeamCommandIO) => Promise<unknown>;
+  readonly runTeamInit?: (options: TeamInitOptions, io?: TeamCommandIO) => Promise<unknown>;
   readonly cloudMigrateIO?: CloudMigrateIO;
   readonly runCloudMigrate?: (options: CloudMigrateOptions, io?: CloudMigrateIO) => Promise<unknown>;
   readonly pauseIO?: PauseIO;
   readonly runPause?: (options: PauseOptions, io?: PauseIO) => Promise<unknown>;
   readonly resumeIO?: ResumeIO;
   readonly runResume?: (options: ResumeOptions, io?: ResumeIO) => Promise<unknown>;
+  readonly loginIO?: LoginIO;
+  readonly runLogin?: (options: LoginOptions, io?: LoginIO) => Promise<unknown>;
+  readonly logoutIO?: LogoutIO;
+  readonly runLogout?: (options: LogoutOptions, io?: LogoutIO) => Promise<unknown>;
+  readonly inviteIO?: InviteIO;
+  readonly runInvite?: (email: string, options: InviteOptions, io?: InviteIO) => Promise<unknown>;
+  readonly orgIO?: OrgIO;
+  readonly runOrgStatus?: (options: OrgStatusOptions, io?: OrgIO) => Promise<unknown>;
+  readonly runOrgSwitch?: (options: OrgSwitchOptions, io?: OrgIO) => Promise<unknown>;
+  readonly teamJoinInviteIO?: TeamJoinInviteIO;
+  readonly runTeamJoinInvite?: (options: TeamJoinInviteOptions, io?: TeamJoinInviteIO) => Promise<unknown>;
   readonly logsIO?: LogsIO;
   readonly runLogs?: (service: string, options: LogsOptions, io?: LogsIO) => Promise<unknown>;
   readonly dbMigrateIO?: DbMigrateIO;
@@ -153,6 +183,16 @@ interface BuildProgramOptions {
   readonly runProjectList?: (options: ProjectListOptions, io?: ProjectIO) => Promise<unknown>;
   readonly runProjectShow?: (identifier: string, options: ProjectShowOptions, io?: ProjectIO) => Promise<unknown>;
   readonly runProjectReset?: (identifier: string, options: ProjectResetOptions, io?: ProjectIO) => Promise<unknown>;
+  readonly runProjectPromote?: (
+    identifier: string | undefined,
+    options: ProjectPromoteOptions,
+    io?: ProjectIO,
+  ) => Promise<unknown>;
+  readonly runProjectDemote?: (
+    identifier: string | undefined,
+    options: ProjectDemoteOptions,
+    io?: ProjectIO,
+  ) => Promise<unknown>;
   readonly runIO?: RunIO;
   readonly runRunList?: (options: RunListOptions, io?: RunIO) => Promise<unknown>;
   readonly runRunShow?: (runId: string, options: RunShowOptions, io?: RunIO) => Promise<unknown>;
@@ -205,7 +245,15 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
       'Initialise ContextOS in the current project (writes ~/.contextos/, .mcp.json, .contextos.json, .env).',
     )
     .option('--project-slug <slug>', 'Project slug; derives from path.basename(cwd) when omitted.')
-    .option('--ide <ide>', 'IDE to wire ("claude", "cursor", "windsurf", or "all").')
+    .option('--ide <ide>', 'IDE to wire ("claude", "cursor", "windsurf", "codex", or "all").')
+    .option(
+      '--team',
+      'On a team-mode machine: register this project under the team org (syncs to cloud). Default on a team machine; skips the interactive prompt.',
+    )
+    .option(
+      '--solo',
+      'On a team-mode machine: register this project as local-only (never synced to the team), even though the machine is in team mode.',
+    )
     .option('--no-graphify', 'Skip the Graphify scan during Feature Pack seeding.')
     .option('--dry-run', 'Print what init would write without touching disk.')
     .option('--force', 'Overwrite existing files with the baseline (destructive — see spec §11 Decision 3).')
@@ -224,10 +272,7 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
         '"skip" leaves the disk untouched. Use "empty" when you plan to upload via the web app to avoid ' +
         'having to tick "force overwrite" on every upload.',
     )
-    .option(
-      '--no-feature-pack',
-      'Shorthand for --feature-pack=skip. Don\'t create docs/feature-packs/<slug>/ at all.',
-    )
+    .option('--no-feature-pack', "Shorthand for --feature-pack=skip. Don't create docs/feature-packs/<slug>/ at all.")
     .action(async (opts: InitOptions) => {
       await initRunner(opts, options.initIO);
     });
@@ -235,10 +280,15 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
   const startRunner = options.runStart ?? runStartCommand;
   program
     .command('start')
-    .description('Start MCP Server + Hooks Bridge (+ Sync Daemon in team mode) as background daemons.')
+    .description('Start MCP Server + Hooks Bridge + Web Dashboard (+ Sync Daemon in team mode) as background daemons.')
     .option('--no-mcp', 'Do not start the MCP server.')
     .option('--no-hooks', 'Do not start the Hooks Bridge.')
     .option('--no-sync', 'Do not start the Sync Daemon (team-mode only; ignored in solo mode).')
+    .option('--no-web', 'Do not start the Web Dashboard (Next.js standalone on :3001).')
+    .option(
+      '--tunnel',
+      'Spawn a Cloudflare quick-tunnel so the web is reachable cross-machine (requires `cloudflared` on PATH).',
+    )
     .option('--foreground', 'Run attached for debugging (does not register the daemon manager unit).')
     .action(async (opts: StartOptions) => {
       await startRunner(opts, options.startIO);
@@ -263,6 +313,99 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
       await statusRunner(opts, options.statusIO);
     });
 
+  // Phase G slice G.3 — top-level `contextos login` for browser-handoff auth.
+  // The `team login` subcommand is kept as a backward-compat alias.
+  const loginRunnerPhaseG = options.runLogin ?? runLoginCommand;
+  program
+    .command('login')
+    .description('Browser-handoff Clerk login. Writes ~/.contextos/clerk-token.json and switches mode to team.')
+    .option(
+      '--web-url <url>',
+      'Override the team-mode web URL (defaults to CONTEXTOS_WEB_URL or http://localhost:3001).',
+    )
+    .option('--no-open', 'Print the sign-in URL instead of opening a browser (useful in headless shells).')
+    .option('--timeout-ms <ms>', 'Override the browser-handoff timeout (default 300000 = 5 minutes).', (v) =>
+      Number.parseInt(v, 10),
+    )
+    .action(async (opts: { webUrl?: string; open?: boolean; timeoutMs?: number }) => {
+      const merged: LoginOptions = {
+        ...(opts.webUrl !== undefined ? { webUrl: opts.webUrl } : {}),
+        // Commander negates `--no-open` to `open: false`. We invert to noOpen.
+        ...(opts.open === false ? { noOpen: true } : {}),
+        ...(opts.timeoutMs !== undefined && Number.isInteger(opts.timeoutMs) ? { timeoutMs: opts.timeoutMs } : {}),
+      };
+      await loginRunnerPhaseG(merged, options.loginIO);
+    });
+
+  // Phase G slice G.10 — `contextos org` parent + status/switch.
+  const orgStatusRunner = options.runOrgStatus ?? runOrgStatusCommand;
+  const orgSwitchRunner = options.runOrgSwitch ?? runOrgSwitchCommand;
+  const orgCmd = program
+    .command('org')
+    .description('Multi-org user commands. Status + switch the active Clerk org bound to this laptop.');
+  orgCmd
+    .command('status')
+    .description('Print the active org (from clerk-token.json).')
+    .action(async () => {
+      await orgStatusRunner({}, options.orgIO);
+    });
+  orgCmd
+    .command('switch')
+    .argument('<orgSlug>', 'Slug of the target org. v1: informational; org picker opens in the browser.')
+    .description('Switch the active org by re-running the browser login flow.')
+    .option('--no-open', 'Print the sign-in URL instead of opening a browser.')
+    .option('--timeout-ms <ms>', 'Override the browser-handoff timeout (default 300000).', (v) =>
+      Number.parseInt(v, 10),
+    )
+    .action(async (orgSlug: string, opts: { open?: boolean; timeoutMs?: number }) => {
+      const merged: OrgSwitchOptions = {
+        targetOrgSlug: orgSlug,
+        ...(opts.open === false ? { noOpen: true } : {}),
+        ...(opts.timeoutMs !== undefined && Number.isInteger(opts.timeoutMs) ? { timeoutMs: opts.timeoutMs } : {}),
+      };
+      await orgSwitchRunner(merged, options.orgIO);
+    });
+
+  // Phase G slice G.4 — top-level `contextos logout`.
+  const logoutRunnerPhaseG = options.runLogout ?? runLogoutCommand;
+  program
+    .command('logout')
+    .description('Log out of team mode. Deletes clerk-token.json, demotes config to solo, strips team env keys.')
+    .option('--force', 'Currently a no-op flag (logout is already idempotent).')
+    .action(async (opts: { force?: boolean }) => {
+      const merged: LogoutOptions = {
+        ...(opts.force === true ? { force: true } : {}),
+      };
+      await logoutRunnerPhaseG(merged, options.logoutIO);
+    });
+
+  // Phase H.5 — top-level `contextos invite <email>`. Mints a team
+  // invite from the CLI side, signed with CONTEXTOS_INVITE_HMAC_SECRET.
+  // Prints a single shareable URL — the teammate doesn't need a separate
+  // Clerk org-invitation email (Phase H.6 changes `/api/install` to
+  // auto-add them to the org at redeem time).
+  const inviteRunner = options.runInvite ?? runInviteCommand;
+  program
+    .command('invite')
+    .description('Mint a team invite from the CLI. Prints a single shareable /install/<token> URL.')
+    .argument('<email>', "Teammate's email address.")
+    .option('--role <role>', 'admin | member | viewer (default: member)')
+    .option('--expires-in-days <n>', '1-30 (default: 7)', (v) => Number.parseInt(v, 10))
+    .option(
+      '--web-url <url>',
+      'Override the deployment URL the invite points at (default: $CONTEXTOS_PUBLIC_URL or http://localhost:3001).',
+    )
+    .action(async (email: string, opts: { role?: string; expiresInDays?: number; webUrl?: string }) => {
+      const merged: InviteOptions = {
+        ...(typeof opts.role === 'string' ? { role: opts.role } : {}),
+        ...(typeof opts.expiresInDays === 'number' && Number.isInteger(opts.expiresInDays)
+          ? { expiresInDays: opts.expiresInDays }
+          : {}),
+        ...(typeof opts.webUrl === 'string' ? { webUrl: opts.webUrl } : {}),
+      };
+      await inviteRunner(email, merged, options.inviteIO);
+    });
+
   const doctorRunner = options.runDoctor ?? runDoctorCommand;
   program
     .command('doctor')
@@ -273,6 +416,11 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     .option('--json', 'Emit structured JSON instead of human-readable text.')
     .option('--timeout-ms <ms>', 'Per-check timeout in milliseconds (default 2000).')
     .option('--full', 'Run every check in the registry, not just the essentials (dec_83ba10c1, 2026-05-02).')
+    .option(
+      '--fix',
+      'After running checks, repair safe drift conditions: strip stale CONTEXTOS_MODE lines ' +
+        "from every registered project's `.env` file (Phase A, clarity-pass-plan 2026-05-11). Idempotent.",
+    )
     .action(async (opts: DoctorOptions) => {
       await doctorRunner(opts, options.doctorIO);
     });
@@ -424,6 +572,29 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     .action(async (identifier: string, opts: ProjectResetOptions) => {
       await projectResetRunner(identifier, opts, options.projectIO);
     });
+  // W5 / beta.5 — promote a solo project to the caller's verified Clerk org.
+  const projectPromoteRunner = options.runProjectPromote ?? runProjectPromoteCommand;
+  project
+    .command('promote [identifier]')
+    .description(
+      'Promote a project from solo (__solo__) to your verified Clerk org so it syncs to cloud. Resolves [identifier] (slug or id), or <cwd>/.contextos.json when omitted. Use this when `contextos init` ran before `contextos team init` + `contextos login`.',
+    )
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (identifier: string | undefined, opts: ProjectPromoteOptions) => {
+      await projectPromoteRunner(identifier, opts, options.projectIO);
+    });
+  // W6 / beta.6 — demote a team project back to solo, but ONLY when it
+  // has not yet synced (cloud-gated, refuses otherwise — see handler).
+  const projectDemoteRunner = options.runProjectDemote ?? runProjectDemoteCommand;
+  project
+    .command('demote [identifier]')
+    .description(
+      'Demote a project from your team org back to solo (local-only). SAFE-ONLY: refuses if the project has already synced to cloud (split-brain risk) — it only works in the window before any data left this machine. Resolves [identifier] (slug or id) or <cwd>/.contextos.json.',
+    )
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (identifier: string | undefined, opts: ProjectDemoteOptions) => {
+      await projectDemoteRunner(identifier, opts, options.projectIO);
+    });
 
   // Module 08b S12 — read-only export <runId> --format markdown|json|html|slack.
   const exportRunner = options.runExport ?? runExportCommand;
@@ -544,7 +715,10 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     .description(
       'Scaffold a new feature at docs/features/<slug>/feature.md with frontmatter + body template. Auto-runs `feature index` on success.',
     )
-    .option('--description <text>', 'Trigger description for the new feature (the "Use this when..." sentence the agent reads).')
+    .option(
+      '--description <text>',
+      'Trigger description for the new feature (the "Use this when..." sentence the agent reads).',
+    )
     .option('--maturity <level>', 'Initial maturity tag: draft (default) | beta | stable | deprecated.')
     .option('--force', 'Overwrite an existing feature.md.')
     .option('--cwd <dir>', 'Override the project root (defaults to process.cwd()).')
@@ -670,7 +844,7 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
   program
     .command('logs <service>')
     .description(
-      'Tail or print recent lines from ~/.contextos/logs/<service>.log. Pure file-read; no DB. Service ∈ {mcp-server, hooks-bridge, sync-daemon}.',
+      'Tail or print recent lines from ~/.contextos/logs/<service>.log. Pure file-read; no DB. Service ∈ {mcp-server, hooks-bridge, sync-daemon, web}.',
     )
     .option('--follow', 'Keep streaming new lines as they arrive (Ctrl-C to exit).')
     .option('--lines <N>', 'Print the last N lines (default 100; max 1,000,000).')
@@ -720,28 +894,27 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     .command('team')
     .description('Team-mode commands. Bodies land when team mode is reachable end-to-end (post-Module 04).');
 
-  const loginRunner = options.runTeamLogin ?? runTeamLoginCommand;
+  // Phase G — `team login` is a backward-compat alias for `contextos login`.
+  // The legacy `[token]` argument and `--server` flag are accepted but
+  // ignored; the new flow captures the token via browser handoff.
   team
     .command('login')
-    .argument('[token]', 'Invite token from the team admin.')
-    .option('--server <url>', 'Override the team-mode server URL.')
-    .description('Log in to a team (writes ~/.contextos/config.json with LOCAL_HOOK_SECRET). Stub in 08a.')
-    .action(async (token: string | undefined, opts: { server?: string }) => {
-      const merged: TeamLoginOptions = {
-        ...(token !== undefined ? { token } : {}),
-        ...(opts.server !== undefined ? { server: opts.server } : {}),
+    .argument('[token]', '[deprecated] ignored — Phase G captures the token via browser handoff.')
+    .option('--server <url>', '[deprecated] use --web-url on `contextos login` instead.')
+    .description('[alias for `contextos login`] Browser-handoff Clerk login.')
+    .action(async (_token: string | undefined, opts: { server?: string }) => {
+      const merged: LoginOptions = {
+        ...(opts.server !== undefined ? { webUrl: opts.server } : {}),
       };
-      await loginRunner(merged, options.teamIO);
+      await loginRunnerPhaseG(merged, options.loginIO);
     });
 
-  const logoutRunner = options.runTeamLogout ?? runTeamLogoutCommand;
+  // Phase G — `team logout` is a backward-compat alias for `contextos logout`.
   team
     .command('logout')
-    .description(
-      'Log out of the current team (rotates the local secret and clears ~/.contextos/config.json). Stub in 08a.',
-    )
+    .description('[alias for `contextos logout`] Log out of team mode.')
     .action(async () => {
-      await logoutRunner(options.teamIO);
+      await logoutRunnerPhaseG({}, options.logoutIO);
     });
 
   // Module 04 Phase 4 — three new team commands.
@@ -760,32 +933,108 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
       await migrateRunner(opts, options.teamIO);
     });
 
-  const joinRunner = options.runTeamJoin ?? runTeamJoinCommand;
+  // Phase G slice G.5 — `team join <invite-url>` is the canonical
+  // teammate onboarding command. Replaces the legacy flag-driven flow.
+  // The legacy flag-driven flow lives at `team join-migrate` for users
+  // who already have credentials from a prior `team setup`.
+  const teamJoinInviteRunner = options.runTeamJoinInvite ?? runTeamJoinInviteCommand;
+  const legacyJoinRunner = options.runTeamJoin ?? runTeamJoinCommand;
   team
     .command('join')
-    .description('Join an existing team — writes ~/.contextos/config.json and seeds local from cloud.')
-    .option('--user-id <id>', 'Clerk user id (or env CONTEXTOS_TEAM_USER_ID).')
-    .option('--org-id <id>', 'Clerk org id (or env CONTEXTOS_TEAM_ORG_ID).')
-    .option('--org-slug <slug>', 'Optional Clerk org slug for display.')
-    .option('--secret <hex>', 'Local hook secret (or env CONTEXTOS_TEAM_HOOK_SECRET).')
-    .option('--database-url <url>', 'Cloud Postgres URL (or env DATABASE_URL).')
-    .action(async (opts: TeamJoinOptions) => {
-      await joinRunner(opts, options.teamIO);
+    .argument('[invite-url]', 'Phase G — invite URL from /settings/team. Browser-handoff flow.')
+    .description(
+      'Join an existing team via an invite URL. Performs browser-based Clerk sign-in, ' +
+        'verifies email matches the invite, fetches install bundle, and writes ~/.contextos/{config.json,.env,clerk-token.json}.',
+    )
+    // Legacy flag-driven flow (pre-Phase-G). Mutually exclusive with <invite-url>.
+    .option('--user-id <id>', '[legacy] Clerk user id (or env CONTEXTOS_TEAM_USER_ID).')
+    .option('--org-id <id>', '[legacy] Clerk org id (or env CONTEXTOS_TEAM_ORG_ID).')
+    .option('--org-slug <slug>', '[legacy] Optional Clerk org slug for display.')
+    .option('--secret <hex>', '[legacy] Local hook secret (or env CONTEXTOS_TEAM_HOOK_SECRET).')
+    .option('--database-url <url>', '[legacy] Cloud Postgres URL (or env DATABASE_URL).')
+    .option('--no-open', 'Print the sign-in URL instead of opening a browser (Phase G mode).')
+    .option('--timeout-ms <ms>', 'Override the browser-handoff timeout (default 300000).', (v) =>
+      Number.parseInt(v, 10),
+    )
+    .action(async (inviteUrl: string | undefined, opts: TeamJoinOptions & { open?: boolean; timeoutMs?: number }) => {
+      const hasInvite = inviteUrl !== undefined && inviteUrl.length > 0;
+      const hasLegacyFlags =
+        opts.userId !== undefined ||
+        opts.orgId !== undefined ||
+        opts.databaseUrl !== undefined ||
+        opts.secret !== undefined;
+      if (hasInvite) {
+        // Phase G — invite-URL flow
+        const merged: TeamJoinInviteOptions = {
+          inviteUrl,
+          ...(opts.open === false ? { noOpen: true } : {}),
+          ...(opts.timeoutMs !== undefined && Number.isInteger(opts.timeoutMs) ? { timeoutMs: opts.timeoutMs } : {}),
+        };
+        await teamJoinInviteRunner(merged, options.teamJoinInviteIO);
+      } else if (hasLegacyFlags) {
+        // Legacy flag-driven flow
+        await legacyJoinRunner(opts, options.teamIO);
+      } else {
+        // Neither — Phase G is the default. Surface the Phase G usage
+        // hint rather than the legacy flag-error.
+        await teamJoinInviteRunner({}, options.teamJoinInviteIO);
+      }
     });
 
   const leaveRunner = options.runTeamLeave ?? runTeamLeaveCommand;
   team
     .command('leave')
-    .description('Demote the local config back to solo mode (cloud data untouched).')
-    .option('--yes', 'Confirm the demotion.')
+    .description(
+      'Demote the local config back to solo mode (cloud data untouched). Prompts for ' +
+        'a typed confirmation (`leave <orgname>`) unless --yes is passed.',
+    )
+    .option('--yes', 'Skip the typed-confirmation prompt (for CI / automation).')
     .action(async (opts: TeamLeaveOptions) => {
       await leaveRunner(opts, options.teamIO);
     });
 
-  // Module 04 Phase 4 — admin bootstrap. Run ONCE per team after creating
-  // your own Supabase / Postgres project. Validates connectivity, installs
-  // pgvector, applies migrations, generates a local hook secret, prints
-  // credentials for teammates' `team join`.
+  // Phase B (clarity-pass-plan, 2026-05-11) — guided admin onboarding
+  // wizard. Replaces `team setup`'s six-flag interface with a three-
+  // step interactive flow (Postgres → Clerk → Local). The legacy
+  // `team setup` remains for CI / automation.
+  const teamInitRunner = options.runTeamInit ?? runTeamInitCommand;
+  team
+    .command('init')
+    .description(
+      'Guided team-mode bootstrap. Walks you through Postgres + Clerk + local config in three interactive ' +
+        'steps. Recommended starting point for first-time admin setup; prefer over `team setup` (which uses six ' +
+        'flags and is intended for CI).',
+    )
+    .option('--database-url <url>', 'Pre-fill DATABASE_URL (skips the Postgres prompt).')
+    .option('--clerk-secret-key <key>', 'Pre-fill Clerk Secret Key (skips the Clerk prompt).')
+    .option(
+      '--clerk-publishable-key <key>',
+      'Pre-fill Clerk Publishable Key (Phase H — required for JWT verification).',
+    )
+    .option('--org-id <id>', 'Pre-select the Clerk org (skips the org-picker prompt).')
+    .option('--skip-pgvector', 'Skip CREATE EXTENSION vector (use when role lacks privileges).')
+    .option('--yes-reinit', 'Skip the "already in team mode — re-init?" prompt (CI only).')
+    .option(
+      '--no-login',
+      'Phase H — skip chaining into the browser-based contextos login at the end. Use only for CI/tests; admin manually runs `contextos login` after.',
+    )
+    .action(async (opts: TeamInitOptions & { login?: boolean }) => {
+      // Commander negates `--no-login` into `login: false`. Translate
+      // to our internal `noLogin` flag.
+      const merged: TeamInitOptions = {
+        ...opts,
+        ...(opts.login === false ? { noLogin: true } : {}),
+      };
+      delete (merged as { login?: boolean }).login;
+      await teamInitRunner(merged, options.teamIO);
+    });
+
+  // Module 04 Phase 4 — admin bootstrap (legacy six-flag interface).
+  // Run ONCE per team after creating your own Supabase / Postgres
+  // project. Validates connectivity, installs pgvector, applies
+  // migrations, generates a local hook secret, prints credentials for
+  // teammates' `team join`. `team init` is the preferred interactive
+  // counterpart for first-time admin use.
   const setupRunner = options.runTeamSetup ?? runTeamSetupCommand;
   team
     .command('setup')
@@ -802,6 +1051,39 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     .option('--json', 'Print credentials as JSON instead of human-formatted prose.')
     .action(async (opts: TeamSetupOptions) => {
       await setupRunner(opts, options.teamIO);
+    });
+
+  // Module 04 Phase 2 — teammate-side counterpart to `team setup`.
+  // Redeems a signed bootstrap URL (`/api/install/<token>` on the
+  // admin's deployment) and writes ~/.contextos/config.json + .env.
+  // Single-use; one invocation consumes the token at the server.
+  const installRunner = options.runTeamInstall ?? runTeamInstallCommand;
+  team
+    .command('install')
+    .description(
+      'Join an existing team via a one-click invite. Provided by your admin from /settings/team. ' +
+        'Writes ~/.contextos/config.json + .env. Single-use — re-running on a new machine requires a fresh invite.',
+    )
+    .option('--bootstrap-url <url>', 'Signed bootstrap URL from the invite email or /install/<token> page.')
+    .option('--json', 'Print the result as JSON (suppresses human-formatted welcome message).')
+    .action(async (opts: TeamInstallOptions) => {
+      await installRunner(opts, options.teamIO);
+    });
+
+  // Interactive terminal UI — the tabbed terminal/commands/status app.
+  // Launched explicitly via `contextos ui`, or by `contextos` with no
+  // arguments at all (handled in `index.ts`, before commander parses,
+  // so the no-args path can branch on TTY without commander's default
+  // action turning the root program into a strict-arity command). The
+  // TUI module is behind a dynamic `import()` so React + Ink never load
+  // on the hot path of a one-shot command. Registered last so it lists
+  // last in `--help`.
+  program
+    .command('ui')
+    .description('Launch the interactive ContextOS terminal UI (tabs: terminal · commands · status).')
+    .action(async () => {
+      const { launchTui } = await import('./tui/index.js');
+      await launchTui();
     });
 
   return program;

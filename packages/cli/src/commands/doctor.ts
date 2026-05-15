@@ -1,8 +1,12 @@
-import pc from 'picocolors';
+import { listProjects } from '@coodra/contextos-db';
 import { buildCheckContext } from '../doctor/context.js';
 import { formatHuman, formatJson } from '../doctor/output.js';
 import { ALL_CHECKS, ESSENTIAL_CHECKS } from '../doctor/registry.js';
 import { exitCodeForReport, runChecks } from '../doctor/run.js';
+import { resolveContextosDataDb, resolveContextosHome } from '../lib/contextos-home.js';
+import { openLocalDb } from '../lib/open-local-db.js';
+import { scanProjectEnvForStaleMode, stripStaleModeFromProjectEnv } from '../lib/project-env-scan.js';
+import { checkGlyph, hintLine, paint, style } from '../ui/index.js';
 
 export interface DoctorOptions {
   readonly json?: boolean;
@@ -14,6 +18,26 @@ export interface DoctorOptions {
    * to debug / team-mode / outbox observability checks.
    */
   readonly full?: boolean;
+  /**
+   * After running checks, repair safe drift conditions. Currently:
+   * strip stale `CONTEXTOS_MODE` lines from every registered
+   * project's `.env` file (Phase A, clarity-pass-plan 2026-05-11).
+   *
+   * Idempotent — re-running on an already-clean machine reports
+   * "no drift detected" and exits 0. Touches `<projectCwd>/.env`
+   * only; never modifies `~/.contextos/.env` or `<cwd>/.contextos.json`.
+   */
+  readonly fix?: boolean;
+}
+
+interface FixReport {
+  readonly scanned: number;
+  readonly stripped: ReadonlyArray<{
+    readonly cwd: string;
+    readonly envPath: string;
+    readonly removedLines: readonly string[];
+  }>;
+  readonly skippedMissing: ReadonlyArray<string>;
 }
 
 export interface DoctorIO {
@@ -58,20 +82,121 @@ export async function runDoctorCommand(options: DoctorOptions = {}, io: DoctorIO
   const report = await runChecks(checks, ctx);
   const exit = exitCodeForReport(report);
 
+  let fixReport: FixReport | null = null;
+  if (options.fix === true) {
+    fixReport = await runFixPass();
+  }
+
   if (options.json === true) {
-    io.writeStdout(`${formatJson(report)}\n`);
+    const merged = fixReport === null ? report : { ...report, fix: fixReport };
+    io.writeStdout(`${formatJson(merged)}\n`);
   } else {
     io.writeStdout(`${formatHuman(report)}\n`);
     if (options.full !== true) {
       io.writeStdout(
-        `${pc.gray(`(${ESSENTIAL_CHECKS.length} essential checks shown. Run \`contextos doctor --full\` for the complete ${ALL_CHECKS.length}-check registry.)`)}\n`,
+        `${hintLine(`(${ESSENTIAL_CHECKS.length} essential checks shown. Run \`contextos doctor --full\` for the complete ${ALL_CHECKS.length}-check registry.)`)}\n`,
       );
     }
+    if (fixReport !== null) {
+      io.writeStdout(formatFixReportHuman(fixReport));
+    }
     if (exit === 2) {
-      io.writeStderr(`${pc.red('doctor: red findings present — fix the items above before continuing.')}\n`);
+      io.writeStderr(`${paint.crimson('doctor: red findings present — fix the items above before continuing.')}\n`);
     }
   }
   return io.exit(exit);
+}
+
+/**
+ * Phase A — `--fix` pass. Read-mostly: opens the local SQLite DB,
+ * iterates every registered project, scans `<cwd>/.env` for stale
+ * `CONTEXTOS_MODE` lines, and strips them. Idempotent — a project
+ * with no stale line contributes a clean entry; nothing is rewritten.
+ *
+ * Why scope this narrow: the project `.env` `CONTEXTOS_MODE` line is
+ * the single best-known drift condition (pre-Phase-A, it silently
+ * demoted team-mode machines to solo via `loadHomeEnv`; the Phase A
+ * carve-out neutralised the runtime effect but the stale line itself
+ * remains misleading documentation). Other drift conditions (e.g.
+ * mismatched LOCAL_HOOK_SECRET between config.json and home .env)
+ * are surfaced by check 36 as warnings but NOT auto-fixed by --fix —
+ * those require regenerating a secret which is a destructive
+ * operation that belongs in `team setup` / `team join` proper.
+ */
+async function runFixPass(): Promise<FixReport> {
+  const home = resolveContextosHome();
+  const dataDb = resolveContextosDataDb(home);
+  let handle: Awaited<ReturnType<typeof openLocalDb>>;
+  try {
+    handle = await openLocalDb(dataDb);
+  } catch {
+    // Data DB missing / unreadable — nothing to scan. Treat as clean.
+    return { scanned: 0, stripped: [], skippedMissing: [] };
+  }
+  try {
+    const projects = await listProjects(handle);
+    const stripped: Array<{ cwd: string; envPath: string; removedLines: readonly string[] }> = [];
+    const skippedMissing: string[] = [];
+    let scanned = 0;
+    for (const p of projects) {
+      if (p.cwd === null) continue; // pre-0010 rows have no cwd; skip silently
+      scanned += 1;
+      const scan = scanProjectEnvForStaleMode(p.cwd);
+      if (!scan.exists) {
+        // Most projects don't have a per-project .env at all — that's
+        // the clean state. Don't surface as drift.
+        continue;
+      }
+      if (scan.staleModeValue === null) {
+        // .env exists but has no CONTEXTOS_MODE line — clean.
+        continue;
+      }
+      const result = stripStaleModeFromProjectEnv(scan.envPath);
+      if (result.stripped) {
+        stripped.push({ cwd: p.cwd, envPath: scan.envPath, removedLines: result.removedLines });
+      } else {
+        // Shouldn't happen — staleModeValue!=null implies stripped.
+        // Surface as a skipped-missing for diagnostics.
+        skippedMissing.push(scan.envPath);
+      }
+    }
+    return { scanned, stripped, skippedMissing };
+  } finally {
+    handle.close();
+  }
+}
+
+function formatFixReportHuman(fix: FixReport): string {
+  const lines: string[] = [];
+  lines.push('');
+  lines.push(style.bold(paint.ink('--fix pass')));
+  if (fix.scanned === 0) {
+    lines.push(`  ${paint.inkFar('No registered projects with a recorded cwd — nothing to scan.')}`);
+    lines.push('');
+    return `${lines.join('\n')}\n`;
+  }
+  if (fix.stripped.length === 0) {
+    lines.push(`  ${checkGlyph('ok')} Scanned ${fix.scanned} project(s). No stale CONTEXTOS_MODE lines found.`);
+    lines.push('');
+    return `${lines.join('\n')}\n`;
+  }
+  lines.push(
+    `  ${paint.blue('✎')} Scanned ${fix.scanned} project(s); stripped stale CONTEXTOS_MODE from ${fix.stripped.length}:`,
+  );
+  for (const s of fix.stripped) {
+    lines.push(`    ${paint.inkFar('-')} ${paint.inkDim(s.envPath)}`);
+    for (const removed of s.removedLines) {
+      lines.push(`      ${paint.inkFar('removed:')} ${paint.inkFar(removed)}`);
+    }
+  }
+  if (fix.skippedMissing.length > 0) {
+    lines.push(
+      `  ${checkGlyph('warn')} ${fix.skippedMissing.length} file(s) reported drift but could not be rewritten:`,
+    );
+    for (const path of fix.skippedMissing) lines.push(`    ${paint.inkFar('-')} ${paint.inkDim(path)}`);
+  }
+  lines.push('');
+  return `${lines.join('\n')}\n`;
 }
 
 function parseTimeout(raw: string | undefined): number {

@@ -1,7 +1,9 @@
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 
 import { Topbar } from '@/components/Topbar';
 import { initProjectAction } from '@/lib/actions/init';
+import { resolveDeploymentMode } from '@/lib/deployment-mode';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,6 +35,11 @@ const IDE_OPTIONS: ReadonlyArray<{ readonly value: string; readonly label: strin
 ];
 
 export default async function InitWizardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  // /init writes ~/.contextos/, .mcp.json, scaffolds docs/feature-packs/
+  // on the local repo — none of which exist on a team-hosted deployment
+  // server. Hide the page so sidebar links / "New project" CTAs don't
+  // dead-end on a 500.
+  if (resolveDeploymentMode() === 'team-hosted') notFound();
   const sp = await searchParams;
 
   return (

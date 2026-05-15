@@ -147,7 +147,7 @@ describe('createSqliteDb + migrateSqlite on a file-backed DB', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('applies the generated migrations and creates the eleven-object logical schema', () => {
+  it('applies the generated migrations and creates the fifteen-object logical schema', () => {
     const handle = createSqliteDb({ path: dbPath });
     try {
       migrateSqlite(handle.db);
@@ -174,6 +174,10 @@ describe('createSqliteDb + migrateSqlite on a file-backed DB', () => {
         'context_packs_vec',
         'decisions',
         'feature_packs',
+        // Phase F.1 (2026-05-11) — pull-on-trigger skill recipes
+        // (Anthropic Skills pattern). Dual-dialect; sync-daemon
+        // round-trips file ↔ cloud in team mode.
+        'features',
         'kill_switches',
         'pending_jobs',
         'policies',
@@ -183,6 +187,10 @@ describe('createSqliteDb + migrateSqlite on a file-backed DB', () => {
         'run_diffs',
         'run_events',
         'runs',
+        // M04 Phase 2 (2026-05-11) — invitation rows for team-hosted
+        // mode. SQLite mirror exists for structural parity even though
+        // only cloud Postgres ever populates rows in practice.
+        'team_invites',
       ]);
     } finally {
       handle.close();
@@ -204,7 +212,8 @@ describe('createSqliteDb + migrateSqlite on a file-backed DB', () => {
                AND substr(name, 1, 18) <> 'context_packs_vec_'`,
         )
         .get() as { n: number };
-      expect(rows.n).toBe(13);
+      // 14 schema tables + context_packs_vec virtual table = 15.
+      expect(rows.n).toBe(15);
     } finally {
       first.close();
     }

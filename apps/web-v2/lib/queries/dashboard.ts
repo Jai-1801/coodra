@@ -82,7 +82,13 @@ export interface DashboardRun {
 
 export async function fetchDashboardSnapshot(): Promise<DashboardSnapshot> {
   const handle = createWebDb();
-  const mode = (process.env.CONTEXTOS_MODE === 'team' ? 'team' : 'solo') as 'solo' | 'team';
+  // Resolve mode from the deployment-mode helper (the only authority that
+  // also recognizes `CONTEXTOS_DEPLOYMENT=team-hosted`). Reading
+  // `process.env.CONTEXTOS_MODE` here would silently render the dashboard
+  // as solo on team-hosted deployments because that env var only ships
+  // in the local-team .env file.
+  const { resolveDeploymentMode } = await import('@/lib/deployment-mode');
+  const mode: 'solo' | 'team' = resolveDeploymentMode() === 'local-solo' ? 'solo' : 'team';
   const since = new Date(Date.now() - 24 * 3600 * 1000);
 
   const since7d = new Date(Date.now() - 7 * 24 * 3600 * 1000);
@@ -166,11 +172,16 @@ async function fetchDecisionCapture(handle: ReturnType<typeof createWebDb>, sinc
     .where(and(eq(r.status, 'completed'), gt(r.endedAt, since)));
   const totalCompletedRuns = Number(totalRows[0]?.n ?? 0);
 
+  // postgres-js refuses to bind a `Date` instance to a raw-sql query
+  // ("string argument must be of type string or Buffer"). Format the
+  // window cutoff as ISO before sending — Postgres parses ISO timestamps
+  // unambiguously and the index on runs.ended_at still matches.
+  const sinceIso = since.toISOString();
   const decRunRows = (await handle.db.execute(
     sql`SELECT COUNT(DISTINCT d.run_id) AS n
         FROM decisions d
         JOIN runs r ON r.id = d.run_id
-        WHERE r.status = 'completed' AND r.ended_at > ${since}`,
+        WHERE r.status = 'completed' AND r.ended_at > ${sinceIso}::timestamptz`,
   )) as unknown as Array<{ n: number }>;
   const runsWithDecision = Number(decRunRows[0]?.n ?? 0);
 

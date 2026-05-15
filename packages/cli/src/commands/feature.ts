@@ -1,6 +1,6 @@
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
 
 import {
   FEATURE_SLUG_RE,
@@ -11,9 +11,10 @@ import {
   renderFeatureMd,
   walkFeatures,
 } from '@coodra/contextos-shared/features';
-import pc from 'picocolors';
-
 import { EXIT_OK, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
+import { deleteFeatureFromDb, upsertFeatureInDb } from '../lib/feature-db.js';
+import { readTeamConfig } from '../lib/team-config.js';
+import { commandTitle, pc, terminalWidth } from '../ui/index.js';
 
 /**
  * `contextos feature {add|list|show|edit|index|remove}` — admin surface
@@ -122,7 +123,11 @@ function resolveProject(rawCwd: string | undefined, io: FeatureIO): ResolvedProj
 }
 
 function basenameSlug(cwd: string): string {
-  const base = cwd.split('/').filter((seg) => seg.length > 0).pop() ?? '';
+  const base =
+    cwd
+      .split('/')
+      .filter((seg) => seg.length > 0)
+      .pop() ?? '';
   return base
     .toLowerCase()
     .replace(/[^a-z0-9_-]+/g, '-')
@@ -176,24 +181,58 @@ export async function runFeatureAddCommand(
   }
 
   mkdirSync(dir, { recursive: true });
-  const description = options.description?.trim() && options.description.trim().length > 0 ? options.description.trim() : PLACEHOLDER_DESCRIPTION;
+  const description =
+    options.description?.trim() && options.description.trim().length > 0
+      ? options.description.trim()
+      : PLACEHOLDER_DESCRIPTION;
   const maturity = (options.maturity as 'draft' | 'beta' | 'stable' | 'deprecated' | undefined) ?? 'draft';
+  const body = scaffoldBody(slug);
   const rendered = renderFeatureMd({
     frontmatter: {
       name: slug,
       description,
       maturity,
     },
-    body: scaffoldBody(slug),
+    body,
   });
   writeFileSync(featureMdPath, rendered, 'utf8');
 
   // Auto-regenerate so INDEX is correct without a separate step.
   const indexResult = generateFeaturesIndex({ projectCwd: cwd, projectSlug });
 
+  // Phase F.1.c — mirror the feature into ~/.contextos/data.db so
+  // team mode can sync it via the sync-daemon. Solo mode keeps the
+  // row purely for the future web /features list to read off the
+  // same shape. The filesystem write above is the source of truth
+  // for authoring; the DB row is the distribution shape.
+  //
+  // The frontmatter we store is the literal YAML the user will see
+  // on disk (without the `---` fences), so the puller's filesystem
+  // writeback can render it back to identical bytes — keeping the
+  // checksum stable across the round-trip and preventing puller-vs-
+  // CLI anti-loops.
+  const storedFrontmatter = renderFrontmatterYamlOnly({ name: slug, description, maturity });
+  const dbResult = await upsertFeatureInDb({
+    projectSlug,
+    slug,
+    frontmatter: storedFrontmatter,
+    body,
+    status: 'published',
+  });
+
   if (options.json === true) {
     io.writeStdout(
-      `${JSON.stringify({ status: 'ok', slug, dir, indexEntries: indexResult.index.features.length }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          status: 'ok',
+          slug,
+          dir,
+          indexEntries: indexResult.index.features.length,
+          dbSync: dbResult.ok ? { created: dbResult.created, enqueued: dbResult.enqueued } : { error: dbResult.error },
+        },
+        null,
+        2,
+      )}\n`,
     );
   } else {
     io.writeStdout(`${pc.green('✓')} Created feature "${slug}" at ${featureMdPath}\n`);
@@ -205,8 +244,42 @@ export async function runFeatureAddCommand(
     io.writeStdout(
       `${pc.green('✓')} Index regenerated (${indexResult.index.features.length} feature${indexResult.index.features.length === 1 ? '' : 's'} total)\n`,
     );
+    if (dbResult.ok) {
+      if (dbResult.enqueued) {
+        io.writeStdout(`${pc.green('✓')} Queued for cloud sync (team mode) — teammates will pull within ~10s.\n`);
+      } else if (readTeamConfig().mode === 'team') {
+        io.writeStdout(`${pc.gray('·')} Local DB mirror updated (team-mode sync skipped — local-only project org).\n`);
+      } else {
+        io.writeStdout(`${pc.gray('·')} Local DB mirror updated (solo mode — no cloud sync).\n`);
+      }
+    } else {
+      io.writeStdout(`${pc.yellow('⚠')} Local DB mirror skipped: ${dbResult.howToFix}\n`);
+    }
   }
   return io.exit(EXIT_OK);
+}
+
+/**
+ * Phase F.1.c — render frontmatter as raw YAML body (no `---` fences).
+ * Mirrors `renderFeatureMd` shape but emits only the YAML block so we
+ * can store the literal authored YAML in the `features.frontmatter`
+ * column. The puller's filesystem writeback wraps this back in fences
+ * so the round-trip is lossless.
+ */
+function renderFrontmatterYamlOnly(fm: {
+  name: string;
+  description: string;
+  whenNotToUse?: string;
+  maturity?: 'draft' | 'beta' | 'stable' | 'deprecated';
+  owners?: ReadonlyArray<string>;
+  tags?: ReadonlyArray<string>;
+}): string {
+  // The canonical renderFeatureMd wraps in `---` fences + appends body.
+  // We strip both to get the pure YAML block.
+  const full = renderFeatureMd({ frontmatter: fm, body: '' });
+  // Strip opening `---\n`, trailing `---\n\n`, and any trailing newlines.
+  const stripped = full.replace(/^---\r?\n/, '').replace(/\r?\n---\r?\n*$/, '');
+  return stripped.trimEnd();
 }
 
 function scaffoldBody(slug: string): string {
@@ -268,6 +341,7 @@ export async function runFeatureListCommand(
     return io.exit(EXIT_OK);
   }
 
+  io.writeStdout(`${commandTitle('Features', projectSlug, { width: terminalWidth() })}\n`);
   if (rows.length === 0) {
     io.writeStdout(`No features yet. Run \`contextos feature add <name>\` to create one.\n`);
     io.writeStdout(`(Looked in ${featuresRoot(cwd)})\n`);
@@ -378,7 +452,41 @@ export async function runFeatureEditCommand(
     return io.exit(EXIT_USER_RECOVERABLE);
   }
   const indexResult = generateFeaturesIndex({ projectCwd: cwd, projectSlug });
-  io.writeStdout(`${pc.green('✓')} Index regenerated (${indexResult.index.features.length} feature${indexResult.index.features.length === 1 ? '' : 's'} total)\n`);
+
+  // Phase F.1.c — mirror the saved feature into local DB + enqueue
+  // sync. Same shape as `feature add` (see comment there). Uses the
+  // raw on-disk frontmatter YAML so the puller's filesystem writeback
+  // produces identical bytes and the checksum stays stable.
+  if (parsed.frontmatter !== null) {
+    const storedFrontmatter = renderFrontmatterYamlOnly({
+      name: parsed.frontmatter.name,
+      description: parsed.frontmatter.description,
+      ...(parsed.frontmatter.whenNotToUse !== undefined ? { whenNotToUse: parsed.frontmatter.whenNotToUse } : {}),
+      ...(parsed.frontmatter.maturity !== undefined ? { maturity: parsed.frontmatter.maturity } : {}),
+      ...(parsed.frontmatter.owners !== undefined ? { owners: parsed.frontmatter.owners } : {}),
+      ...(parsed.frontmatter.tags !== undefined ? { tags: parsed.frontmatter.tags } : {}),
+    });
+    const dbResult = await upsertFeatureInDb({
+      projectSlug,
+      slug,
+      frontmatter: storedFrontmatter,
+      body: parsed.body,
+      status: 'published',
+    });
+    if (dbResult.ok) {
+      if (dbResult.enqueued) {
+        io.writeStdout(`${pc.green('✓')} Queued for cloud sync (team mode) — teammates will pull within ~10s.\n`);
+      } else if (dbResult.created) {
+        io.writeStdout(`${pc.gray('·')} Local DB row created (no cloud sync — solo mode or local-only project).\n`);
+      }
+    } else {
+      io.writeStdout(`${pc.yellow('⚠')} Local DB sync skipped: ${dbResult.howToFix}\n`);
+    }
+  }
+
+  io.writeStdout(
+    `${pc.green('✓')} Index regenerated (${indexResult.index.features.length} feature${indexResult.index.features.length === 1 ? '' : 's'} total)\n`,
+  );
   return io.exit(EXIT_OK);
 }
 
@@ -448,9 +556,23 @@ export async function runFeatureRemoveCommand(
   }
   rmSync(dir, { recursive: true, force: true });
   const indexResult = generateFeaturesIndex({ projectCwd: cwd, projectSlug });
+
+  // Phase F.1.c — delete the local DB row too. The cloud row stays
+  // until F.3.c (audit table + cloud DELETE flow) ships; the web's
+  // upcoming /features list will surface "orphaned cloud row" markers
+  // for any cloud feature whose local SQLite mirror is absent.
+  const dbResult = deleteFeatureFromDb({ projectSlug, slug });
+
   io.writeStdout(
     `${pc.green('✓')} Removed feature "${slug}" (${dir}). Index regenerated (${indexResult.index.features.length} feature${indexResult.index.features.length === 1 ? '' : 's'} total).\n`,
   );
+  if (dbResult.ok) {
+    if (dbResult.deleted) {
+      io.writeStdout(`${pc.gray('·')} Local DB mirror row deleted.\n`);
+    }
+  } else {
+    io.writeStdout(`${pc.yellow('⚠')} Local DB delete skipped: ${dbResult.howToFix}\n`);
+  }
   return io.exit(EXIT_OK);
 }
 

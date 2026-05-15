@@ -233,12 +233,43 @@ export function createRunRecorder(deps: CreateRunRecorderDeps): RunRecorder {
         // lives only in local SQLite and every dependent FK push
         // (run_events, policy_decisions, decisions, context_packs)
         // fails forever against cloud Postgres.
+        recorderLogger.info(
+          {
+            event: 'implicit_session_open_completed',
+            sessionId: event.sessionId,
+            projectId: effectiveProjectId,
+            rowId,
+            mode,
+          },
+          'implicit session_open insertRun completed; team-mode sync enqueue next',
+        );
         if (mode === 'team') {
           try {
-            await scheduleDurableWrite(deps.db, {
+            // CRITICAL: insertRun uses ON CONFLICT(projectId, sessionId)
+            // DO NOTHING — when a runs row already exists for this
+            // (projectId, sessionId), the freshly-minted `rowId` was
+            // never inserted; the existing row keeps its old id. Using
+            // `kind: 'id'` here would point dispatch at a non-existent
+            // local row. Use `project_session` so dispatch resolves the
+            // canonical row regardless of which id ended up winning.
+            const result = await scheduleDurableWrite(deps.db, {
               queue: 'sync_to_cloud',
-              payload: { v: 1 as const, table: 'runs', lookup: { kind: 'id', value: rowId } },
+              payload: {
+                v: 1 as const,
+                table: 'runs',
+                lookup: { kind: 'project_session', projectId: effectiveProjectId, sessionId: event.sessionId },
+              },
             });
+            recorderLogger.info(
+              {
+                event: 'implicit_session_open_sync_enqueued',
+                sessionId: event.sessionId,
+                projectId: effectiveProjectId,
+                rowId,
+                jobId: result.id,
+              },
+              'sync_to_cloud runs job enqueued successfully',
+            );
           } catch (err) {
             recorderLogger.warn(
               {

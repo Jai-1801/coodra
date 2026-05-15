@@ -1,12 +1,11 @@
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-
-import pc from 'picocolors';
 import { EXIT_OK, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosHome } from '../lib/contextos-home.js';
 import { listAvailableTemplates } from '../lib/template-paths.js';
 import { loadTemplate, TemplateLoadError } from '../lib/templates/load-template.js';
+import { commandTitle, pc, terminalWidth } from '../ui/index.js';
 
 /**
  * `contextos template {list|install}` — admin surface for the
@@ -108,16 +107,19 @@ export async function runTemplateListCommand(options: TemplateListOptions, ioOve
   );
   if (json) {
     io.writeStdout(`${JSON.stringify({ ok: true, templates: enriched }, null, 2)}\n`);
-  } else if (enriched.length === 0) {
-    io.writeStdout(`${pc.dim('—')} no templates available.\n`);
   } else {
-    for (const t of enriched) {
-      const sourceTag = t.source === 'user' ? pc.cyan('user') : pc.dim('bundled');
-      io.writeStdout(`${pc.bold(t.name)} (${sourceTag}) v${t.version}\n`);
-      io.writeStdout(`  ${t.description}\n`);
-      if (t.languages.length > 0) io.writeStdout(`  languages: ${t.languages.join(', ')}\n`);
-      if (t.autoSections.length > 0) io.writeStdout(`  @auto sections: ${t.autoSections.join(', ')}\n`);
-      io.writeStdout(`  ${pc.dim(t.dir)}\n\n`);
+    io.writeStdout(`${commandTitle('Templates', `${enriched.length} available`, { width: terminalWidth() })}\n`);
+    if (enriched.length === 0) {
+      io.writeStdout(`${pc.dim('—')} no templates available.\n`);
+    } else {
+      for (const t of enriched) {
+        const sourceTag = t.source === 'user' ? pc.cyan('user') : pc.dim('bundled');
+        io.writeStdout(`${pc.bold(t.name)} (${sourceTag}) v${t.version}\n`);
+        io.writeStdout(`  ${t.description}\n`);
+        if (t.languages.length > 0) io.writeStdout(`  languages: ${t.languages.join(', ')}\n`);
+        if (t.autoSections.length > 0) io.writeStdout(`  @auto sections: ${t.autoSections.join(', ')}\n`);
+        io.writeStdout(`  ${pc.dim(t.dir)}\n\n`);
+      }
     }
   }
   io.exit(EXIT_OK);

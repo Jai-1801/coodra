@@ -1,5 +1,6 @@
 import { Topbar } from '@/components/Topbar';
 import { installTemplateFromPathAction } from '@/lib/actions/templates';
+import { resolveDeploymentMode } from '@/lib/deployment-mode';
 import { listTemplates } from '@/lib/queries/templates';
 
 export const dynamic = 'force-dynamic';
@@ -13,6 +14,12 @@ interface SearchParams {
 export default async function TemplatesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const templates = listTemplates();
+  // Templates are a CLI concept: each developer's CLI maintains
+  // `~/.contextos/templates/`. The "Install from path" form below
+  // would write to the SERVER's filesystem on a team-hosted deployment,
+  // which is the wrong machine. Hide the affordance in team-hosted and
+  // tell the admin to install templates locally on their own laptop.
+  const isTeamHosted = resolveDeploymentMode() === 'team-hosted';
 
   return (
     <>
@@ -127,42 +134,83 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
           </div>
         )}
 
-        {/* Install-from-path form */}
-        <div className="card" style={{ padding: 28, marginTop: 32 }}>
-          <div className="card__head">
-            <h2 className="card__title">
-              Install <em>from path</em>
-            </h2>
-            <span className="card__role">absolute path · template.json required</span>
-          </div>
-          <form action={installTemplateFromPathAction} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* projectSlug is required by the action schema but we don't carry one in v2's flat IA — pass __global__ */}
-            <input type="hidden" name="projectSlug" value="__global__" />
-            <Field label="Source path" name="source" placeholder="/Users/you/path/to/template-dir" required />
-            <Field label="Name override (optional)" name="name" placeholder="my-custom-template" />
-            <label
+        {/* Install-from-path form — local-only. In team-hosted the form
+            would write to the server's filesystem (wrong machine), so we
+            replace it with an explanatory panel pointing at the CLI. */}
+        {isTeamHosted ? (
+          <div className="card" style={{ padding: 28, marginTop: 32 }}>
+            <div className="card__head">
+              <h2 className="card__title">
+                Install a <em>template</em>
+              </h2>
+              <span className="card__role">local-cli operation</span>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--ink-dim)', lineHeight: 1.65 }}>
+              Templates live under{' '}
+              <code style={inlineMono}>~/.contextos/templates/</code> on each developer's laptop. To install
+              a custom template, run on your local terminal:
+            </p>
+            <pre
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
+                marginTop: 12,
+                padding: '14px 18px',
+                background: 'var(--bg)',
+                border: '1px solid var(--rule)',
                 fontFamily: 'var(--mono)',
-                fontSize: 11,
-                color: 'var(--ink-dim)',
-                letterSpacing: '0.04em',
+                fontSize: 12,
+                color: 'var(--ink)',
+                overflowX: 'auto',
               }}
             >
-              <input type="checkbox" name="force" />
-              Force overwrite if a user template with this name exists
-            </label>
-            <button type="submit" className="btn btn--accent" style={{ width: 'fit-content' }}>
-              Install template
-            </button>
-          </form>
-        </div>
+              contextos template install /Users/you/path/to/template-dir
+            </pre>
+          </div>
+        ) : (
+          <div className="card" style={{ padding: 28, marginTop: 32 }}>
+            <div className="card__head">
+              <h2 className="card__title">
+                Install <em>from path</em>
+              </h2>
+              <span className="card__role">absolute path · template.json required</span>
+            </div>
+            <form action={installTemplateFromPathAction} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* projectSlug is required by the action schema but we don't carry one in v2's flat IA — pass __global__ */}
+              <input type="hidden" name="projectSlug" value="__global__" />
+              <Field label="Source path" name="source" placeholder="/Users/you/path/to/template-dir" required />
+              <Field label="Name override (optional)" name="name" placeholder="my-custom-template" />
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  fontFamily: 'var(--mono)',
+                  fontSize: 11,
+                  color: 'var(--ink-dim)',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                <input type="checkbox" name="force" />
+                Force overwrite if a user template with this name exists
+              </label>
+              <button type="submit" className="btn btn--accent" style={{ width: 'fit-content' }}>
+                Install template
+              </button>
+            </form>
+          </div>
+        )}
       </section>
     </>
   );
 }
+
+const inlineMono: React.CSSProperties = {
+  fontFamily: 'var(--mono)',
+  fontSize: 11,
+  color: 'var(--accent)',
+  background: 'var(--bg)',
+  padding: '1px 6px',
+  border: '1px solid var(--rule)',
+};
 
 const tplStyle: React.CSSProperties = {
   background: 'var(--bg-2)',

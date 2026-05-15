@@ -1,6 +1,7 @@
 import { listAllActiveKillSwitches, postgresSchema, sqliteSchema } from '@coodra/contextos-db';
 import { and, count, desc, eq, gt, inArray } from 'drizzle-orm';
 
+import { tryGetActor } from '@/lib/auth';
 import { createWebDb } from '@/lib/db';
 
 /**
@@ -40,8 +41,31 @@ const SENTINEL_PROJECT_SLUGS: ReadonlySet<string> = new Set(['__global__']);
 export async function fetchPickerSnapshot(): Promise<PickerSnapshot> {
   const handle = createWebDb();
   const mode = (process.env.CONTEXTOS_MODE === 'team' ? 'team' : 'solo') as 'solo' | 'team';
+
+  // Phase-isolation fix (2026-05-11): scope project listings to the
+  // current actor's org_id so solo-era projects don't bleed into the
+  // team view (and vice-versa). Local SQLite holds rows from BOTH
+  // org-id contexts after a `team init` / `team leave` cycle — the
+  // query layer is where we filter.
+  //
+  // - local-solo: actor.orgId = '__solo__'  → only solo projects visible
+  // - local-team: actor.orgId = <team org>  → only team projects visible
+  // - team-hosted: actor.orgId from Clerk session → only that org's projects
+  //
+  // `tryGetActor` returns null only on team-hosted with no signed-in
+  // user (middleware should have redirected before this query runs).
+  // In that edge case we fall back to showing nothing — safer than
+  // leaking cross-org rows.
+  const actor = await tryGetActor();
+  const actorOrgId = actor?.orgId ?? null;
+  if (actorOrgId === null) {
+    return { projects: [], mode, fetchedAt: new Date().toISOString() };
+  }
+
   const allProjects = await selectAllProjects(handle);
-  const projects = allProjects.filter((p) => !SENTINEL_PROJECT_SLUGS.has(p.slug));
+  const projects = allProjects.filter(
+    (p) => !SENTINEL_PROJECT_SLUGS.has(p.slug) && p.orgId === actorOrgId,
+  );
   if (projects.length === 0) {
     return { projects: [], mode, fetchedAt: new Date().toISOString() };
   }

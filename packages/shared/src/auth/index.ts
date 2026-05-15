@@ -8,8 +8,20 @@ export {
   verifyLocalHookSecret,
 } from './auth.js';
 export {
+  deleteToken,
+  getClerkTokenPath,
+  hasStoredToken,
+  loadHomeEnvForVerify,
+  readVerifiedToken,
+  type StoredToken,
+  type TokenStoreOptions,
+  writeToken,
+} from './clerk-token-store.js';
+export {
   type Actor,
+  assertCanAuthorKnowledge,
   assertCanEdit,
+  assertCanEditKnowledge,
   assertCanResumeKillSwitch,
   hasRole,
   parseClerkRole,
@@ -19,3 +31,8 @@ export {
   SOLO_ACTOR,
 } from './roles.js';
 export type { AuthClient, AuthEnv, Identity } from './types.js';
+export {
+  clearVerifyClerkJwtCache,
+  type VerifiedClerkClaims,
+  verifyClerkJwtAndExtractClaims,
+} from './verify-clerk-jwt.js';

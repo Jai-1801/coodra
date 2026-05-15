@@ -4,6 +4,7 @@ import { cancelRun } from '@coodra/contextos-db';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
+import { assertActorRole } from '@/lib/action-guards';
 import { createWebDb } from '@/lib/db';
 
 /**
@@ -20,6 +21,7 @@ import { createWebDb } from '@/lib/db';
  */
 
 export async function cancelRunAction(formData: FormData): Promise<void> {
+  await assertActorRole('admin');
   const id = String(formData.get('id') ?? '');
   const returnTo = String(formData.get('returnTo') ?? '/runs');
   if (id.length === 0) {
@@ -48,6 +50,7 @@ export async function cancelRunAction(formData: FormData): Promise<void> {
  * field. Returns the count of rows flipped via `?cleared=N`.
  */
 export async function cancelAllInProgressRunsAction(formData: FormData): Promise<void> {
+  await assertActorRole('admin');
   const projectId = formData.get('projectId');
   const returnTo = String(formData.get('returnTo') ?? '/');
   const handle = createWebDb();

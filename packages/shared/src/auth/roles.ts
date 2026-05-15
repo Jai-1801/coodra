@@ -55,7 +55,15 @@ export interface Actor {
   readonly userId: string;
   readonly orgId: string;
   readonly role: Role;
-  readonly source: 'solo-bypass' | 'clerk' | 'local-hook';
+  /**
+   * Provenance of the identity. Per-source meaning:
+   *   - `solo-bypass`  — synthetic __solo__ user (no real identity)
+   *   - `clerk`        — verified Clerk session JWT (team-hosted web)
+   *   - `local-hook`   — local hook-secret-authenticated HTTP request
+   *   - `local-config` — read from ~/.contextos/config.json on this
+   *                      machine (per-developer local web pattern)
+   */
+  readonly source: 'solo-bypass' | 'clerk' | 'local-hook' | 'local-config';
 }
 
 export const SOLO_ACTOR: Actor = Object.freeze({
@@ -137,4 +145,61 @@ export function assertCanResumeKillSwitch(
   killSwitch: { readonly pausedByUserId?: string | null | undefined },
 ): void {
   assertCanEdit(actor, { createdByUserId: killSwitch.pausedByUserId ?? null }, { allowOwner: true });
+}
+
+/**
+ * Phase F.3 — knowledge-layer authoring gate. An actor may CREATE or
+ * EDIT (when also owner) a feature / feature_pack iff they are `admin`
+ * or `member`. Viewers are explicitly excluded — the viewer role is
+ * read-only by definition and authoring a draft would violate that
+ * contract regardless of subsequent publish gating.
+ *
+ * The `member` floor is intentional: features and feature packs ARE
+ * the team's shared knowledge — every team member should be able to
+ * contribute. The publish step (separately gated by ownership +
+ * admin override via `assertCanEditKnowledge`) is where review-style
+ * gates would normally land, but Phase F.3 ships with auto-publish
+ * for the member's own drafts (admin can demote / hide drafts but
+ * can't block them from existing).
+ *
+ * Throws ForbiddenError when the actor is `viewer`.
+ */
+export function assertCanAuthorKnowledge(actor: Actor): void {
+  if (hasRole(actor, 'member')) return;
+  throw new ForbiddenError(
+    `Requires role 'member' or higher to author features or feature packs; actor has '${actor.role}'.`,
+  );
+}
+
+/**
+ * Phase F.3 — knowledge-layer edit gate. Mirrors `assertCanEdit` with
+ * a knowledge-tailored rationale:
+ *
+ *   - admin       → can edit ANY feature / feature_pack
+ *   - member      → can edit OWN feature / feature_pack (createdByUserId
+ *                   matches actor.userId)
+ *   - viewer      → never
+ *   - null owner  → admin-only (unattributed rows have no ownership claim)
+ *
+ * Use this from web server actions that mutate `features` / `feature_packs`
+ * rows and from the MCP / sync-daemon layers that would expose a
+ * cross-user write surface in future iterations. The default
+ * `allowOwner: true` reflects "Phase F.3 RBAC table" defaults — opt
+ * back to admin-only by passing `{ allowOwner: false }` for surgical
+ * cases (e.g. delete operations that should require an admin).
+ */
+export function assertCanEditKnowledge(
+  actor: Actor,
+  resource: { readonly createdByUserId?: string | null | undefined },
+  opts: { readonly allowOwner?: boolean } = {},
+): void {
+  const allowOwner = opts.allowOwner ?? true;
+  if (hasRole(actor, 'admin')) return;
+  if (allowOwner && hasRole(actor, 'member')) {
+    const owner = resource.createdByUserId ?? null;
+    if (owner !== null && owner === actor.userId) return;
+  }
+  throw new ForbiddenError(
+    `Requires admin role${allowOwner ? ' or member-ownership' : ''} to edit this knowledge artifact; actor has '${actor.role}'.`,
+  );
 }

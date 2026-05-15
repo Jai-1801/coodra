@@ -1,24 +1,37 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { chmod, mkdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, resolve } from 'node:path';
-import { ensureDefaultPolicy, ensureGlobalProject, ensureProject, migrateSqlite } from '@coodra/contextos-db';
-import pc from 'picocolors';
+import { basename, join, resolve } from 'node:path';
+import {
+  createPostgresDb,
+  ensureDefaultPolicy,
+  ensureGlobalProject,
+  ensureProject,
+  migrateSqlite,
+  postgresSchema,
+} from '@coodra/contextos-db';
+import { readVerifiedToken } from '@coodra/contextos-shared/auth';
+import { eq } from 'drizzle-orm';
 import { EXIT_ENVIRONMENT_PROBLEM, EXIT_OK, EXIT_USER_ACTION_REQUIRED, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosHome, resolveContextosLogsDir, resolveContextosPidsDir } from '../lib/contextos-home.js';
 import { detectIDE, detectLanguages, detectProjectRoot } from '../lib/detect.js';
-import { loadHomeEnv } from '../lib/load-home-env.js';
 import { defaultClaudeSettingsPath, mergeClaudeSettings } from '../lib/init/claude-settings-merge.js';
+import { mergeCodexConfig } from '../lib/init/codex-merge.js';
 import { writeContextosJson } from '../lib/init/contextos-json.js';
 import { type BaselineEnv, mergeEnvFile } from '../lib/init/env-merge.js';
 import { seedFeaturePack } from '../lib/init/feature-pack-seed.js';
+import { mergeInstructionFile } from '../lib/init/instruction-files.js';
 import { buildContextosMcpEntry, mergeMcpJson } from '../lib/init/mcp-merge.js';
 import type { WriteOutcome } from '../lib/init/types.js';
+import { mergeWindsurfMcpConfig } from '../lib/init/windsurf-merge.js';
+import { loadHomeEnv } from '../lib/load-home-env.js';
 import { openLocalDb } from '../lib/open-local-db.js';
 import { bundledMigrationsDir, resolveRuntimeBinary } from '../lib/runtime-paths.js';
+import { readTeamConfig } from '../lib/team-config.js';
 import { listAvailableTemplates, resolveTemplatePath } from '../lib/template-paths.js';
 import { detectTemplate } from '../lib/templates/detect.js';
 import { loadTemplate, type TemplateDefinition, TemplateLoadError } from '../lib/templates/load-template.js';
+import { commandTitle, hintLine, okLine, pc, terminalWidth } from '../ui/index.js';
 
 export interface InitOptions {
   readonly projectSlug?: string;
@@ -65,6 +78,28 @@ export interface InitOptions {
    * `--no-feature-pack` (which maps to `skip` in the runner).
    */
   readonly featurePack?: string;
+  /**
+   * W6 / beta.6 (2026-05-14) — project org scope selection on a
+   * team-capable machine.
+   *
+   *   `--team` → register this project under the machine's Clerk org
+   *              (syncs to cloud, visible to teammates). Default on a
+   *              team machine.
+   *   `--solo` → register this project as local-only (`org_id=__solo__`,
+   *              never synced) even though the machine is in team mode.
+   *              Lets a team member keep private / scratch projects.
+   *
+   * Mutually exclusive. On a solo machine both are ignored (everything
+   * is solo). When neither is set on a team machine AND stdin is a TTY,
+   * `init` prompts; non-interactive callers default to `team` with a
+   * printed notice (preserves pre-beta.6 scripted behaviour).
+   *
+   * Test surface: `readPrompt` overrides stdin so unit tests drive the
+   * selection without a real terminal.
+   */
+  readonly solo?: boolean;
+  readonly team?: boolean;
+  readonly readPrompt?: (prompt: string) => Promise<string>;
 }
 
 export interface InitIO {
@@ -95,10 +130,31 @@ export interface InitReport {
   readonly dryRun: boolean;
 }
 
+/**
+ * W6 / beta.6 (2026-05-14) — terminal prompt used by `runInitCommand`
+ * to ask "team or solo project?" on a team-capable machine. Mirrors
+ * `team-init.ts::defaultReadPrompt`. Tests inject `options.readPrompt`.
+ */
+async function defaultInitReadPrompt(prompt: string): Promise<string> {
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await rl.question(prompt);
+  } finally {
+    rl.close();
+  }
+}
+
 export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEFAULT_INIT_IO): Promise<never> {
   const env = options.env ?? process.env;
   const dryRun = options.dryRun === true;
   const force = options.force === true;
+
+  // W6 / beta.6 — `--solo` / `--team` are mutually exclusive.
+  if (options.solo === true && options.team === true) {
+    io.writeStderr(`${pc.red('contextos init')}: --solo and --team are mutually exclusive — pass at most one.\n`);
+    return io.exit(EXIT_USER_RECOVERABLE);
+  }
 
   const cwd = resolve(options.cwd ?? process.cwd());
   const detection = await detectProjectRoot(cwd);
@@ -116,18 +172,95 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
     return io.exit(EXIT_USER_RECOVERABLE);
   }
 
+  io.writeStdout(
+    `${commandTitle('Initialise', `ContextOS · ${projectSlug}`, { width: terminalWidth(), indent: 0 })}\n`,
+  );
+
   const userHome = options.userHome ?? homedir();
   const languages = await detectLanguages(root);
   const ides = await detectIDE({ homeDir: userHome });
 
+  // Phase D (clarity-pass-plan, 2026-05-11) — surface the machine's
+  // mode in the first lines of `contextos init` output. Projects
+  // don't have a mode; machines do. A project inherits the machine's
+  // mode at init time and gets stamped with the team's org_id if the
+  // machine is in team mode. Making this explicit at init eliminates
+  // the "wait, am I solo or team?" surprise from later workflows.
+  const machineHome = resolveContextosHome({
+    ...(options.home !== undefined ? { override: options.home } : {}),
+    env,
+  });
+  const machineCfg = readTeamConfig({ homeOverride: machineHome });
+  const machineModeLabel = machineCfg.mode === 'team' ? pc.cyan('team') : pc.gray('solo');
+  const machineOrgSuffix =
+    machineCfg.mode === 'team' && machineCfg.team !== undefined
+      ? `  (org ${machineCfg.team.clerkOrgSlug ?? `${machineCfg.team.clerkOrgId.slice(0, 12)}…`})`
+      : '';
+  io.writeStdout(`${pc.bold('Machine mode')}: ${machineModeLabel}${machineOrgSuffix}\n`);
+
+  // W6 / beta.6 (2026-05-14) — project org-scope selection. The MACHINE
+  // has a mode (solo | team); each PROJECT independently chooses whether
+  // to register under the machine's team org (syncs to cloud, visible
+  // to teammates) or stay local-only (`org_id=__solo__`, never synced).
+  //
+  // Pre-beta.6 `init` silently inherited the machine mode — a team-mode
+  // laptop made *every* project a team project with no prompt, which
+  // surprised users who wanted a private scratch project. Now:
+  //   - solo machine          → always solo (no choice exists).
+  //   - team machine + --solo → solo project.
+  //   - team machine + --team → team project.
+  //   - team machine, neither flag, interactive TTY → prompt (default team).
+  //   - team machine, neither flag, non-interactive → team + notice
+  //     (preserves pre-beta.6 scripted behaviour).
+  let registerAsTeamProject = false;
+  if (machineCfg.mode === 'team') {
+    if (options.solo === true) {
+      registerAsTeamProject = false;
+      io.writeStdout(
+        `${pc.gray('·')} Project scope: ${pc.gray('solo')} (--solo) — local-only, never synced to the team.\n`,
+      );
+    } else if (options.team === true) {
+      registerAsTeamProject = true;
+      io.writeStdout(`${pc.green('✓')} Project scope: ${pc.cyan('team')} (--team) — syncs to the team org.\n`);
+    } else {
+      const readPrompt = options.readPrompt ?? defaultInitReadPrompt;
+      const interactive = options.readPrompt !== undefined || process.stdin.isTTY === true;
+      if (interactive) {
+        const orgLabel =
+          machineCfg.team !== undefined ? (machineCfg.team.clerkOrgSlug ?? machineCfg.team.clerkOrgId) : 'your team';
+        io.writeStdout(
+          `\n${pc.bold('Register this project as:')}\n` +
+            `  ${pc.cyan('[T]')} team  — syncs to org ${pc.cyan(orgLabel)}; teammates see its features/decisions/runs\n` +
+            `  ${pc.gray('[s]')} solo  — local-only on this machine; never synced\n`,
+        );
+        const answer = (await readPrompt(`  Choice [${pc.cyan('T')}/s]: `)).trim().toLowerCase();
+        registerAsTeamProject = answer !== 's' && answer !== 'solo';
+        io.writeStdout(
+          registerAsTeamProject
+            ? `${pc.green('✓')} Project scope: ${pc.cyan('team')}\n`
+            : `${pc.gray('·')} Project scope: ${pc.gray('solo')} — local-only.\n`,
+        );
+      } else {
+        registerAsTeamProject = true;
+        io.writeStdout(
+          `${pc.gray('·')} Project scope: ${pc.cyan('team')} (default; non-interactive). ` +
+            `Pass ${pc.cyan('--solo')} to keep a project local-only.\n`,
+        );
+      }
+    }
+  }
+
   io.writeStdout(`${pc.green('✓')} Detected project root: ${root}\n`);
+  if (detection.markers.includes('.git')) {
+    io.writeStdout(`${pc.green('✓')} Detected git repo at ${root}\n`);
+  }
   if (languages.length > 0) {
     io.writeStdout(`${pc.green('✓')} Detected languages: ${languages.join(', ')}\n`);
   }
   if (ides.length > 0) {
     io.writeStdout(`${pc.green('✓')} Detected IDEs: ${ides.join(', ')}\n`);
   } else {
-    io.writeStdout(`${pc.yellow('⚠')} No IDE config dir (~/.claude, ~/.cursor, ~/.windsurf) detected.\n`);
+    io.writeStdout(`${pc.yellow('⚠')} No IDE config dir (~/.claude, ~/.cursor, ~/.windsurf, ~/.codex) detected.\n`);
   }
 
   // Resolve and create ~/.contextos/{logs,pids} (data.db is created by openLocalDb).
@@ -136,6 +269,20 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
     env,
   });
   if (!dryRun) {
+    // First make sure the home root itself is 0700. `mkdir { mode }`
+    // only sets perms on directories it actually creates; if the
+    // operator pre-created `~/.contextos` (e.g. via `mkdir -p`), perms
+    // stay at the umask default (typically 0755) and doctor check 2
+    // flags it. Explicitly chmod brings it into compliance whether
+    // it's new or pre-existing. (Demo finding 2026-05-11.)
+    await mkdir(contextosHome, { recursive: true, mode: 0o700 });
+    try {
+      await chmod(contextosHome, 0o700);
+    } catch {
+      // chmod can fail on Windows or when the user lacks ownership.
+      // We don't escalate — doctor check 2 will surface a yellow with
+      // the actual remediation.
+    }
     await mkdir(resolveContextosLogsDir(contextosHome), { recursive: true, mode: 0o700 });
     await mkdir(resolveContextosPidsDir(contextosHome), { recursive: true, mode: 0o700 });
   }
@@ -174,11 +321,89 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
       // default to `__solo__` even after `team setup` set up the team
       // config, and the cloud-side `org_id` column would split the project
       // off from the rest of the org's data.
-      const teamOrgId = process.env.CONTEXTOS_MODE === 'team' ? process.env.CONTEXTOS_TEAM_ORG_ID : undefined;
+      //
+      // Phase H.2 — prefer the verified Clerk JWT mirror's orgId over the
+      // env var. The env var is overrideable by anything that can write
+      // `~/.contextos/.env`; the verified token mirror is bound to a
+      // valid Clerk signature. They should agree, but on disagreement
+      // the JWT mirror wins (it's the source of truth for who-is-acting).
+      //
+      // W6 / beta.6 — the team-org resolution is now gated on
+      // `registerAsTeamProject` (the solo/team choice made above). On a
+      // team machine where the user picked "solo" for THIS project,
+      // `teamOrgId` stays undefined → `ensureProject` defaults to
+      // `__solo__` → the project is local-only even though the machine
+      // is team mode.
+      let teamOrgId: string | undefined;
+      if (process.env.CONTEXTOS_MODE === 'team' && registerAsTeamProject) {
+        try {
+          const verified = await readVerifiedToken({ homeOverride: contextosHome });
+          if (verified !== null && verified.orgId.length > 0) {
+            teamOrgId = verified.orgId;
+          }
+        } catch {
+          // Verifier may fail at boot if CLERK_PUBLISHABLE_KEY isn't yet
+          // layered into process.env. Fall back to the env var.
+        }
+        if (teamOrgId === undefined) {
+          teamOrgId = process.env.CONTEXTOS_TEAM_ORG_ID;
+        }
+      }
+
+      // Team-mode slug-adoption (M04 Phase 4 / split-brain fix):
+      // when another teammate has already registered this slug, cloud
+      // Postgres has the canonical id. If we mint a fresh local UUID
+      // here, the daemon's first push hits a unique-on-slug FK
+      // violation and the row is stuck forever. Instead, query cloud
+      // for the slug; if found, adopt that id locally. ensureProject's
+      // existing `idOverride` arg handles the cloud-supplied id.
+      //
+      // W6 / beta.6 — also gated on `registerAsTeamProject`: a solo
+      // project on a team machine must NOT adopt a cloud id (it never
+      // syncs, so there's no split-brain to avoid, and adopting a
+      // team-canonical id for a local-only project is wrong).
+      let cloudIdHint: string | undefined;
+      const databaseUrl = process.env.DATABASE_URL;
+      if (
+        process.env.CONTEXTOS_MODE === 'team' &&
+        registerAsTeamProject &&
+        databaseUrl !== undefined &&
+        databaseUrl.length > 0
+      ) {
+        try {
+          const cloudHandle = createPostgresDb({ databaseUrl });
+          try {
+            const existing = await cloudHandle.db
+              .select({ id: postgresSchema.projects.id })
+              .from(postgresSchema.projects)
+              .where(eq(postgresSchema.projects.slug, projectSlug))
+              .limit(1);
+            if (existing[0] !== undefined) {
+              cloudIdHint = existing[0].id;
+              io.writeStdout(
+                `${pc.cyan('ℹ')} Cloud already has project '${projectSlug}' — adopting team-canonical id ${cloudIdHint}\n`,
+              );
+            }
+          } finally {
+            await cloudHandle.close();
+          }
+        } catch (err) {
+          // Cloud unreachable — proceed with a fresh local id and
+          // accept the risk of split-brain. Doctor will flag the FK
+          // failure once the daemon comes online.
+          io.writeStdout(
+            `${pc.yellow('⚠')} Could not query cloud for existing slug — proceeding with a fresh id ` +
+              `(if a teammate has already registered '${projectSlug}', re-run init once cloud is reachable). ` +
+              `Cause: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        }
+      }
+
       const projectResult = await ensureProject(handle, {
         slug: projectSlug,
         cwd: root,
         ...(teamOrgId !== undefined && teamOrgId.length > 0 ? { orgId: teamOrgId } : {}),
+        ...(cloudIdHint !== undefined ? { idOverride: cloudIdHint } : {}),
       });
       const policyResult = await ensureDefaultPolicy(handle, projectResult.id);
       io.writeStdout(
@@ -222,7 +447,24 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
   const migrationsDir =
     bundledMigrations !== null ? bundledMigrations.replace(/\/sqlite$/, '').replace(/\\sqlite$/, '') : null;
 
-  const localHookSecret = randomBytes(32).toString('hex');
+  // Phase F.6+ (2026-05-11) — reuse the daemon's LOCAL_HOOK_SECRET when
+  // it already exists in ~/.contextos/.env. Otherwise Claude Code reads
+  // the project-level secret (which init randomly generated) but the
+  // daemons read the home-level one, the secrets don't match, and every
+  // hook event 401s. Common symptom: "HTTP 401 from /v1/hooks/claude-code"
+  // in Claude Code's output.
+  //
+  // Resolution: try the daemon's existing secret first; fall back to a
+  // fresh random one only for the very first init on this machine.
+  let localHookSecret: string;
+  try {
+    const homeEnvPath = join(contextosHome, '.env');
+    const homeRaw = await readFile(homeEnvPath, 'utf8');
+    const match = homeRaw.match(/^LOCAL_HOOK_SECRET=(\S+)/m);
+    localHookSecret = match?.[1] ?? randomBytes(32).toString('hex');
+  } catch {
+    localHookSecret = randomBytes(32).toString('hex');
+  }
   const baselineEnv: BaselineEnv = {
     // Module 04 Phase 4 H6 — CONTEXTOS_MODE intentionally omitted. See
     // BaselineEnv type comment for the full reason. tldr: project .env
@@ -240,11 +482,30 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
   // Write/merge .contextos.json
   outcomes.push(await writeContextosJson({ cwd: root, projectSlug, force, dryRun }));
 
-  // Write/merge .mcp.json with the canonical contextos entry
+  // Write/merge .mcp.json with the canonical contextos entry. Pin
+  // CONTEXTOS_HOME so the Claude-Code-spawned MCP server reads/writes
+  // the same SQLite the bridge does — without this, MCP tool calls
+  // (record_decision, save_context_pack) land in the user's default
+  // ~/.contextos/data.db while the bridge writes to the project home.
+  // Phase F.6+ (2026-05-12) — pin team-mode + DATABASE_URL into the MCP
+  // child env so Claude Code's spawned MCP server enqueues sync_to_cloud
+  // jobs on record_decision / save_context_pack writes. Without this,
+  // the child defaults to solo because it inherits Claude's shell env
+  // (which doesn't auto-load ~/.contextos/.env). Result pre-fix: cloud
+  // Postgres stays empty for decisions/packs even though local SQLite
+  // has the rows — web /decisions and /context-packs render empty.
+  const machineDatabaseUrl =
+    machineCfg.mode === 'team' && machineCfg.team !== undefined ? process.env.DATABASE_URL : undefined;
   const mcpEntry = buildContextosMcpEntry({
     mcpServerBin,
     clerkSecretKey: baselineEnv.CLERK_SECRET_KEY,
     migrationsDir,
+    contextosHome,
+    mode: machineCfg.mode,
+    ...(typeof machineDatabaseUrl === 'string' && machineDatabaseUrl.length > 0
+      ? { databaseUrl: machineDatabaseUrl }
+      : {}),
+    localHookSecret,
   });
   outcomes.push(await mergeMcpJson({ cwd: root, entry: mcpEntry, force, dryRun }));
 
@@ -270,6 +531,10 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
     const claudeMerge = await mergeClaudeSettings({
       settingsPath: defaultClaudeSettingsPath(userHome),
       bridgePort: Number(baselineEnv.HOOKS_BRIDGE_PORT),
+      // Phase F.6+ — inline the literal secret so Claude Code's hook
+      // sends the correct X-Local-Hook-Secret header regardless of
+      // shell env state. See ClaudeSettingsMergeOptions docblock.
+      localHookSecret: localHookSecret,
       force,
       dryRun,
     });
@@ -278,6 +543,39 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
     io.writeStderr(
       `${pc.yellow('⚠')} Could not merge ~/.claude/settings.json hook entries: ${(err as Error).message}\n`,
     );
+  }
+
+  // beta.95 (Scope A) — Codex + Windsurf integration. Both are MCP
+  // clients: wire the same `mcpEntry` (built above for `.mcp.json`)
+  // into each agent's MCP config, and generate the per-agent
+  // instruction file (AGENTS.md / .windsurfrules) carrying the
+  // ContextOS trigger contract. Unlike Claude Code, Codex + Windsurf
+  // get no hooks in Scope A — the instruction file IS how the agent
+  // learns to call the `contextos__*` tools.
+  //
+  // Detection-gated: a `~/.codex` / `~/.windsurf` config dir must
+  // exist (detectIDE). A Claude-only machine's `init` output is
+  // byte-identical to pre-beta.95. Every writer is idempotent
+  // merge-don't-clobber and reversed by `contextos uninstall`.
+  if (ides.includes('codex')) {
+    try {
+      outcomes.push(await mergeCodexConfig({ cwd: root, entry: mcpEntry, force, dryRun }));
+      outcomes.push(
+        await mergeInstructionFile({ cwd: root, filename: 'AGENTS.md', projectSlug, dryRun }),
+      );
+    } catch (err) {
+      io.writeStderr(`${pc.yellow('⚠')} Could not wire Codex integration: ${(err as Error).message}\n`);
+    }
+  }
+  if (ides.includes('windsurf')) {
+    try {
+      outcomes.push(await mergeWindsurfMcpConfig({ entry: mcpEntry, force, dryRun, userHome }));
+      outcomes.push(
+        await mergeInstructionFile({ cwd: root, filename: '.windsurfrules', projectSlug, dryRun }),
+      );
+    } catch (err) {
+      io.writeStderr(`${pc.yellow('⚠')} Could not wire Windsurf integration: ${(err as Error).message}\n`);
+    }
   }
 
   // Module 08b S13: resolve --template (and --mode auto) to a
@@ -386,6 +684,7 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
   }
 
   io.writeStdout('\n');
+  io.writeStdout(`${pc.bold('Files written')}\n`);
   for (const outcome of outcomes) {
     const glyph = actionGlyph(outcome.action);
     const note = outcome.notes !== undefined ? pc.gray(` (${outcome.notes})`) : '';
@@ -393,10 +692,10 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
   }
 
   io.writeStdout('\n');
-  io.writeStdout(`${pc.green('ContextOS is ready')} (project '${projectSlug}').\n`);
-  io.writeStdout('  → Restart your IDE so it picks up .mcp.json.\n');
-  io.writeStdout('  → Run `contextos doctor` to verify the install.\n');
-  io.writeStdout('  → Run `contextos start` to launch the MCP server + Hooks Bridge daemons.\n');
+  io.writeStdout(`${okLine(`ContextOS is ready — project '${projectSlug}'.`)}\n`);
+  io.writeStdout(`${hintLine('  → Restart your IDE so it picks up .mcp.json.')}\n`);
+  io.writeStdout(`${hintLine('  → Run `contextos doctor` to verify the install.')}\n`);
+  io.writeStdout(`${hintLine('  → Run `contextos start` to launch the MCP server + Hooks Bridge daemons.')}\n`);
 
   if (dryRun) {
     io.writeStdout(`${pc.yellow('Note')}: --dry-run was set; no files were actually written.\n`);
@@ -447,10 +746,7 @@ function actionGlyph(action: string): string {
  * Anything else is a typo — warn and fall back to `'template'` so a
  * stale shell completion or fat-finger doesn't silently change behaviour.
  */
-function resolveFeaturePackMode(
-  raw: string | undefined,
-  io: InitIO,
-): 'template' | 'empty' | 'skip' {
+function resolveFeaturePackMode(raw: string | undefined, io: InitIO): 'template' | 'empty' | 'skip' {
   // Commander turns `--no-feature-pack` into a `false` boolean on the
   // options bag. The TypeScript type widens to string for callers that
   // pass a value, but at runtime we accept either.

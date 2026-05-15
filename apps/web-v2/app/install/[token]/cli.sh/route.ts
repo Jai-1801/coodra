@@ -1,0 +1,168 @@
+import { resolveIdentityMode } from '@/lib/deployment-mode';
+import { verifyInviteToken } from '@/lib/invite-token';
+import { resolveDeploymentBaseUrl } from '@/lib/public-url';
+
+/**
+ * `/install/[token]/cli.sh` — one-line installer.
+ *
+ * Returns a plain-text shell script (Content-Type: text/x-shellscript)
+ * meant to be piped into `sh` via:
+ *
+ *     curl -sSL https://contextos.acme.com/install/<token>/cli.sh | sh
+ *
+ * Per design open question H — for Phase 2 we ship via `npm i -g`
+ * (Node ≥ 22 required). A static-binary distribution path is a Phase 4
+ * decision. The script:
+ *
+ *   1. Detects Node ≥ 22; surfaces a clear "install Node first" message
+ *      if absent.
+ *   2. Runs `npm i -g @coodra/contextos-cli@latest`.
+ *   3. Runs `contextos team install --bootstrap-url <PUBLIC_URL>/api/install/<token>`
+ *      which redeems the token and writes `~/.contextos/config.json`
+ *      + `~/.contextos/.env`.
+ *   4. Prints the next step (`contextos init` in the project).
+ *
+ * Token validation happens here too — a malformed/expired token gets a
+ * shell script that simply `echo`s the remediation and exits. We never
+ * return the bundle from `cli.sh`; that's the redeem endpoint's job.
+ */
+
+export const dynamic = 'force-dynamic';
+
+interface RouteParams {
+  readonly params: Promise<{ readonly token: string }>;
+}
+
+function plainTextResponse(body: string, status = 200): Response {
+  return new Response(body, {
+    status,
+    headers: {
+      'Content-Type': 'text/x-shellscript; charset=utf-8',
+      // Disallow caching so a revoked invite can't be re-served from a CDN.
+      'Cache-Control': 'no-store, max-age=0',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
+function scriptForError(reason: string, howToFix: string): string {
+  // Shell-safe: avoid $ expansions. Escape ' and " conservatively.
+  const safeReason = reason.replace(/'/g, "'\\''");
+  const safeHow = howToFix.replace(/'/g, "'\\''");
+  return `#!/bin/sh
+echo ""
+echo "ContextOS install: invite cannot be used"
+echo "----------------------------------------"
+echo "reason   : ${safeReason}"
+echo "how to fix: ${safeHow}"
+echo ""
+exit 1
+`;
+}
+
+export async function GET(_request: Request, { params }: RouteParams): Promise<Response> {
+  // Phase G — install works in any team mode (laptop or cloud).
+  if (resolveIdentityMode() !== 'team') {
+    return plainTextResponse(
+      scriptForError(
+        'not_team_mode',
+        'This installer is only available on team-mode ContextOS deployments. Run `contextos team init` first.',
+      ),
+      404,
+    );
+  }
+  const { token } = await params;
+  const verification = verifyInviteToken(token, Math.floor(Date.now() / 1000));
+  if (!verification.ok) {
+    return plainTextResponse(scriptForError(verification.reason, verification.howToFix), 400);
+  }
+
+  const baseUrl = resolveDeploymentBaseUrl();
+  const inviteUrl = `${baseUrl}/install/${token}`;
+  // Phase H — npm dist-tag the installer should pull. Read from the
+  // deployment's process.env so admins running a pre-release can set
+  // CONTEXTOS_CLI_NPM_TAG=beta during the validation window, then
+  // remove the env var (or set to 'latest') once they promote
+  // `@beta` → `@latest`. Default 'latest' preserves the long-term
+  // contract: a user typing `npm i -g @coodra/contextos-cli` without
+  // a tag gets the same thing the installer fetches.
+  const npmTag = (() => {
+    const raw = process.env.CONTEXTOS_CLI_NPM_TAG;
+    if (typeof raw !== 'string' || raw.trim().length === 0) return 'latest';
+    // Defense: only allow [a-z0-9.-]+ to avoid shell-injection if the env
+    // is accidentally set to something funky.
+    if (!/^[a-z0-9.-]+$/i.test(raw.trim())) return 'latest';
+    return raw.trim();
+  })();
+  // Derive a friendly "name" from the email local-part so the welcome
+  // line reads as "Welcome Jane!" instead of "Welcome jane.doe@acme.com!".
+  // The exact rule: capitalize the first segment of the email up to the
+  // first `.` or `+` or `@`. If empty, fall back to "team member".
+  const emailLocal = verification.payload.email.split('@')[0] ?? '';
+  const firstSeg = emailLocal.split(/[.+]/)[0] ?? '';
+  const friendlyName =
+    firstSeg.length > 0 ? `${firstSeg.charAt(0).toUpperCase()}${firstSeg.slice(1)}` : 'team member';
+
+  // The script body. Kept deliberately readable so a paranoid teammate
+  // can `curl -sSL .../cli.sh` and inspect before piping to `sh`.
+  //
+  // Phase H.6 — uses `contextos team join <invite-url>` instead of the
+  // legacy `contextos team install --bootstrap-url`. `team join` opens
+  // the browser to /auth/cli-login which:
+  //   - Signs Jane in (Clerk hosted UI handles sign-up if she's new)
+  //   - Captures a verified Clerk JWT
+  //   - POSTs to /api/install/<token> which auto-adds her to the org
+  //     (Phase H drops the separate Clerk org-invite email entirely)
+  // Result: ONE link, ONE browser window, no env editing, no incognito.
+  const script = `#!/bin/sh
+set -e
+
+# ContextOS team installer — generated by ${baseUrl}
+# Invite for ${verification.payload.email} (role: ${verification.payload.role})
+# Single-use; sign-in URL: ${inviteUrl}
+
+echo ""
+echo "ContextOS · team installer"
+echo "──────────────────────────"
+echo "  email : ${verification.payload.email}"
+echo "  role  : ${verification.payload.role}"
+echo "  org   : ${verification.payload.org}"
+echo ""
+
+# --- preflight: require Node ≥ 22 ----------------------------------------
+if ! command -v node >/dev/null 2>&1; then
+  echo "Error: Node.js is not installed."
+  echo "ContextOS CLI ships as an npm package and requires Node ≥ 22."
+  echo "Install Node first: https://nodejs.org/en/download"
+  exit 1
+fi
+
+NODE_MAJOR=\`node -e "process.stdout.write(String(process.versions.node.split('.')[0]))"\`
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  echo "Error: Node $NODE_MAJOR detected; ContextOS requires Node ≥ 22."
+  echo "Upgrade: https://nodejs.org/en/download"
+  exit 1
+fi
+
+# --- install / update CLI -------------------------------------------------
+# The dist-tag below was resolved server-side at the time this script
+# was generated (controlled via the deployment's CONTEXTOS_CLI_NPM_TAG
+# env; defaults to 'latest').
+echo "→ installing @coodra/contextos-cli@${npmTag} globally …"
+npm install -g @coodra/contextos-cli@${npmTag}
+
+# --- browser sign-in + redeem invite + write config ----------------------
+echo "→ opening your browser to sign in and join the team …"
+contextos team join '${inviteUrl}'
+
+# --- start daemons --------------------------------------------------------
+echo "→ starting ContextOS daemons …"
+contextos start || true
+
+# --- final message --------------------------------------------------------
+echo ""
+echo "✓ Welcome ${friendlyName}! Try: contextos feature add my-first-thing"
+echo ""
+`;
+  return plainTextResponse(script);
+}

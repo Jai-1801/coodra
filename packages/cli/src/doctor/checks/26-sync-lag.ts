@@ -65,8 +65,18 @@ export const syncLagCheck: Check = {
 
       let cloudNewest: number | null = null;
       try {
-        const rows = await cloud.raw<Array<{ s: Date | null }>>`SELECT MAX(started_at) AS s FROM runs`;
-        cloudNewest = rows[0]?.s ? Math.floor(rows[0].s.getTime() / 1000) : null;
+        // postgres-js returns plain `timestamp` columns as Date objects,
+        // but a value wrapped in an aggregate (`MAX(started_at)`) loses
+        // the type-oid mapping and comes back as an ISO string. Coerce
+        // through `new Date(...)` so both shapes work — the pre-fix code
+        // called `.getTime()` directly and crashed with
+        // "rows[0].s.getTime is not a function" on the string path.
+        const rows = await cloud.raw<Array<{ s: Date | string | null }>>`SELECT MAX(started_at) AS s FROM runs`;
+        const rawS = rows[0]?.s;
+        if (rawS != null) {
+          const asDate = rawS instanceof Date ? rawS : new Date(rawS);
+          cloudNewest = Number.isNaN(asDate.getTime()) ? null : Math.floor(asDate.getTime() / 1000);
+        }
       } catch (err) {
         return { status: 'skipped', detail: `cloud query failed: ${(err as Error).message}` };
       }

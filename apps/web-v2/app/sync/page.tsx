@@ -1,5 +1,8 @@
+import { notFound } from 'next/navigation';
+
 import { Topbar } from '@/components/Topbar';
 import { retryQueueAction, retrySingleJobAction } from '@/lib/actions/sync';
+import { resolveDeploymentMode } from '@/lib/deployment-mode';
 import { fmtRelative } from '@/lib/format';
 import { fetchSyncSnapshot } from '@/lib/queries/sync';
 
@@ -13,6 +16,11 @@ interface SearchParams {
 }
 
 export default async function SyncPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  // /sync reads pending_jobs from local SQLite — that's the outbox the
+  // sync-daemon drains on the developer's laptop. On a team-hosted
+  // deployment server there's no local SQLite, so the page can't render
+  // anything meaningful. Hide.
+  if (resolveDeploymentMode() === 'team-hosted') notFound();
   const sp = await searchParams;
   const snap = await fetchSyncSnapshot();
   const totals = snap.queues.reduce(

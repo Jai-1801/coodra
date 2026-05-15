@@ -2,7 +2,7 @@ import { type DbHandle, postgresSchema, sqliteSchema } from '@coodra/contextos-d
 import { createLogger } from '@coodra/contextos-shared';
 import { and, eq, ne, sql } from 'drizzle-orm';
 import type { ToolContext } from '../../framework/tool-context.js';
-import { getActorIdentity } from '../../lib/actor-identity.js';
+import { requireActorIdentityForTeamMode } from '../../lib/actor-identity.js';
 import type { ContextPackWriteResult } from '../../lib/context-pack.js';
 import type { SaveContextPackInput, SaveContextPackOutput } from './schema.js';
 
@@ -106,14 +106,23 @@ export function createSaveContextPackHandler(deps: SaveContextPackHandlerDeps) {
       };
     }
 
-    // Module 05: explicit MCP-tool calls always carry source='agent'.
-    // The bridge's auto-pack path (auto-context-pack.ts) bypasses this
-    // tool and writes directly via the store with source='bridge_auto'.
-    //
-    // Module 04 Phase 4: stamp the active user's clerk id on the row so
-    // the web app's "saved by" badge attributes correctly. Solo mode +
-    // missing team-config returns null → column written as NULL.
-    const actor = getActorIdentity();
+    // Phase G slice G.6 — require Clerk-verified identity for team-
+    // mode writes. Solo mode short-circuits to actor=null (NULL stamp).
+    // Team mode + no verified token returns auth_required soft-failure
+    // so the agent can surface the remediation message to the user.
+    const auth = await requireActorIdentityForTeamMode();
+    if (auth.kind === 'auth_required') {
+      handlerLogger.info(
+        { event: 'save_context_pack_auth_required', runId: input.runId, sessionId: ctx.sessionId },
+        'save_context_pack: team mode but no verified Clerk JWT — returning auth_required soft-failure',
+      );
+      return {
+        ok: false,
+        error: 'auth_required',
+        howToFix: auth.howToFix,
+      };
+    }
+    const actor = auth.actor;
     const written = (await ctx.contextPack.write(
       {
         runId: input.runId,

@@ -1,14 +1,27 @@
-import pc from 'picocolors';
+import { join } from 'node:path';
 import { EXIT_OK, EXIT_SERVICE_STARTUP_FAILED, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
-import { resolveContextosHome } from '../lib/contextos-home.js';
+import { resolveContextosHome, resolveContextosLogsDir } from '../lib/contextos-home.js';
 import { selectDaemonManager } from '../lib/daemon/index.js';
+import { loadHomeEnv } from '../lib/load-home-env.js';
 import { type ResolvedService, resolveServices } from '../lib/services.js';
+import { detectCloudflared, startQuickTunnel, writeTunnelState, writeTunnelUrlToHomeEnv } from '../lib/tunnel.js';
 import { waitForHealth } from '../lib/wait-for-health.js';
+import { commandTitle, pc, terminalWidth } from '../ui/index.js';
 
 export interface StartOptions {
   readonly mcp?: boolean;
   readonly hooks?: boolean;
   readonly sync?: boolean;
+  /** W1 (2026-05-13) — `--no-web` flag opts out of the bundled Next.js standalone server. */
+  readonly web?: boolean;
+  /**
+   * W4 (2026-05-13) — `--tunnel` spawns a Cloudflare quick-tunnel that
+   * publishes the bundled web on a `https://*.trycloudflare.com` URL.
+   * Cross-machine teammates can then click the install link the admin
+   * shares. cloudflared must be on PATH; the start command degrades
+   * gracefully (warning + EXIT 0) when it isn't.
+   */
+  readonly tunnel?: boolean;
   readonly foreground?: boolean;
   readonly env?: NodeJS.ProcessEnv;
   readonly home?: string;
@@ -34,7 +47,7 @@ export const DEFAULT_START_IO: StartIO = {
 };
 
 export async function runStartCommand(options: StartOptions = {}, io: StartIO = DEFAULT_START_IO): Promise<never> {
-  const env = options.env ?? process.env;
+  const processEnv = options.env ?? process.env;
 
   if (options.foreground === true) {
     io.writeStderr(
@@ -44,10 +57,25 @@ export async function runStartCommand(options: StartOptions = {}, io: StartIO = 
     return io.exit(EXIT_USER_RECOVERABLE);
   }
 
+  io.writeStdout(`${commandTitle('Start', 'launch ContextOS daemons', { width: terminalWidth() })}\n`);
+
   const contextosHome = resolveContextosHome({
     ...(options.home !== undefined ? { override: options.home } : {}),
-    env,
+    env: processEnv,
   });
+
+  // Merge `~/.contextos/.env` (plus the project's `.env` if cwd is a
+  // registered project) under the parent shell's env so that service
+  // resolution sees CONTEXTOS_MODE=team / DATABASE_URL / LOCAL_HOOK_SECRET
+  // even when the operator didn't `source` the file before running
+  // `contextos start`. Without this merge the sync-daemon silently
+  // never launches in team mode — the team install flow writes
+  // CONTEXTOS_MODE=team to `~/.contextos/.env` but never to the shell,
+  // so a fresh terminal post-`team install` would only see solo. Process
+  // env wins on conflicts so operators can still pin overrides via
+  // `CONTEXTOS_MODE=solo contextos start` etc.
+  const homeEnvOverlay = loadHomeEnv(contextosHome);
+  const env: NodeJS.ProcessEnv = { ...homeEnvOverlay, ...processEnv };
 
   let resolved: ResolvedService[];
   try {
@@ -57,10 +85,37 @@ export async function runStartCommand(options: StartOptions = {}, io: StartIO = 
     return io.exit(EXIT_USER_RECOVERABLE);
   }
 
+  // W5 / beta.5 (2026-05-13) — team-mode env preflight. If
+  // CONTEXTOS_MODE=team but DATABASE_URL is missing/empty, the
+  // sync-daemon's Zod env validation throws on boot. systemd/launchd
+  // dutifully restart it, hit the restart rate-limiter after ~5 tries,
+  // and leave a permanently-failed unit + a log full of identical
+  // ValidationError stacks — with no signal to the operator about WHY.
+  //
+  // Catch it here: a missing DATABASE_URL in team mode means team
+  // setup never completed (e.g. `contextos team init` failed at the
+  // Postgres step, or only `contextos login` ran). Print one clear
+  // actionable line and SKIP the sync-daemon — the MCP server, Hooks
+  // Bridge, and Web still come up, so the machine is usable while the
+  // operator finishes team setup.
+  const teamMode = env.CONTEXTOS_MODE === 'team';
+  const databaseUrl = env.DATABASE_URL;
+  const teamSetupIncomplete = teamMode && (typeof databaseUrl !== 'string' || databaseUrl.trim().length === 0);
+  if (teamSetupIncomplete) {
+    io.writeStderr(
+      `${pc.yellow('⚠')} ${pc.bold('CONTEXTOS_MODE=team')} but ${pc.bold('DATABASE_URL')} is not set in ` +
+        `${pc.cyan('~/.contextos/.env')}.\n` +
+        `  Team setup is incomplete — the Sync Daemon needs a cloud Postgres URL.\n` +
+        `  Finish setup with ${pc.cyan('contextos team init')} (it writes DATABASE_URL + Clerk keys + local config).\n` +
+        `  ${pc.gray('Skipping the Sync Daemon for now; MCP server + Hooks Bridge + Web will still start.')}\n`,
+    );
+  }
+
   const skip = (name: string): boolean =>
     (name === 'mcp-server' && options.mcp === false) ||
     (name === 'hooks-bridge' && options.hooks === false) ||
-    (name === 'sync-daemon' && options.sync === false);
+    (name === 'sync-daemon' && (options.sync === false || teamSetupIncomplete)) ||
+    (name === 'web' && options.web === false);
 
   const manager = await selectDaemonManager({ contextosHome });
   io.writeStdout(`${pc.gray(`Using ${manager.kind} daemon manager.`)}\n`);
@@ -69,7 +124,11 @@ export async function runStartCommand(options: StartOptions = {}, io: StartIO = 
 
   for (const service of resolved) {
     if (skip(service.descriptor.name)) {
-      io.writeStdout(`${pc.gray('·')} Skipping ${service.descriptor.displayName} (--no-${service.descriptor.name}).\n`);
+      const reason =
+        service.descriptor.name === 'sync-daemon' && teamSetupIncomplete && options.sync !== false
+          ? 'team setup incomplete — see warning above'
+          : `--no-${service.descriptor.name}`;
+      io.writeStdout(`${pc.gray('·')} Skipping ${service.descriptor.displayName} (${reason}).\n`);
       continue;
     }
     try {
@@ -81,15 +140,20 @@ export async function runStartCommand(options: StartOptions = {}, io: StartIO = 
       continue;
     }
     if (service.descriptor.kind === 'http' && service.port !== null) {
+      // Phase H.7 — bump the default health-wait from 10s to 30s. The
+      // mcp-server's first cold boot under launchd consistently took
+      // 12-15s in the 2026-05-12 live test (CONTEXTOS_HOME resolution
+      // + SQLite init + tool registry load); a 10s window flagged
+      // healthy services as failed. 30s is the right floor.
       const healthy = await waitForHealth({
         url: service.descriptor.healthUrl(service.port),
-        timeoutMs: options.waitTimeoutMs ?? 10_000,
+        timeoutMs: options.waitTimeoutMs ?? 30_000,
       });
       if (healthy) {
         io.writeStdout(`${pc.green('✓')} ${service.descriptor.displayName} listening on :${service.port}\n`);
       } else {
         io.writeStderr(
-          `${pc.red('✗')} ${service.descriptor.displayName} did not become healthy on :${service.port} within ${options.waitTimeoutMs ?? 10_000}ms\n`,
+          `${pc.red('✗')} ${service.descriptor.displayName} did not become healthy on :${service.port} within ${options.waitTimeoutMs ?? 30_000}ms\n`,
         );
         anyFailure = true;
       }
@@ -107,5 +171,53 @@ export async function runStartCommand(options: StartOptions = {}, io: StartIO = 
     return io.exit(EXIT_SERVICE_STARTUP_FAILED);
   }
   io.writeStdout(`${pc.green('All ContextOS services running.')}\n`);
+
+  // W4 (2026-05-13) — optional Cloudflare quick-tunnel. Runs only when
+  // `--tunnel` is set, AFTER every daemon is healthy. Failures here are
+  // never fatal: the local web is already up, the tunnel is purely a
+  // shareability nicety. Print install instructions on missing
+  // cloudflared, then fall through to a clean EXIT_OK.
+  if (options.tunnel === true) {
+    await orchestrateTunnel({ contextosHome, io });
+  }
+
   return io.exit(EXIT_OK);
+}
+
+async function orchestrateTunnel(args: { readonly contextosHome: string; readonly io: StartIO }): Promise<void> {
+  const { io } = args;
+  const lookup = await detectCloudflared();
+  if (lookup === null) {
+    io.writeStdout(
+      `\n${pc.yellow('⚠')} ${pc.bold('--tunnel')} requested but ${pc.cyan('cloudflared')} is not on PATH.\n` +
+        `  Install it and re-run \`contextos start --tunnel\`:\n` +
+        `    macOS:  ${pc.cyan('brew install cloudflared')}\n` +
+        `    Linux:  ${pc.cyan('curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared')}\n` +
+        `  Local web is up on http://localhost:3001/; only public URL is missing.\n`,
+    );
+    return;
+  }
+
+  io.writeStdout(`${pc.gray('Starting Cloudflare quick-tunnel …')}\n`);
+  const logPath = join(resolveContextosLogsDir(args.contextosHome), 'cloudflared.log');
+  try {
+    const tunnel = await startQuickTunnel({ localPort: 3001, logPath });
+    writeTunnelUrlToHomeEnv(args.contextosHome, tunnel.url);
+    writeTunnelState(args.contextosHome, {
+      pid: tunnel.pid,
+      url: tunnel.url,
+      startedAt: Date.now(),
+    });
+    io.writeStdout(
+      `${pc.green('✓')} Public tunnel: ${pc.cyan(tunnel.url)} → http://127.0.0.1:3001\n` +
+        `  Invite URLs now use this host. Quick-tunnels expire when ` +
+        `\`${pc.cyan('contextos stop')}\` runs.\n` +
+        `  Log: ${pc.gray(tunnel.logPath)}\n`,
+    );
+  } catch (err) {
+    io.writeStderr(
+      `${pc.yellow('⚠')} Tunnel start failed: ${(err as Error).message}\n` +
+        `  Local web is still up on http://127.0.0.1:3001/.\n`,
+    );
+  }
 }

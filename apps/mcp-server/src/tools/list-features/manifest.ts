@@ -36,12 +36,14 @@ export function createListFeaturesToolRegistration(
     name: 'list_features',
     title: 'ContextOS: list_features',
     description:
-      'Call this once per session to discover the skill-style features available for the project — each feature is a self-contained ' +
-      'knowledge unit (description + body + supporting files) the agent can load on demand. Returns ' +
-      '{ ok: true, features: [{slug, description, whenNotToUse, maturity, fileCount, ...}] } sorted by slug, OR a soft-failure ' +
-      'with project_not_found / project_cwd_unknown / features_dir_missing for new projects. Read each entry\'s description, ' +
-      'then call get_feature(slug) ONLY for the ones whose triggers match the current task — do not load every feature blindly. ' +
-      'Re-run when the user mentions a topic you don\'t recognise.',
+      'Call when you need to discover available SKILLS for this project — atomic, reusable recipes the agent fetches ' +
+      'on demand when a user prompt matches a feature\'s trigger description (the Anthropic Skills pattern). ' +
+      'Distinct from `get_feature_pack`: Feature Packs are MODULE blueprints (push, loaded at SessionStart). ' +
+      'Features are SKILLS (pull, loaded on trigger match). Returns { ok: true, features: [{slug, description, ' +
+      'whenNotToUse, maturity, fileCount, ...}] } sorted by slug, OR soft-failure with project_not_found / ' +
+      'project_cwd_unknown / features_dir_missing. Read each description, then call `get_feature(slug)` only for ' +
+      'features whose triggers match the current task — never load every feature blindly. Re-run when the user ' +
+      'mentions a topic you don\'t recognise.',
     inputSchema: listFeaturesInputSchema,
     outputSchema: listFeaturesOutputSchema,
     idempotencyKey: listFeaturesIdempotencyKey,

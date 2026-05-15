@@ -3,13 +3,13 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['__tests__/unit/**/*.test.ts'],
+    include: ['__tests__/unit/**/*.test.ts', '__tests__/unit/**/*.test.tsx'],
     clearMocks: true,
     restoreMocks: true,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],
-      include: ['src/**/*.ts'],
+      include: ['src/**/*.ts', 'src/**/*.tsx'],
       exclude: ['src/index.ts', 'src/**/*.d.ts', 'src/version.ts'],
       thresholds: {
         lines: 80,

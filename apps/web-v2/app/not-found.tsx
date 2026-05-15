@@ -1,5 +1,11 @@
 import { Topbar } from '@/components/Topbar';
 
+// W1 (2026-05-13) — opt out of static prerender. The root layout renders
+// Sidebar (client), which calls useSearchParams(); Next.js's static
+// generation of /_not-found fails the prerender without a Suspense
+// boundary. Forcing dynamic skips the prerender entirely.
+export const dynamic = 'force-dynamic';
+
 export default function NotFoundPage() {
   return (
     <>

@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { createDb, type PostgresHandle, postgresSchema, type SqliteHandle } from '@coodra/contextos-db';
 import { createLogger } from '@coodra/contextos-shared';
 import { and, eq } from 'drizzle-orm';
-import pc from 'picocolors';
 import { EXIT_USER_ACTION_REQUIRED } from '../exit-codes.js';
 import { resolveContextosDataDb, resolveContextosHome } from '../lib/contextos-home.js';
 import { clearTeamHomeEnv, upgradeToTeamConfig, writeTeamHomeEnv } from '../lib/team-config.js';
@@ -19,6 +18,7 @@ import {
   rollbackMigration,
   snapshotLocalDb,
 } from '../lib/team-migrate/index.js';
+import { pc } from '../ui/index.js';
 
 import type { TeamCommandIO } from './team.js';
 import { DEFAULT_TEAM_IO } from './team.js';
@@ -74,6 +74,12 @@ export interface TeamJoinOptions {
 
 export interface TeamLeaveOptions {
   readonly yes?: boolean;
+  /**
+   * Override for tests: supplies the user's typed-confirmation string
+   * without reading stdin. When omitted, the command reads a line from
+   * the terminal via `node:readline/promises`.
+   */
+  readonly readConfirm?: (prompt: string) => Promise<string>;
 }
 
 interface ResolvedCredentials {
@@ -387,28 +393,78 @@ export async function runTeamLeaveCommand(
   options: TeamLeaveOptions = {},
   io: TeamCommandIO = DEFAULT_TEAM_IO,
 ): Promise<never> {
-  if (options.yes !== true) {
-    io.writeStdout(
-      pc.yellow(
-        '`team leave` clears your local team config and drops org-tagged rows from the local DB. ' +
-          'Cloud data is untouched (other team members still see it). Re-run with --yes to confirm.\n',
-      ),
-    );
+  // Phase C (clarity-pass-plan, 2026-05-11) — read the current team
+  // config FIRST so we can show the operator the org slug they're
+  // about to leave AND use it as the typed-confirmation token. If the
+  // machine is already in solo mode, refuse immediately — `team leave`
+  // has no meaningful action to take.
+  const { readTeamConfig, demoteToSoloConfig } = await import('../lib/team-config.js');
+  const cfg = readTeamConfig();
+  if (cfg.mode === 'solo' || cfg.team === undefined) {
+    io.writeStderr(`${pc.yellow('contextos team leave')}: this machine is already in solo mode — nothing to leave.\n`);
     return io.exit(EXIT_USER_ACTION_REQUIRED);
   }
+  const orgLabel = cfg.team.clerkOrgSlug ?? cfg.team.clerkOrgId;
 
-  const { demoteToSoloConfig } = await import('../lib/team-config.js');
+  // Print the "what stays / what goes" block ALWAYS — both --yes and
+  // interactive paths need the operator to see it. Per Phase C plan,
+  // this is the message that prevents accidental data-loss panic
+  // (operators often think "leave" means "delete my history").
+  io.writeStdout(`${pc.bold('contextos team leave')} — leaving team ${pc.cyan(orgLabel)}\n\n`);
+  io.writeStdout(`${pc.bold('What gets removed (this machine only):')}\n`);
+  io.writeStdout('  • ~/.contextos/config.json team block (mode → solo)\n');
+  io.writeStdout(
+    '  • ~/.contextos/.env entries: CONTEXTOS_MODE, DATABASE_URL, LOCAL_HOOK_SECRET, CONTEXTOS_TEAM_ORG_ID\n',
+  );
+  io.writeStdout('  • sync-daemon will stop spawning on next `contextos start`\n\n');
+  io.writeStdout(`${pc.bold('What stays:')}\n`);
+  io.writeStdout('  • all local SQLite rows (runs, decisions, context_packs) — historical state intact\n');
+  io.writeStdout('  • all cloud rows — other team members continue to see them, your past contributions remain\n');
+  io.writeStdout('  • per-project .contextos.json files (unchanged)\n\n');
+
+  if (options.yes !== true) {
+    const reader = options.readConfirm ?? defaultReadConfirm;
+    const expected = `leave ${orgLabel}`;
+    const typed = (
+      await reader(`Type ${pc.yellow(`\`${expected}\``)} to confirm (or anything else to cancel): `)
+    ).trim();
+    if (typed !== expected) {
+      io.writeStderr(`${pc.red('✗')} Confirmation token did not match — leave aborted. Nothing was changed.\n`);
+      return io.exit(EXIT_USER_ACTION_REQUIRED);
+    }
+  }
+
   demoteToSoloConfig();
   // Also strip the team env keys from ~/.contextos/.env so the next
   // `contextos start` launches in solo mode. Preserves any user-managed
   // entries the operator put there manually.
   clearTeamHomeEnv();
-  io.writeStdout(pc.green('✓ ~/.contextos/config.json + ~/.contextos/.env demoted to solo mode\n'));
+  io.writeStdout(`${pc.green('✓')} ~/.contextos/config.json + ~/.contextos/.env demoted to solo mode\n`);
   io.writeStdout(
     pc.dim(
       '(local SQLite rows attributed to the team org are not deleted in v1 — they remain as historical state. ' +
         'A future contextos clean-team-data command will offer scrubbing.)\n',
     ),
   );
+  io.writeStdout(`\n${pc.bold('Next steps:')}\n`);
+  io.writeStdout(
+    `  1. ${pc.cyan('`contextos stop && contextos start`')} — daemons still in memory carry the old team credentials; restart so they pick up solo-mode env.\n`,
+  );
+  io.writeStdout(
+    `  2. ${pc.cyan('`contextos doctor --fix`')} — strip any stale CONTEXTOS_MODE lines from registered project .env files.\n`,
+  );
   return io.exit(0);
+}
+
+async function defaultReadConfirm(prompt: string): Promise<string> {
+  // Lazy-load readline/promises so test paths that pass `readConfirm`
+  // never even import it. Keeps the module's eager dependency surface
+  // small.
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await rl.question(prompt);
+  } finally {
+    rl.close();
+  }
 }

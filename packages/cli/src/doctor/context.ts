@@ -38,6 +38,7 @@ export function buildCheckContext(options: BuildCheckContextOptions = {}): Check
   const dataDb = resolveContextosDataDb(contextosHome);
   const mcpPort = parsePortFromEnv(env.MCP_SERVER_PORT, 3100);
   const bridgePort = parsePortFromEnv(env.HOOKS_BRIDGE_PORT, 3101);
+  const webPort = parsePortFromEnv(env.CONTEXTOS_WEB_PORT, 3001);
 
   return {
     contextosHome,
@@ -46,6 +47,7 @@ export function buildCheckContext(options: BuildCheckContextOptions = {}): Check
     env,
     mcpPort,
     bridgePort,
+    webPort,
     now: options.now ?? (() => new Date()),
     timeoutMs: options.timeoutMs ?? 2000,
     platform: options.platform ?? process.platform,

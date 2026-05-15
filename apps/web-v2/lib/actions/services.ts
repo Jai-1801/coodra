@@ -3,6 +3,8 @@
 import { runStart, runStatus, runStop } from '@coodra/contextos-cli/lib/services';
 import { redirect } from 'next/navigation';
 
+import { refuseInTeamHosted } from '@/lib/action-guards';
+
 /**
  * web-v2 server actions for service control.
  *
@@ -14,23 +16,18 @@ import { redirect } from 'next/navigation';
  *   refreshStatusAction()  — no-op redirect that triggers a rerun
  *                            so /workspace picks up the latest status.
  *
- * Solo-mode-only gate (mirrored from page-level + here so a stray POST
- * doesn't bypass the UI).
+ * Deployment gate: in `team-hosted` mode the web app runs on a server
+ * (Vercel/Fly/Docker) where there are no local daemons to spawn. We
+ * refuse with a redirect to /forbidden so an operator can't
+ * accidentally trigger launchd-style spawning from a serverless host.
+ * In `local-solo` and `local-team` both, the daemons run on the same
+ * machine as the web — service control is the right affordance there.
  */
-
-function ensureSoloMode(action: string): void {
-  const mode = process.env.CONTEXTOS_MODE ?? 'solo';
-  if (mode !== 'solo') {
-    throw new Error(
-      `${action} is only available in solo mode. CONTEXTOS_MODE=${mode}; service control via the web UI is solo-only.`,
-    );
-  }
-}
 
 const WORKSPACE_HREF = '/workspace';
 
 export async function startServicesAction(formData: FormData): Promise<void> {
-  ensureSoloMode('startServicesAction');
+  refuseInTeamHosted('startServicesAction');
   const onlyMcp = formData.get('only') === 'mcp';
   const onlyHooks = formData.get('only') === 'hooks';
   const result = await runStart({
@@ -46,7 +43,7 @@ export async function startServicesAction(formData: FormData): Promise<void> {
 }
 
 export async function stopServicesAction(formData: FormData): Promise<void> {
-  ensureSoloMode('stopServicesAction');
+  refuseInTeamHosted('stopServicesAction');
   const service = formData.get('service');
   const result = await runStop(
     typeof service === 'string' && (service === 'mcp-server' || service === 'hooks-bridge' || service === 'sync-daemon')
@@ -62,7 +59,7 @@ export async function stopServicesAction(formData: FormData): Promise<void> {
 }
 
 export async function refreshStatusAction(): Promise<void> {
-  ensureSoloMode('refreshStatusAction');
+  refuseInTeamHosted('refreshStatusAction');
   redirect(`${WORKSPACE_HREF}?refreshed=${Date.now()}`);
 }
 

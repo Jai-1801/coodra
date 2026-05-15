@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
+import { assertActorRole } from '@/lib/action-guards';
 import { deleteProject, renameProject, resetProject } from '@/lib/queries/projects';
 
 /**
@@ -29,6 +30,7 @@ const DELETE_SCHEMA = z.object({
 });
 
 export async function resetProjectAction(formData: FormData): Promise<void> {
+  await assertActorRole('admin');
   const identifier = String(formData.get('identifier') ?? '');
   const confirmation = String(formData.get('confirmation') ?? '');
   const keepPolicies = formData.get('alsoDeletePolicies') !== 'on';
@@ -72,6 +74,7 @@ export async function resetProjectAction(formData: FormData): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function renameProjectAction(formData: FormData): Promise<void> {
+  await assertActorRole('admin');
   const raw = {
     identifier: String(formData.get('identifier') ?? ''),
     newSlug: String(formData.get('newSlug') ?? '').trim(),
@@ -112,6 +115,7 @@ export async function renameProjectAction(formData: FormData): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function deleteProjectAction(formData: FormData): Promise<void> {
+  await assertActorRole('admin');
   const raw = {
     identifier: String(formData.get('identifier') ?? ''),
     confirmation: String(formData.get('confirmation') ?? '').trim(),

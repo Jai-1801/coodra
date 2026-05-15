@@ -9,11 +9,10 @@ import {
   type PolicyWithRules,
   setPolicyActive,
 } from '@coodra/contextos-db';
-import pc from 'picocolors';
-
 import { EXIT_OK, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosDataDb, resolveContextosHome } from '../lib/contextos-home.js';
 import { openLocalDb } from '../lib/open-local-db.js';
+import { commandTitle, pc, terminalWidth } from '../ui/index.js';
 
 /**
  * `contextos policy {list|show|add|enable|disable}` — admin surface
@@ -101,16 +100,19 @@ export async function runPolicyListCommand(options: PolicyListOptions, ioOverrid
     const policies = await listPolicies(handle, projectId);
     if (json) {
       io.writeStdout(`${JSON.stringify({ ok: true, policies: policies.map(serializePolicy) }, null, 2)}\n`);
-    } else if (policies.length === 0) {
-      io.writeStdout(
-        options.project !== undefined
-          ? `${pc.dim('—')} no policies for project "${options.project}".\n`
-          : `${pc.dim('—')} no policies in this contextos store.\n`,
-      );
     } else {
-      for (const p of policies) {
-        printPolicyHuman(io, p);
-        io.writeStdout('\n');
+      io.writeStdout(`${commandTitle('Policies', options.project ?? 'all projects', { width: terminalWidth() })}\n`);
+      if (policies.length === 0) {
+        io.writeStdout(
+          options.project !== undefined
+            ? `${pc.dim('—')} no policies for project "${options.project}".\n`
+            : `${pc.dim('—')} no policies in this contextos store.\n`,
+        );
+      } else {
+        for (const p of policies) {
+          printPolicyHuman(io, p);
+          io.writeStdout('\n');
+        }
       }
     }
     io.exit(EXIT_OK);

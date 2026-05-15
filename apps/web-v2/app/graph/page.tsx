@@ -1,4 +1,5 @@
 import { Topbar } from '@/components/Topbar';
+import { resolveDeploymentMode } from '@/lib/deployment-mode';
 import { fmtRelative } from '@/lib/format';
 import { loadGraph } from '@/lib/queries/graph';
 import { listProjects } from '@/lib/queries/projects';
@@ -9,7 +10,15 @@ export default async function GraphPage({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const projects = await listProjects();
   const slug = sp.project ?? projects[0]?.slug ?? '';
-  const result = slug.length === 0 ? null : loadGraph(slug);
+  // The Graphify index lives under ~/.contextos/graphify/<slug>/graph.json
+  // on each developer's laptop. In `team-hosted` mode there is no
+  // ~/.contextos on the deployment server, so loadGraph would always
+  // return a missing-index sentinel. Surface that as a deployment-aware
+  // copy change rather than a confusing "no graph" with a misleading
+  // local-only path in the lede.
+  const dm = resolveDeploymentMode();
+  const isTeamHosted = dm === 'team-hosted';
+  const result = isTeamHosted || slug.length === 0 ? null : loadGraph(slug);
 
   return (
     <>
@@ -22,11 +31,24 @@ export default async function GraphPage({ searchParams }: { searchParams: Promis
               Files the <em>agent</em> read.
             </h1>
             <p className="head__lede">
-              A graph of files touched, the order they were touched, and the runs that touched them. Loaded from{' '}
-              <span style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>
-                ~/.contextos/graphify/&lt;slug&gt;/graph.json
-              </span>{' '}
-              per ADR-010.
+              {isTeamHosted ? (
+                <>
+                  A graph of files touched, the order they were touched, and the runs that touched them. The
+                  Graphify index is per-laptop (each developer runs <code style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>graphify scan</code> against
+                  their local checkout, producing <code style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>~/.contextos/graphify/&lt;slug&gt;/graph.json</code>),
+                  so this view is empty on the hosted web. Open the same project's web app on your laptop
+                  (local-team mode) to see your graph. Cross-team graph aggregation is a future enhancement.
+                </>
+              ) : (
+                <>
+                  A graph of files touched, the order they were touched, and the runs that touched them. Loaded
+                  from{' '}
+                  <span style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>
+                    ~/.contextos/graphify/&lt;slug&gt;/graph.json
+                  </span>{' '}
+                  per ADR-010.
+                </>
+              )}
             </p>
           </div>
           <div>

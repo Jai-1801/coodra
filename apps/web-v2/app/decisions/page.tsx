@@ -1,9 +1,12 @@
 import Link from 'next/link';
 
+import { ActorBadge } from '@/components/ActorBadge';
 import { Topbar } from '@/components/Topbar';
 import { fmtClockSec, fmtRelative } from '@/lib/format';
+import { resolveClerkDisplayNames } from '@/lib/queries/clerk-users';
 import { listDecisions } from '@/lib/queries/decisions';
 import { listProjects } from '@/lib/queries/projects';
+import { readTeamConfig } from '@/lib/team-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +37,20 @@ export default async function DecisionsPage({ searchParams }: { searchParams: Pr
     ...(selectedProject !== undefined ? { projectId: selectedProject.id } : {}),
     limit,
   });
+
+  // Team-mode "decided by" attribution: show the viewer's own writes as
+  // "You", other teammates by their resolved name / email (via Clerk).
+  // In solo mode no row carries a created_by_user_id so the column
+  // collapses into em-dashes — we hide it then to save horizontal space.
+  const teamCfg = readTeamConfig();
+  const viewerUserId = teamCfg.mode === 'team' ? teamCfg.team?.clerkUserId ?? null : null;
+  const showAuthorColumn = teamCfg.mode === 'team' || decisions.some((d) => d.createdByUserId !== null);
+  // Batch-resolve every distinct Clerk user id on the page to a display
+  // name (full name → email → shortened id fallback). Solo mode skips
+  // the Clerk round-trip because there's no team config to authenticate.
+  const userDisplayNames = showAuthorColumn && teamCfg.mode === 'team'
+    ? await resolveClerkDisplayNames(decisions.map((d) => d.createdByUserId))
+    : new Map<string, { label: string; email: string | null }>();
 
   return (
     <>
@@ -125,6 +142,7 @@ export default async function DecisionsPage({ searchParams }: { searchParams: Pr
                   <th style={{ width: 18 }}></th>
                   <th>Decision</th>
                   <th>Project</th>
+                  {showAuthorColumn ? <th>Decided by</th> : null}
                   <th>Confidence</th>
                   <th>Rev?</th>
                   <th style={{ textAlign: 'right' }}>Recorded</th>
@@ -189,6 +207,17 @@ export default async function DecisionsPage({ searchParams }: { searchParams: Pr
                           <span style={{ color: 'var(--ink-mute)' }}>—</span>
                         )}
                       </td>
+                      {showAuthorColumn ? (
+                        <td>
+                          <ActorBadge
+                            userId={d.createdByUserId}
+                            viewerUserId={viewerUserId}
+                            {...((d.createdByUserId !== null && userDisplayNames.get(d.createdByUserId)?.label) !== undefined
+                              ? { displayName: userDisplayNames.get(d.createdByUserId as string)!.label }
+                              : {})}
+                          />
+                        </td>
+                      ) : null}
                       <td>
                         <span
                           style={{

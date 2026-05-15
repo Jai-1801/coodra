@@ -38,6 +38,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* ---------- App shell ---------- */
 .app { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
+/* Pre-auth pages (Sidebar self-suppresses on /auth, /forbidden, /install)
+   collapse to a single column so the centered sign-in / forbidden / install
+   landing widgets don't sit in column 2 with a 248px empty gutter on the
+   left. :has() is supported in every modern browser this app targets. */
+.app:not(:has(> aside.side)) { grid-template-columns: 1fr; }
 
 /* ---------- Sidebar ---------- */
 .side {

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { Topbar } from '@/components/Topbar';
+import { tryGetActor } from '@/lib/auth';
 import { listPacks } from '@/lib/queries/packs';
 
 export const dynamic = 'force-dynamic';
@@ -11,9 +12,15 @@ export default async function PacksPage({
   searchParams: Promise<{ deleted?: string; uploaded?: string }>;
 }) {
   const sp = await searchParams;
-  const packs = listPacks();
+  const packs = await listPacks();
   const synced = packs.filter((p) => p.fileCount === 4).length;
   const partial = packs.filter((p) => p.fileCount > 0 && p.fileCount < 4).length;
+
+  // Phase F.6 — role-aware UI. Viewers see a "read-only" badge instead
+  // of the Upload button.
+  const actor = await tryGetActor();
+  const role = actor?.role ?? 'admin';
+  const isViewer = role === 'viewer';
 
   return (
     <>
@@ -26,8 +33,14 @@ export default async function PacksPage({
               Three voices: <em>spec</em>, plan, stack.
             </h1>
             <p className="head__lede">
-              A feature pack is the durable record of a module: the why, the how, the dependency graph. Auto-injected on
-              SessionStart. Edit on disk; we sync the metadata.
+              A feature pack is the durable architectural record of a <strong>module</strong>: the why, the how, the
+              dependency graph. Push model — auto-injected on SessionStart. Edit on disk; we sync the metadata.
+              <br />
+              <span style={{ color: 'var(--ink-mute)', fontSize: 13 }}>
+                Need atomic skill recipes that load on demand when a user prompt matches a trigger? Those are{' '}
+                <strong>features</strong>, not feature packs — manage them via the CLI's{' '}
+                <code style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>contextos feature</code> commands.
+              </span>
             </p>
           </div>
           <div>
@@ -42,9 +55,29 @@ export default async function PacksPage({
               <Link className="btn btn--ghost" href="/templates">
                 Templates
               </Link>
-              <Link className="btn btn--accent" href="/packs/new">
-                + Upload pack
-              </Link>
+              {/* Phase F.6 — Upload is hidden for viewers. Members +
+                  admins both see it; the action's RBAC guard does the
+                  final check at submit time. */}
+              {!isViewer ? (
+                <Link className="btn btn--accent" href="/packs/new">
+                  + Upload pack
+                </Link>
+              ) : (
+                <span
+                  style={{
+                    fontFamily: 'var(--mono)',
+                    fontSize: 10,
+                    letterSpacing: '0.04em',
+                    color: 'var(--ink-mute)',
+                    padding: '6px 10px',
+                    border: '1px dashed var(--ink-mute)',
+                    borderRadius: 4,
+                  }}
+                  title="Viewers can browse every pack but cannot author or edit."
+                >
+                  Read-only · viewer role
+                </span>
+              )}
             </div>
           </div>
         </div>

@@ -29,7 +29,14 @@
  */
 
 /** Canonical agent-type values the rest of the codebase consumes. */
-export type KnownAgentType = 'claude_code' | 'cursor' | 'windsurf' | 'vscode_copilot' | 'mcp_inspector' | 'unknown';
+export type KnownAgentType =
+  | 'claude_code'
+  | 'cursor'
+  | 'windsurf'
+  | 'codex'
+  | 'vscode_copilot'
+  | 'mcp_inspector'
+  | 'unknown';
 
 /**
  * Readonly mapping `clientInfo.name` → canonical `runs.agent_type`.
@@ -39,6 +46,7 @@ export type KnownAgentType = 'claude_code' | 'cursor' | 'windsurf' | 'vscode_cop
  *   - Claude Code:   'claude-ai' (prior to 2026-02) or 'claude-code'
  *   - Cursor:        'cursor-vscode' (observed) / 'cursor'
  *   - Windsurf:      'windsurf'
+ *   - Codex:         'codex' / 'codex-cli' (beta.95 — Codex CLI MCP client)
  *   - VS Code + Copilot Chat: 'github-copilot-chat-vscode' (observed)
  *   - MCP Inspector: 'mcp-inspector'
  *
@@ -52,6 +60,8 @@ export const AGENT_TYPE_MAPPING: Readonly<Record<string, KnownAgentType>> = Obje
   cursor: 'cursor',
   'cursor-vscode': 'cursor',
   windsurf: 'windsurf',
+  codex: 'codex',
+  'codex-cli': 'codex',
   'github-copilot-chat-vscode': 'vscode_copilot',
   'mcp-inspector': 'mcp_inspector',
 });

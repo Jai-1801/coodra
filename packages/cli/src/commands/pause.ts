@@ -9,12 +9,11 @@ import {
   lookupProjectBySlug,
   scheduleDurableWrite,
 } from '@coodra/contextos-db';
-import pc from 'picocolors';
-
 import { EXIT_KILL_SWITCH_REFUSAL, EXIT_OK, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosDataDb, resolveContextosHome } from '../lib/contextos-home.js';
 import { DurationParseError, parseDuration } from '../lib/duration.js';
 import { openLocalDb } from '../lib/open-local-db.js';
+import { pc } from '../ui/index.js';
 
 /**
  * `contextos pause` — insert a row into `kill_switches` so the bridge's

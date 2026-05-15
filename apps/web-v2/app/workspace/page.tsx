@@ -2,8 +2,11 @@ import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
+import { notFound } from 'next/navigation';
+
 import { Topbar } from '@/components/Topbar';
 import { refreshStatusAction, startServicesAction, stopServicesAction } from '@/lib/actions/services';
+import { resolveDeploymentMode } from '@/lib/deployment-mode';
 import { listProjects } from '@/lib/queries/projects';
 
 export const dynamic = 'force-dynamic';
@@ -37,6 +40,10 @@ async function probe(url: string, timeoutMs = 600): Promise<boolean> {
 }
 
 export default async function WorkspacePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  // /workspace shows the status of LOCAL daemons (MCP server, Hooks Bridge,
+  // Sync Daemon) on this machine. On a team-hosted deployment server those
+  // don't exist — hide the page so users don't dead-end on a probe-fail UI.
+  if (resolveDeploymentMode() === 'team-hosted') notFound();
   const sp = await searchParams;
   const mode = (process.env.CONTEXTOS_MODE ?? 'solo') as 'solo' | 'team';
   const isSolo = mode === 'solo';

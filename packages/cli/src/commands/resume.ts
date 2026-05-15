@@ -7,11 +7,10 @@ import {
   softResumeAllKillSwitches,
   softResumeKillSwitch,
 } from '@coodra/contextos-db';
-import pc from 'picocolors';
-
 import { EXIT_OK, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosDataDb, resolveContextosHome } from '../lib/contextos-home.js';
 import { openLocalDb } from '../lib/open-local-db.js';
+import { pc } from '../ui/index.js';
 
 /**
  * `contextos resume` — soft-resume one or more active kill switches.

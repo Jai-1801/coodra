@@ -1,20 +1,18 @@
 import { type FSWatcher, watch } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
-
-import pc from 'picocolors';
-
 import { EXIT_OK, EXIT_USER_ACTION_REQUIRED, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { resolveContextosHome, resolveContextosLogsDir } from '../lib/contextos-home.js';
 import { DurationParseError, parseDuration } from '../lib/duration.js';
 import { readLastNLines, readLinesSince } from '../lib/log-reader.js';
+import { pc } from '../ui/index.js';
 
 /**
  * `contextos logs <service>` — tail or print recent lines from
  * `<contextosHome>/logs/<service>.log`. Pure file I/O; no DB calls.
  *
  * Service names mirror `lib/services.ts::ServiceName`:
- * `mcp-server | hooks-bridge | sync-daemon`. Unknown service →
+ * `mcp-server | hooks-bridge | sync-daemon | web`. Unknown service →
  * exit 1 with the valid set listed. Missing log file → exit 2
  * with "daemon hasn't started yet" remediation pointing at
  * `contextos start`.
@@ -28,7 +26,7 @@ import { readLastNLines, readLinesSince } from '../lib/log-reader.js';
  * through verbatim so the operator never silently loses a line.
  */
 
-const VALID_SERVICES = ['mcp-server', 'hooks-bridge', 'sync-daemon'] as const;
+const VALID_SERVICES = ['mcp-server', 'hooks-bridge', 'sync-daemon', 'web'] as const;
 type ValidService = (typeof VALID_SERVICES)[number];
 
 export interface LogsOptions {

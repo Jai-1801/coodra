@@ -14,6 +14,7 @@ import {
   resetProject as resetProjectDb,
 } from '@coodra/contextos-db';
 
+import { tryGetActor } from '@/lib/auth';
 import { createWebDb } from '@/lib/db';
 
 /**
@@ -31,10 +32,28 @@ import { createWebDb } from '@/lib/db';
 
 const SENTINEL_PROJECT_SLUGS: ReadonlySet<string> = new Set(['__global__']);
 
+/**
+ * Phase-isolation fix (2026-05-11): list ONLY projects belonging to the
+ * current actor's org. Without this, a local-team-mode page shows the
+ * user's pre-flip solo projects (org_id=`__solo__`) mixed with the
+ * team's projects — visually confusing and a real cross-context leak.
+ *
+ * Mode → orgId mapping (see `lib/auth.ts::getActor`):
+ *   - local-solo : actor.orgId = '__solo__'
+ *   - local-team : actor.orgId = team block's clerkOrgId
+ *   - team-hosted: actor.orgId = Clerk session orgId
+ *
+ * When there's no resolved actor (team-hosted, signed out — should be
+ * rare because the middleware redirects), we return an empty list
+ * rather than leaking everything.
+ */
 export async function listProjects(): Promise<ProjectListRow[]> {
   const handle = createWebDb();
   const rows = await listProjectsDb(handle);
-  return rows.filter((row) => !SENTINEL_PROJECT_SLUGS.has(row.slug));
+  const actor = await tryGetActor();
+  const actorOrgId = actor?.orgId ?? null;
+  if (actorOrgId === null) return [];
+  return rows.filter((row) => !SENTINEL_PROJECT_SLUGS.has(row.slug) && row.orgId === actorOrgId);
 }
 
 export async function getProject(identifier: string): Promise<ProjectDetailRow | null> {

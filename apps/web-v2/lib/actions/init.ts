@@ -4,6 +4,8 @@ import { runInit } from '@coodra/contextos-cli/lib/init';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
+import { refuseInTeamHosted } from '@/lib/action-guards';
+
 /**
  * `apps/web/lib/actions/init.ts` — Server Action for the `/init`
  * wizard (M04 Phase 2 S3).
@@ -46,6 +48,13 @@ const FORM_SCHEMA = z.object({
 });
 
 export async function initProjectAction(formData: FormData): Promise<void> {
+  // `init` is inherently a local-laptop operation — it writes
+  // .contextos.json + .mcp.json + scaffolds docs/feature-packs/ on
+  // disk + wires Claude Code hook entries in ~/.claude/settings.json.
+  // None of that has meaning on a Vercel server, so we refuse in
+  // team-hosted mode. Developers who need init use the CLI.
+  refuseInTeamHosted('initProjectAction');
+
   const raw = {
     cwd: String(formData.get('cwd') ?? '').trim(),
     projectSlug: String(formData.get('projectSlug') ?? '').trim(),

@@ -1,3 +1,7 @@
+import { listProjects } from '@coodra/contextos-db';
+
+import { openLocalDb } from '../../lib/open-local-db.js';
+import { scanProjectEnvForStaleMode } from '../../lib/project-env-scan.js';
 import { readTeamConfig, readTeamHomeEnv } from '../../lib/team-config.js';
 
 import type { Check } from '../types.js';
@@ -36,6 +40,24 @@ export const teamConfigCheck: Check = {
           remediation:
             'Run `contextos team join --user-id <id> --org-id <id> --secret <hex> --database-url <url>` to write ' +
             'the team block, or `contextos team setup` if you are the org admin doing first-time bootstrap.',
+        };
+      }
+      // Phase A — solo machine, but check for stale `CONTEXTOS_MODE=team`
+      // (or any value) in project .env files. Neutralised by the
+      // MACHINE_LEVEL_KEYS carve-out, but still misleading.
+      const soloDrift = await scanProjectDrift(ctx.dataDb);
+      const soloMisleading = soloDrift.filter((d) => d.staleModeValue !== 'solo');
+      if (soloMisleading.length > 0) {
+        const sample = soloMisleading
+          .slice(0, 3)
+          .map((p) => p.envPath)
+          .join(', ');
+        return {
+          status: 'yellow',
+          detail:
+            `mode=solo but ${soloMisleading.length} project .env file(s) carry a non-solo CONTEXTOS_MODE line ` +
+            `(${sample}${soloMisleading.length > 3 ? ', …' : ''}) — neutralised at runtime but misleading to read`,
+          remediation: 'Run `contextos doctor --fix` to strip the stale lines. Idempotent.',
         };
       }
       return { status: 'green', detail: 'mode=solo (no team config required)' };
@@ -96,9 +118,65 @@ export const teamConfigCheck: Check = {
       };
     }
 
+    // Phase A (clarity-pass-plan, 2026-05-11) — scan every registered
+    // project's `<cwd>/.env` for stale `CONTEXTOS_MODE` lines. These
+    // were written by pre-Phase-A `contextos init` runs and survive
+    // even after `team setup`. The `loadHomeEnv` MACHINE_LEVEL_KEYS
+    // carve-out neutralises their runtime effect (home wins for
+    // CONTEXTOS_MODE) but the line itself remains misleading
+    // documentation — a developer reading the file thinks the project
+    // is solo when the machine is actually team.
+    const projectDrift = await scanProjectDrift(ctx.dataDb);
+    if (projectDrift.length > 0) {
+      const sample = projectDrift
+        .slice(0, 3)
+        .map((p) => p.envPath)
+        .join(', ');
+      return {
+        status: 'yellow',
+        detail:
+          `team mode wired correctly, but ${projectDrift.length} project .env file(s) carry a stale CONTEXTOS_MODE line ` +
+          `(${sample}${projectDrift.length > 3 ? ', …' : ''}) — neutralised at runtime by MACHINE_LEVEL_KEYS but ` +
+          'misleading to read',
+        remediation:
+          'Run `contextos doctor --fix` to strip the stale lines. Idempotent — re-runs after the strip report "no drift".',
+      };
+    }
+
     return {
       status: 'green',
-      detail: `team mode wired (user=${team.clerkUserId.slice(0, 12)}…, org=${team.clerkOrgId.slice(0, 12)}…, joined ${new Date(team.joinedAt).toISOString().slice(0, 10)}, env synced)`,
+      detail: `team mode wired (user=${team.clerkUserId.slice(0, 12)}…, org=${team.clerkOrgId.slice(0, 12)}…, joined ${new Date(team.joinedAt).toISOString().slice(0, 10)}, env synced, no project .env drift)`,
     };
   },
 };
+
+/**
+ * Open the local data.db and scan every registered project's
+ * `<cwd>/.env` for a stale `CONTEXTOS_MODE=` line. Read-only — never
+ * mutates files. Failures (DB missing, project rows without `cwd`)
+ * gracefully degrade to "no drift found" so this check never goes red
+ * for reasons unrelated to its intent.
+ */
+async function scanProjectDrift(
+  dataDb: string,
+): Promise<Array<{ cwd: string; envPath: string; staleModeValue: string }>> {
+  let handle: Awaited<ReturnType<typeof openLocalDb>>;
+  try {
+    handle = await openLocalDb(dataDb);
+  } catch {
+    return [];
+  }
+  try {
+    const projects = await listProjects(handle);
+    const drift: Array<{ cwd: string; envPath: string; staleModeValue: string }> = [];
+    for (const p of projects) {
+      if (p.cwd === null) continue;
+      const scan = scanProjectEnvForStaleMode(p.cwd);
+      if (!scan.exists || scan.staleModeValue === null) continue;
+      drift.push({ cwd: p.cwd, envPath: scan.envPath, staleModeValue: scan.staleModeValue });
+    }
+    return drift;
+  } finally {
+    handle.close();
+  }
+}
