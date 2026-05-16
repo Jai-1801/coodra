@@ -59,7 +59,9 @@ describe('runStatusCommand — integration', () => {
     ).rejects.toThrow('__exit__:2');
     expect(captured.exit).toBe(2);
     const stdout = captured.stdout.join('');
-    expect(stdout).toContain('Services');
+    // Section header is `/03  SERVICES  ───…` in the Phase B clarity-pass
+    // renderer (2026-05-11). Match the uppercase variant.
+    expect(stdout).toMatch(/SERVICES/);
     expect(stdout).toContain('stopped');
   });
 
@@ -104,10 +106,13 @@ describe('runStatusCommand — integration', () => {
     ).rejects.toThrow('__exit__:0');
     const parsed = JSON.parse(captured.stdout.join(''));
     expect(parsed.project).toBeDefined();
-    expect(parsed.services).toHaveLength(2);
+    // Three services in solo mode: mcp-server, hooks-bridge, web (W1
+    // web-bundle-initiative 2026-05-13 added the bundled dashboard as
+    // a default service). sync-daemon is filtered out in solo mode.
+    expect(parsed.services).toHaveLength(3);
     expect(parsed.recent).toBeDefined();
     expect(parsed.coodraHome).toBe(home);
-    expect(parsed.services.map((s: { name: string }) => s.name).sort()).toEqual(['hooks-bridge', 'mcp-server']);
+    expect(parsed.services.map((s: { name: string }) => s.name).sort()).toEqual(['hooks-bridge', 'mcp-server', 'web']);
   });
 });
 

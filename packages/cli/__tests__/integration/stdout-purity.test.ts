@@ -52,6 +52,11 @@ describe('CLI stdout purity — no pino JSON leakage', () => {
         // Explicitly DO NOT set COODRA_LOG_DESTINATION — the shim's
         // job is to default it to stderr without an explicit override.
         COODRA_LOG_DESTINATION: undefined,
+        // Phase B clarity pass (2026-05-11) defaults LOG_LEVEL=warn for
+        // the CLI process to keep stdout clean. Override to 'info' here
+        // so the db.* seed events fire — without info logs there's
+        // nothing to verify the stderr routing against.
+        LOG_LEVEL: 'info',
       },
       reject: false,
       timeout: 30_000,

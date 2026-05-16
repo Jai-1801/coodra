@@ -128,7 +128,13 @@ describe('cold install — bundled binary works end-to-end', () => {
     // never matched any tool. Fix F switched ownership detection to URL.
     expect(ours.matcher).toBeUndefined();
     expect(ours.hooks[0].url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/v1\/hooks\/claude-code$/);
-    expect(ours.hooks[0].headers['X-Local-Hook-Secret']).toBe('$LOCAL_HOOK_SECRET');
+    // Phase F.6+ (and the docblock on `ClaudeSettingsMergeOptions.
+    // localHookSecret`) inline the literal 64-hex secret here rather
+    // than the `$LOCAL_HOOK_SECRET` placeholder, so Claude Code's hook
+    // sends the right `X-Local-Hook-Secret` header without depending on
+    // its own shell-env propagation. The generator (init.ts) writes a
+    // fresh 32-byte hex string per project.
+    expect(ours.hooks[0].headers['X-Local-Hook-Secret']).toMatch(/^[0-9a-f]{64}$/);
     // SessionEnd: same shape as SessionStart (no matcher, bridge URL).
     const sessionEnd = settings.hooks.SessionEnd[0];
     expect(sessionEnd.matcher).toBeUndefined();

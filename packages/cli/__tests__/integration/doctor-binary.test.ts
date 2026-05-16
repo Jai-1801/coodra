@@ -86,13 +86,19 @@ describe('doctor binary — integration spawn', () => {
     expect(result.exitCode).toBeGreaterThanOrEqual(1); // empty home → reds, exit 2
     const stdout = String(result.stdout);
     expect(stdout).toContain('coodra doctor');
-    expect(stdout).toContain('1. Node.js >= 22.16.0');
-    expect(stdout).toContain('Summary:');
+    // The check-row format is `<icon> <id padded>  <name>` (Phase B
+    // clarity pass renderer, 2026-05-11) — e.g. `✓   1  Node.js >= 22.16.0`.
+    // The pre-Phase-B "1." numbering with a period was replaced by space-
+    // padded alignment. Match flexibly on the check name + id.
+    expect(stdout).toMatch(/1\s+Node\.js >= 22\.16\.0/);
+    // The summary line is `<n> ok · <n> warn · <n> fail · <n> skipped`
+    // (Phase B). Pre-Phase-B printed a `Summary:` label.
+    expect(stdout).toMatch(/\d+ ok\s+·\s+\d+ warn\s+·\s+\d+ fail\s+·\s+\d+ skipped/);
     // The trimmed default surface tells the user how to see the full one.
     expect(stdout).toMatch(/11 essential checks shown\. Run `coodra doctor --full`/);
   }, 30_000);
 
-  it('--full runs the complete 36-check registry', async () => {
+  it('--full runs the complete 38-check registry', async () => {
     const result = await execa('node', [distBin, 'doctor', '--json', '--full', '--timeout-ms', '500'], {
       env: {
         ...process.env,
@@ -110,6 +116,9 @@ describe('doctor binary — integration spawn', () => {
     });
     const stdout = String(result.stdout);
     const parsed = JSON.parse(stdout) as { checks: Array<{ id: number }> };
-    expect(parsed.checks).toHaveLength(36);
+    // 38 = 30 original checks + 36-team-config + 37-web-healthz + 38-tunnel-reachability
+    // (W1 web-bundle-initiative landed checks 37-38; 36 added with team-config).
+    // Source of truth: packages/cli/src/doctor/registry.ts imports.
+    expect(parsed.checks).toHaveLength(38);
   }, 30_000);
 });

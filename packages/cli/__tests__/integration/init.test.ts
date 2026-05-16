@@ -225,11 +225,19 @@ describe('runInitCommand — integration', () => {
     // subdirectory exists. Pre-Phase-3 init gated the merger on
     // `~/.claude/` existence; the merge step was silently skipped.
     // Post-Fix-B the merger is unconditional and creates the dir.
+    //
+    // We pass `ide: 'claude'` explicitly so the assertion targets the
+    // claude-wiring path. Without it, `detectIDE({ homeDir: userHome })`
+    // sees the fresh tmpdir and (correctly) reports zero installed IDEs,
+    // skipping every per-IDE merge. The Phase 3 Fix B invariant under
+    // test is "given claude is wanted, the merger creates the dir if
+    // missing" — not "init auto-wires claude into machines that don't
+    // have it installed".
     const claudeDir = join(userHome, '.claude');
     await expect(stat(claudeDir)).rejects.toMatchObject({ code: 'ENOENT' });
 
     const { io, captured } = makeIO();
-    await expect(runInitCommand({ cwd, home, userHome, env: {} }, io)).rejects.toThrow('__exit__:0');
+    await expect(runInitCommand({ cwd, home, userHome, env: {}, ide: 'claude' }, io)).rejects.toThrow('__exit__:0');
     expect(captured.exit).toBe(0);
 
     // Dir exists and contains settings.json.

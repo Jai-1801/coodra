@@ -50,21 +50,46 @@ describe('loadHomeEnv — layered <COODRA_HOME>/.env + <cwd>/.env', () => {
     expect(merged.COODRA_MODE).toBe('solo');
   });
 
-  it('case 2 — both files exist with overlap → cwd value wins', () => {
-    // Per-project override is the more specific scope. A developer who
-    // sets COODRA_MODE=team in their project must override whatever
-    // the user-global .env says.
-    writeFileSync(join(homeDir, '.env'), ['COODRA_MODE=solo', 'CLERK_SECRET_KEY=sk_test_from_home'].join('\n'), 'utf8');
+  it('case 2 — both files exist with overlap → home wins for machine-level keys, cwd wins for everything else', () => {
+    // The precedence is dual, not one-direction. See
+    // packages/cli/src/lib/load-home-env.ts::MACHINE_LEVEL_KEYS for the
+    // canonical list. Two policy fixes drove the carve-out:
+    //   - M04 Phase 4 (2026-05-11): a stale project .env carrying
+    //     COODRA_MODE=solo silently demoted a team developer back to
+    //     solo — sync-daemon never spawned, runs never pushed. Home
+    //     `.env` now wins for COODRA_MODE / DATABASE_URL /
+    //     LOCAL_HOOK_SECRET / COODRA_TEAM_*.
+    //   - Phase H.6 (2026-05-13): CLERK_SECRET_KEY + CLERK_PUBLISHABLE_KEY
+    //     joined the same set. `coodra init` writes the solo-bypass
+    //     sentinels into every project .env; without this carve-out
+    //     they overrode the real team-mode Clerk keys from ~/.coodra/.env
+    //     and feature-db.ts fell back to the legacy (forgeable) path.
+    writeFileSync(
+      join(homeDir, '.env'),
+      [
+        'COODRA_MODE=team',
+        'CLERK_SECRET_KEY=sk_test_from_home',
+        'COODRA_GRAPHIFY_ROOT=/var/graphify-home',
+      ].join('\n'),
+      'utf8',
+    );
     writeFileSync(
       join(cwdDir, '.env'),
-      ['COODRA_MODE=team', 'CLERK_SECRET_KEY=sk_test_from_project'].join('\n'),
+      [
+        'COODRA_MODE=solo',
+        'CLERK_SECRET_KEY=sk_test_from_project',
+        'COODRA_GRAPHIFY_ROOT=/var/graphify-project',
+      ].join('\n'),
       'utf8',
     );
 
     const merged = loadHomeEnv(homeDir, cwdDir);
 
+    // Machine-level: home wins (overrides whatever the project says).
     expect(merged.COODRA_MODE).toBe('team');
-    expect(merged.CLERK_SECRET_KEY).toBe('sk_test_from_project');
+    expect(merged.CLERK_SECRET_KEY).toBe('sk_test_from_home');
+    // Non-machine-level: cwd wins (per-project override).
+    expect(merged.COODRA_GRAPHIFY_ROOT).toBe('/var/graphify-project');
   });
 
   it('case 3 — only <COODRA_HOME>/.env exists → its vars loaded', () => {
