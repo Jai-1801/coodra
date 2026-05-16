@@ -155,16 +155,12 @@ jobs:
       - name: Build @coodra/* in dependency order
         # `shared` first (db + policy depend on it transitively); `db`
         # next (its dist/migrate.js is consumed by both apps' auto-migrate
-        # at boot); `policy` next (apps consume it); `cli build:tsc-only`
-        # is required before mcp-server / hooks-bridge because both apps
-        # import `@coodra/cli/lib/{outbox,team-config}` subpaths that
-        # only resolve once cli's tsc has emitted them (we skip the full
-        # cli build here because its bundle.mjs needs apps/web-v2/.next/
-        # standalone which the integration job doesn't use); `mcp-server`
-        # and `hooks-bridge` last because their integration tests may
-        # spawn `dist/index.js` as a subprocess. Without the explicit
-        # build, `node dist/index.js` fails with ENOENT and the SDK Client
-        # / HTTP client times out with "Connection closed".
+        # at boot); `policy` next; `cli build:tsc-only` emits cli lib
+        # subpaths that mcp-server + hooks-bridge tsc need; then their
+        # builds; then web-v2 next build (produces .next/standalone);
+        # finally `cli build` (full, with bundle) so cli integration
+        # tests like cold-install + npm-pack-lock + doctor-binary see
+        # dist/runtime/{mcp-server,hooks-bridge,sync-daemon,web} present.
         run: |
           pnpm --filter @coodra/shared build
           pnpm --filter @coodra/db build
@@ -172,6 +168,8 @@ jobs:
           pnpm --filter @coodra/cli build:tsc-only
           pnpm --filter @coodra/mcp-server build
           pnpm --filter @coodra/hooks-bridge build
+          pnpm --filter @coodra/web-v2 build
+          pnpm --filter @coodra/cli build
 
       - name: Integration tests (Postgres migrations + hooks-bridge auth chain + mcp-server boot)
         # `--concurrency=1` is load-bearing: each workspace's integration
