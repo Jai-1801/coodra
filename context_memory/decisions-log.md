@@ -1366,3 +1366,89 @@ Resolution: build the id as `re_` + sha256(sessionId + '|' + toolUseId + '|' + p
 **Test counts (workspace-wide, post-S1):** web 35/35, hooks-bridge 54/54, db 54/54, mcp-server 261/261, cli 188/188 — 592/592 pass.
 
 **Reference:** commit `feat(web,bridge,db): M04 Phase 2 S1` on `feat/04-web-app`. Spec ACs #25 (`ensureProject` in bridge) + #26 (`/graph` empty-state CTA — defers to S9) recorded; AC #25 verified live this slice.
+
+---
+
+## 2026-05-21 — Module 09 (External MCP Integrations) architecture locked: Jira + Graphify
+
+**Context:** Planning session. `system-architecture.md §22` (Jira) and `§17` (Graphify) were specced long ago and are largely fiction — §22's 8 `jira_*` tools + OAuth + webhooks were never built; §17's `/api/graphify/*` endpoints, `graphify_graphs` table, and `knowledge_edges` do not exist in the schema. Live research confirmed two viable, mature external MCP servers: the Atlassian Rovo MCP (GA Feb 2026, `mcp.atlassian.com/v1/mcp/authv2`) and Graphify's own stdio MCP server (`python -m graphify.serve`, v0.8.14, 50k★).
+
+**Decision — restructure into one module.** Jira and Graphify are the same pattern: wire an external MCP server into the agent's config; Coodra provides *fusion tools + skill recipes*. Unified as **Module 09 — External MCP Integrations** with a shared substrate (9·Core: the MCP-config writer, the `/settings/integrations` page, the `coodra <x> enable/disable/status` CLI shape) + track 9A (Jira) + track 9B (Graphify).
+
+**Jira (9A) — 4 locked decisions:**
+1. Access = **Direct** — onboarding writes Atlassian's Rovo MCP (`mcp.atlassian.com/v1/mcp/authv2`, per-user OAuth 2.1) into the agent config. Coodra builds no Jira REST client / OAuth app / webhooks. §22's build-our-own design is superseded. Tradeoff accepted (user directive): Jira calls bypass `check_policy`.
+2. **Story → Run** (Context Pack = write-back artifact); **Epic → Feature Pack**; Features stay separate, with an explicit "promote a finished Story to a Feature".
+3. Write-back = **on request only** — never automatic.
+4. Onboarding = **both** — optional skippable wizard step + a permanent `/settings/integrations` page.
+
+**Graphify (9B) — Option C:** consumed via its own stdio MCP server (`python -m graphify.serve graphify-out/graph.json`). Coodra builds no graph reader / producer / parser. Coodra's tools expand to FUSE Graphify's structure into the knowledge layer: `query_codebase_graph` + `apps/mcp-server/src/lib/graphify.ts` are **retired** (dead reader of `~/.coodra/graphify/<slug>/graph.json` — a path nothing writes); a new `coodra__seed_feature_packs_from_graph` turns Leiden communities into draft Feature Packs; `get_feature_pack` gains a `structure` block. Zero schema migration (`structure` lives in `feature_packs.content_json`). Supersedes ADR-010.
+
+**Alternatives considered and rejected:**
+- Jira: build Coodra's own `jira_*` tools (the §22 design) — rejected: ongoing Jira-API maintenance treadmill. Proxy Atlassian's MCP through Coodra — rejected for v1 (governance of Jira calls not required per user directive).
+- Graphify: Coodra runs the `graphify` CLI as a managed subprocess (the old ADR-010/§17 producer plan) — rejected: brittle to babysit a ~daily-release Python tool. Coodra reads the committed `graphify-out/graph.json` itself (option B) — folded into the seed recipe (the *agent* reads it and hands data to Coodra) rather than Coodra reading the file.
+
+**Rationale:** matches the "wire the external MCP, don't rebuild it" thesis (Pattern 20 / ADR-012 / ADR-013 — ship intelligence as records and recipes, not as services). Both external servers are mature and actively maintained; reimplementing either inside Coodra is waste.
+
+**This session (G0):** rewrote ADR-010 (Graphify via Option C); rewrote `system-architecture.md §17`; marked the §24 `query_codebase_graph` manifest entry superseded; corrected the External-api-ref Graphify section and `essentialsforclaude/05-agent-trigger-contract.md` §5.6; created `docs/feature-packs/09-integrations/` (spec / implementation / techstack / meta.json).
+
+**Next:** G1 (retire the dead `query_codebase_graph` path) → G2 (`seed_feature_packs_from_graph` + `get_feature_pack` structure block) → G3 (wiring + CLI) → G4 (web UX); Jira track J0–J4. Full plan: `docs/feature-packs/09-integrations/` and `~/.claude/.../memory/module-09-mcp-integrations.md`.
+
+**Reference:** `docs/feature-packs/09-integrations/`, ADR-010 (rewritten), `system-architecture.md §17`.
+
+---
+
+## 2026-05-22 — Module 09 G3: 9·Core MCP-config writer + `coodra graphify` CLI
+
+**Context:** G3 builds the shared 9·Core substrate (the idempotent external-MCP-config writer) and the `coodra graphify {enable,disable,status}` CLI on top of it. The Jira track (J2) will reuse the same writer.
+
+**Decisions:**
+1. **Writer location = `packages/cli/src/lib/init/external-mcp-merge.ts`**, not the `lib/mcp-integrations/` path sketched in `implementation.md`. Rationale: it is a generalisation of `lib/init/mcp-merge.ts` (`coodra`-hardcoded) and `lib/init/windsurf-merge.ts`, shares the `WriteOutcome` type from `lib/init/types.ts`, and every MCP-config writer already lives in `lib/init/`. Splitting it into a new directory would fragment the merge family.
+2. **Default Python interpreter = `python3`**, with a `--python <path>` override. Graphify's README (v8) confirms Ubuntu ships `python3` not bare `python`, and recommends an isolated venv for the `graphifyy[mcp]` extra — the override exists precisely so a venv interpreter (`.venv/bin/python3`) can be wired. Bare `python` is increasingly absent on macOS + modern Linux, so it is the wrong default.
+3. **Codex (TOML) is not auto-spliced.** `external-mcp-merge.ts` handles only `.mcp.json`-shaped JSON files. `graphify enable`/`disable` print the `[mcp_servers.graphify]` TOML snippet for the user to add/remove by hand; `graphify status` *reads* `.codex/config.toml` via a regex probe so the report still covers all four agents. A TOML writer is deferred (would belong in 9·Core, shared with `coodra init`'s Codex path).
+4. **Confirmed open item — Graphify MCP invocation.** Verified against the live `safishamsi/graphify` README (v8, PyPI `graphifyy`): the MCP server is `python -m graphify.serve graphify-out/graph.json`; the serve module needs the `graphifyy[mcp]` extra; the graph is produced by the `/graphify .` skill (writes `graphify-out/graph.json`). The entry shape is `{ command, args }` (no `type` field — stdio is the default, consistent with the `coodra` entry).
+
+**Per-IDE graph-path nuance:** Claude Code + Cursor read project-scoped configs, so a relative `graphify-out/graph.json` resolves against the repo root the agent spawns from — kept relative. Windsurf's config is global (`~/.codeium/windsurf/mcp_config.json`) with no project anchor, so the path is pinned absolute against `cwd` at enable time.
+
+**Verification:** CLI typecheck clean; Biome clean; 426/426 CLI unit tests pass (47 new: `external-mcp-merge.test.ts` 22 + `graphify.test.ts` 24 + 3 `program.test.ts` wiring tests; help-output snapshot updated). Real-binary smoke test: `enable` adds `graphify` next to a pre-existing `coodra` entry (preserved byte-for-byte), re-`enable` is `unchanged`, `disable` strips only `graphify`.
+
+**Deferred (remaining G3 sub-items per `implementation.md`):** the optional `coodra init` Graphify prompt; bundling + seeding the `graphify-seed-packs` Feature recipe; the Codex TOML write path.
+
+**Reference:** `packages/cli/src/lib/init/external-mcp-merge.ts`, `packages/cli/src/commands/graphify.ts`, `docs/feature-packs/09-integrations/implementation.md`.
+
+---
+
+## 2026-05-23 — Module 09 G3 finished: Codex TOML writer, `coodra init` Graphify step, `graphify-seed-packs` recipe
+
+**Context:** G3-core (the JSON 9·Core writer + `coodra graphify enable|disable|status`) landed 2026-05-22 with three sub-items deferred. This entry closes all three.
+
+**Decisions:**
+1. **Codex TOML 9·Core writer = `lib/init/external-codex-merge.ts`.** Parallels `external-mcp-merge.ts` (JSON) the way `codex-merge.ts` parallels `mcp-merge.ts` — a separate file rather than folding TOML into `external-mcp-merge.ts`, because TOML is a different file shape and the existing `mcp-merge.ts`/`codex-merge.ts` split is the established pattern. Parameterised on `name` + absolute `filePath`; uses `smol-toml`.
+2. **`graphify-wire.ts` is the shared wiring core.** Extracted so `commands/graphify.ts` AND `commands/init.ts` consume one dispatch — `wireGraphify`/`unwireGraphify`/`readGraphifyPresence` route JSON agents to `external-mcp-merge.ts` and Codex to `external-codex-merge.ts`. `commands/graphify.ts` was refactored onto it; the `codex-manual` path is **retired** — Codex now gets a real `[mcp_servers.graphify]` write in `enable`/`disable`, same as the three JSON agents.
+3. **`coodra init` Graphify step — opt-in, 3-state, never default.** The dead "Graphify scan not implemented in 08a" stub is removed. Replaced with: `--graphify` wires it, `--no-graphify` skips it, neither + interactive TTY prompts (default skip), neither + non-interactive skips with a hint. **Graphify is NOT wired by default** — it needs a separate `graphifyy[mcp]` install plus a built `graphify-out/graph.json`, so a blind wire would point Claude/Cursor at an MCP server that isn't there. `program.ts` defines `--graphify` then `--no-graphify` so commander yields a genuine 3-state (`undefined`/`true`/`false`).
+4. **`graphify-seed-packs` Feature recipe — embedded, not a bundled asset file.** `lib/init/graphify-feature.ts` carries the feature.md content as a TS string constant (compiles into `dist/` — no build-script copy step). `seedGraphifySeedPacksFeature` writes `docs/features/graphify-seed-packs/feature.md` idempotently (never-clobber; `--force` overrides) + regenerates the features index. Disk-first only — no DB mirror, so `graphify enable` stays filesystem-pure (no `~/.coodra/data.db` dependency). Seeded on `graphify enable` (skippable with `--no-feature`) and on `init`'s Graphify step.
+5. **The recipe is robust to Graphify's MCP tool-set uncertainty.** Graphify's README (v8) lists `query_graph`/`get_node`/`get_neighbors`/`shortest_path`/PR tools; an earlier search also surfaced `get_community`/`god_nodes`. Rather than hard-depend on a `get_community` tool that may be version-specific, the recipe's primary instruction is to **read `graphify-out/graph.json` directly** (NetworkX node-link JSON; each node carries a `community` attribute), with the MCP query tools as the documented alternative. `graph.json` reading always works.
+
+**Verification:** CLI typecheck clean; Biome clean; **458/458 CLI unit tests** (49 files — new `external-codex-merge.test.ts` + `graphify-feature.test.ts`; `graphify.test.ts` rewritten for the Codex-real-write + feature-seed behavior; help snapshot updated); **13/13 `init` integration tests** (4 new: `--graphify` / `--no-graphify` / prompt-y / prompt-n). Real-binary smoke tests: `graphify enable --ide all` writes all four agents incl. a real Codex `[mcp_servers.graphify]` TOML table + seeds the feature; `disable --ide codex` strips the TOML table; `--no-feature` skips the seed; `coodra init --graphify` wires `graphify` beside `coodra` + seeds the skill; `coodra init --no-graphify` leaves both untouched.
+
+**Module 09 Track 9B status:** G0–G3 complete. Remaining: **G4 — Web UX** (`/settings/integrations` Graphify card + onboarding wizard step). Jira track J0–J4 not started.
+
+**Reference:** `packages/cli/src/lib/init/{external-codex-merge,graphify-wire,graphify-feature}.ts`, `packages/cli/src/commands/{graphify,init}.ts`.
+
+---
+
+## 2026-05-23 — Module 09 G4: Graphify Web UX (`/settings/integrations` + wizard step)
+
+**Context:** G4 is the web surface for the Graphify integration — the last Graphify-track phase. Two deliverables per `implementation.md`: the `/settings/integrations` page (a card per integration) and an optional onboarding-wizard step.
+
+**Decisions:**
+1. **9·Core wiring code is reused in web-v2, not reimplemented.** Added three export-map entries to `@coodra/cli`'s `package.json` — `./lib/init/graphify-wire`, `./lib/init/graphify-feature`, `./lib/detect` — and re-exported `IDE` / `IDE_ORDER` from `graphify-wire.ts`. web-v2's server actions call the exact same `wireGraphify` / `unwireGraphify` / `readGraphifyPresence` / `seedGraphifySeedPacksFeature` / `detectIDE` the CLI runs. One implementation, two front-ends (CLI + web) — same idempotent, never-clobber behavior.
+2. **`/settings/integrations` — local web writes, team-hosted shows the CLI command.** `app/settings/integrations/page.tsx` renders a Graphify card. Local web (`!isCloudHostedWeb()`): a per-project list, each row with Enable/Disable forms → `enableGraphifyAction` / `disableGraphifyAction` server actions (`refuseInTeamHosted` guarded, like `services.ts`). Team-hosted web: the server has no developer configs to touch, so the card renders the `coodra graphify enable` CLI command read-only. The page is structured for a Jira card to be added next to the Graphify one in J3.
+3. **The web autodetects IDEs — mirrors `coodra graphify enable` with no `--ide`.** The actions call `detectIDE()` and wire only the agents installed on the machine — no cluttering a Claude-only project with a `.cursor/mcp.json`. All four agents are eligible (Windsurf included); the card documents Windsurf's global-config quirk (its `graphify` entry points at the most-recently-enabled project's graph) — identical to the CLI's behavior, not a web-specific wart.
+4. **No `--force` in the web.** The web actions always run never-clobber (`force: false`). A drifted, hand-edited `graphify` entry is preserved; the CLI's `coodra graphify enable --force` is the deliberate, explicit escape hatch — the web does not expose a clobber button.
+5. **The wizard step is informational, not a write step.** `app/onboarding/team/page.tsx` gains an optional Step 6 "Integrations" — it explains Graphify (Option C), shows the `coodra graphify enable` command, and links to `/settings/integrations`. It performs no writes, honoring the wizard's established philosophy ("the wizard never makes a destructive change — it only verifies + explains + hands the user the CLI command"). `STEPS`, the step clamp (`<= 6`), and `StepFiveInvite`'s forward nav were extended; the step is genuinely skippable (Step 5 → dashboard remains a valid exit).
+
+**Verification:** web-v2 typecheck clean; Biome `lint` exit 0 (no new errors); 43/43 web-v2 unit tests pass; `next build` succeeds with `/settings/integrations` in the route table; runtime smoke — `next start` then `GET /settings/integrations` → 200 with the Graphify card rendered, `GET /onboarding/team?step=6` → 200 with the integrations step. CLI re-verified: 458/458 unit tests green after the export-map + `IDE`/`IDE_ORDER` re-export change.
+
+**Module 09 Track 9B (Graphify) is COMPLETE — G0–G4 all shipped.** Next: the Jira track, J0 (spec + ADR-015) → J1–J4.
+
+**Reference:** `apps/web-v2/app/settings/integrations/page.tsx`, `apps/web-v2/lib/{actions,queries}/integrations.ts`, `apps/web-v2/app/onboarding/team/page.tsx`, `packages/cli/package.json` (exports map).
