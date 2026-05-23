@@ -12,17 +12,18 @@ export const dynamic = 'force-dynamic';
 /**
  * `/onboarding/team` — the team-mode onboarding wizard.
  *
- * Five linear steps. The wizard never makes a destructive change — it
+ * Six linear steps. The wizard never makes a destructive change — it
  * only verifies + explains + hands the user the exact CLI command to
  * run. Persistence happens through `coodra team setup`, which
  * writes `~/.coodra/config.json::team` + `~/.coodra/.env` (the
  * env file is the one `coodra start` reads when spawning daemons).
  *
- *   Step 1 · Supabase  — admin creates a Postgres project, copies URL.
- *   Step 2 · Connect   — admin pastes the URL; we verify reachability + schema.
- *   Step 3 · Clerk     — admin creates a Clerk app + an org, copies keys + their userId / orgId.
- *   Step 4 · CLI       — admin runs `coodra team setup` (we render the exact, copy-paste-ready command).
- *   Step 5 · Invite    — admin shares the four-credential block with teammates so they can run `coodra team join`.
+ *   Step 1 · Supabase     — admin creates a Postgres project, copies URL.
+ *   Step 2 · Connect      — admin pastes the URL; we verify reachability + schema.
+ *   Step 3 · Clerk        — admin creates a Clerk app + an org, copies keys + their userId / orgId.
+ *   Step 4 · CLI          — admin runs `coodra team setup` (we render the exact, copy-paste-ready command).
+ *   Step 5 · Invite       — admin shares the four-credential block with teammates so they can run `coodra team join`.
+ *   Step 6 · Integrations — OPTIONAL: wire Graphify's MCP server into the agent configs (Module 09), or skip.
  *
  * State is fully URL-driven (search params). No client state. The
  * verify-step server action redirects with the result encoded back
@@ -57,7 +58,7 @@ export default async function TeamOnboardingWizardPage({ searchParams }: { searc
   if (resolveDeploymentMode() === 'team-hosted') notFound();
   const sp = await searchParams;
   const stepRaw = parseInt(sp.step ?? '1', 10);
-  const step = Number.isFinite(stepRaw) && stepRaw >= 1 && stepRaw <= 5 ? stepRaw : 1;
+  const step = Number.isFinite(stepRaw) && stepRaw >= 1 && stepRaw <= 6 ? stepRaw : 1;
 
   const alreadyTeam = resolveEffectiveMode() === 'team';
 
@@ -72,8 +73,8 @@ export default async function TeamOnboardingWizardPage({ searchParams }: { searc
               Stand up your <em>team</em>.
             </h1>
             <p className="head__lede">
-              Five steps. You bring a Supabase project + a Clerk org. We never see those credentials — they live on your
-              machine and your cloud accounts. The CLI does every persistent write.
+              Six steps — the last is optional. You bring a Supabase project + a Clerk org. We never see those
+              credentials — they live on your machine and your cloud accounts. The CLI does every persistent write.
             </p>
           </div>
           <div>
@@ -106,6 +107,7 @@ export default async function TeamOnboardingWizardPage({ searchParams }: { searc
         {step === 3 ? <StepThreeClerk sp={sp} /> : null}
         {step === 4 ? <StepFourCli sp={sp} /> : null}
         {step === 5 ? <StepFiveInvite /> : null}
+        {step === 6 ? <StepSixIntegrations /> : null}
       </section>
     </>
   );
@@ -119,6 +121,7 @@ const STEPS: ReadonlyArray<{ readonly num: string; readonly label: string }> = [
   { num: '03', label: 'Clerk' },
   { num: '04', label: 'Run CLI' },
   { num: '05', label: 'Invite team' },
+  { num: '06', label: 'Integrations' },
 ];
 
 function Stepper({ current }: { readonly current: number }) {
@@ -695,11 +698,11 @@ clerk secret key    sk_live_…   (each teammate appends as
         </p>
 
         <div style={{ display: 'flex', gap: 10, marginTop: 28 }}>
-          <Link href="/" className="btn btn--accent">
-            Open dashboard
+          <Link href="/onboarding/team?step=6" className="btn btn--accent">
+            Next · Integrations
           </Link>
-          <Link href="/settings/team" className="btn">
-            Team settings
+          <Link href="/" className="btn">
+            Open dashboard
           </Link>
           <Link href="/onboarding/team?step=4" className="btn btn--ghost">
             Back
@@ -721,6 +724,75 @@ clerk secret key    sk_live_…   (each teammate appends as
             v: 'Every row carries who wrote it. The web app shows “decided by Alice” badges.',
           },
           { k: 'Local-first', v: 'Their local SQLite stays primary. Sync daemon mirrors to your Postgres async.' },
+        ]}
+      />
+    </div>
+  );
+}
+
+/* ---------- step 6 ---------- */
+
+function StepSixIntegrations() {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 32, alignItems: 'start' }}>
+      <div className="card" style={{ padding: 36 }}>
+        <h2 className="card__title" style={{ marginBottom: 14 }}>
+          Optional · wire <em>Graphify</em>.
+        </h2>
+        <p style={{ fontSize: 14, color: 'var(--ink-dim)', lineHeight: 1.6, marginBottom: 24 }}>
+          Graphify maps a repository into a queryable knowledge graph and ships its own MCP server. Coodra wires that
+          server into your agent configs next to the <code style={inlineMono}>coodra</code> server — the agent can then
+          ask structural questions and seed Feature Packs from the graph. This step is optional: skip it now and wire
+          Graphify any time from the Integrations page.
+        </p>
+
+        <FieldLabel>In each project you want graphed, run</FieldLabel>
+        <pre style={{ ...codeBlockStyle, padding: 22 }}>{`coodra graphify enable`}</pre>
+
+        <p style={{ marginTop: 24, fontSize: 13, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+          That wires the <code style={inlineMono}>graphify</code> MCP server into every detected agent config and seeds
+          the <code style={inlineMono}>graphify-seed-packs</code> skill. It needs Graphify installed (
+          <code style={inlineMono}>uv tool install graphifyy</code>) and a built graph (
+          <code style={inlineMono}>/graphify .</code>). The web app’s Integrations page does the same per project with
+          one click.
+        </p>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 28 }}>
+          <Link href="/" className="btn btn--accent">
+            Done · open dashboard
+          </Link>
+          <Link href="/settings/integrations" className="btn">
+            Integrations page
+          </Link>
+          <Link href="/onboarding/team?step=5" className="btn btn--ghost">
+            Back
+          </Link>
+        </div>
+      </div>
+
+      <SidePanel
+        title={
+          <>
+            Why <em>Graphify</em>
+          </>
+        }
+        rows={[
+          {
+            k: 'Structural queries',
+            v: 'The agent asks "where is X defined?" and blast-radius questions instead of grepping files.',
+          },
+          {
+            k: 'Cold-start packs',
+            v: 'The graphify-seed-packs skill turns the graph’s communities into draft Feature Packs.',
+          },
+          {
+            k: 'Optional',
+            v: 'Coodra works fully without it — wire Graphify when a repo is large enough to benefit.',
+          },
+          {
+            k: 'Option C',
+            v: 'Coodra consumes Graphify’s own MCP server by configuration — nothing is rebuilt or proxied (ADR-010).',
+          },
         ]}
       />
     </div>

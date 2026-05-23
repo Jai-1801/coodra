@@ -1,6 +1,8 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
+import Link from 'next/link';
+
 import { Topbar } from '@/components/Topbar';
 import { getActor } from '@/lib/auth';
 
@@ -69,6 +71,23 @@ export default async function SettingsPage() {
               <KV k="DATABASE_URL" v={process.env.DATABASE_URL ? 'configured' : 'unset'} />
               <KV k="Clerk publishable" v={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? 'configured' : 'unset'} />
               <KV k="Supabase project" v={process.env.SUPABASE_PROJECT_REF ?? 'unset'} />
+            </div>
+
+            <div className="aside-card">
+              <h3 className="aside-card__title" style={{ marginBottom: 14 }}>
+                Integrations
+              </h3>
+              <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--ink-dim)', marginBottom: 16 }}>
+                Wire external MCP servers — Graphify’s codebase graph today — into your agent configs alongside the{' '}
+                <span style={{ fontFamily: 'var(--mono)', color: 'var(--ink)' }}>coodra</span> server.
+              </p>
+              <Link
+                href="/settings/integrations"
+                className="btn"
+                style={{ width: '100%', textAlign: 'center', display: 'block' }}
+              >
+                Open integrations →
+              </Link>
             </div>
           </div>
 

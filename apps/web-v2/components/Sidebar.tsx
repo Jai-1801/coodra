@@ -156,7 +156,6 @@ export function Sidebar({
               { href: `/runs${scope}`, label: 'Runs', icon: <IconLedger /> },
               { href: `/decisions${scope}`, label: 'Decisions', icon: <IconLedger /> },
               { href: `/context-packs${scope}`, label: 'Context packs', icon: <IconPack /> },
-              { href: `/graph${scope}`, label: 'Context graph', icon: <IconGraph /> },
             ],
           },
           {
@@ -190,7 +189,6 @@ export function Sidebar({
               { href: `/runs${scope}`, label: 'Runs', icon: <IconLedger /> },
               { href: `/decisions${scope}`, label: 'Decisions', icon: <IconLedger /> },
               { href: `/context-packs${scope}`, label: 'Context packs', icon: <IconPack /> },
-              { href: `/graph${scope}`, label: 'Context graph', icon: <IconGraph /> },
             ],
           },
           {
@@ -488,18 +486,6 @@ function IconLedger() {
       <rect x="3" y="4" width="18" height="16" />
       <line x1="3" y1="9" x2="21" y2="9" />
       <circle cx="6.5" cy="6.5" r="0.6" fill="currentColor" />
-    </svg>
-  );
-}
-function IconGraph() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
-      <circle cx="6" cy="6" r="2.5" />
-      <circle cx="18" cy="6" r="2.5" />
-      <circle cx="12" cy="18" r="2.5" />
-      <line x1="8" y1="7" x2="16" y2="7" />
-      <line x1="7" y1="8" x2="11" y2="16" />
-      <line x1="17" y1="8" x2="13" y2="16" />
     </svg>
   );
 }

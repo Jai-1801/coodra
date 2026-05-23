@@ -103,9 +103,6 @@ export default async function ProjectHomePage({
               <Link className="btn btn--ghost" href={`/runs?project=${encodeURIComponent(project.slug)}`}>
                 Open runs
               </Link>
-              <Link className="btn" href={`/graph?project=${encodeURIComponent(project.slug)}`}>
-                Graph
-              </Link>
             </div>
           </div>
         </div>
