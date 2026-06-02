@@ -50,7 +50,13 @@ const EXPECTED_TOOLS = [
   'get_feature',
   'get_feature_file',
   'query_run_diff',
-  'seed_feature_packs_from_graph',
+  // Module 09 J2 (2026-05-31, ADR-016 — Jira = Direct). Replaces the retired
+  // seed_feature_packs_from_graph (ADR-015): that entry was stale here because
+  // this e2e is main-only and the retirement run didn't exercise it.
+  'link_run_to_issue',
+  // Module 09 J3 (2026-05-31) — the on-request write-back helper (assembles
+  // the session summary; the agent posts it via Rovo's addCommentToJiraIssue).
+  'prepare_jira_comment',
 ] as const;
 
 interface Harness {
@@ -145,10 +151,11 @@ describe('manifest-e2e — minimal-valid-input round-trip per tool', () => {
       toolName: 'Write',
       toolInput: { file_path: '/tmp/x' },
     },
-    seed_feature_packs_from_graph: {
-      projectSlug: 'e2e-probe',
-      communities: [{ communityId: 'c1', label: 'Probe Community' }],
-    },
+    // run_does_not_exist → the run_not_found soft-failure branch, which the
+    // round-trip test explicitly accepts (success OR structured failure).
+    link_run_to_issue: { runId: 'run_does_not_exist', issueRef: 'PROBE-1' },
+    // run_does_not_exist → the run_not_found soft-failure branch (accepted).
+    prepare_jira_comment: { runId: 'run_does_not_exist' },
   };
 
   for (const name of EXPECTED_TOOLS) {

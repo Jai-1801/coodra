@@ -67,15 +67,15 @@ async function selectRuns(
   db: DbHandle,
   projectId: string,
   status: RunStatus | undefined,
+  issueRef: string | undefined,
   limit: number,
 ): Promise<RawRow[]> {
   if (db.kind === 'sqlite') {
     const runs = sqliteSchema.runs;
     const packs = sqliteSchema.contextPacks;
-    const where =
-      status === undefined
-        ? eq(runs.projectId, projectId)
-        : and(eq(runs.projectId, projectId), eq(runs.status, status));
+    const conds = [eq(runs.projectId, projectId)];
+    if (status !== undefined) conds.push(eq(runs.status, status));
+    if (issueRef !== undefined) conds.push(eq(runs.issueRef, issueRef));
     const rows = await db.db
       .select({
         runId: runs.id,
@@ -88,15 +88,16 @@ async function selectRuns(
       })
       .from(runs)
       .leftJoin(packs, eq(packs.runId, runs.id))
-      .where(where)
+      .where(and(...conds))
       .orderBy(desc(runs.startedAt))
       .limit(limit);
     return rows as RawRow[];
   }
   const runs = postgresSchema.runs;
   const packs = postgresSchema.contextPacks;
-  const where =
-    status === undefined ? eq(runs.projectId, projectId) : and(eq(runs.projectId, projectId), eq(runs.status, status));
+  const conds = [eq(runs.projectId, projectId)];
+  if (status !== undefined) conds.push(eq(runs.status, status));
+  if (issueRef !== undefined) conds.push(eq(runs.issueRef, issueRef));
   const rows = await db.db
     .select({
       runId: runs.id,
@@ -109,7 +110,7 @@ async function selectRuns(
     })
     .from(runs)
     .leftJoin(packs, eq(packs.runId, runs.id))
-    .where(where)
+    .where(and(...conds))
     .orderBy(desc(runs.startedAt))
     .limit(limit);
   return rows as RawRow[];
@@ -161,7 +162,11 @@ export function createQueryRunHistoryHandler(deps: QueryRunHistoryHandlerDeps) {
       };
     }
 
-    const rows = await selectRuns(deps.db, projectId, input.status, input.limit);
+    // Normalise the issue key to uppercase to match link_run_to_issue's
+    // canonical stored form ("what touched PROJ-412?" works whatever case
+    // the agent passed).
+    const issueRefFilter = input.issueRef !== undefined ? input.issueRef.toUpperCase() : undefined;
+    const rows = await selectRuns(deps.db, projectId, input.status, issueRefFilter, input.limit);
     return {
       ok: true,
       runs: rows.map(toEntry),

@@ -73,9 +73,11 @@ afterAll(async () => {
 describe('boot — COODRA_MODE=team with no override knob (finding §8.3 closed)', () => {
   it('binary boots with team-mode auth + sqlite store; tools/list returns the full inventory', async () => {
     const { tools } = await h.client.listTools();
-    // See `boot.test.ts` for the tool count drift log. 16 = post-M09-G2
-    // inventory (seed_feature_packs_from_graph added 2026-05-21).
-    expect(tools.length).toBe(16);
+    // See `boot.test.ts` for the tool count drift log. 17 = post-ADR-016
+    // inventory: the post-ADR-015 15 + link_run_to_issue (J2) +
+    // prepare_jira_comment (J3) — Coodra's two Jira tools (2026-05-31). The
+    // Jira tools themselves are Atlassian's Rovo MCP, not Coodra's.
+    expect(tools.length).toBe(17);
   });
 
   it('tool runs end-to-end against sqlite — DB read path executed (proves no Postgres connection attempted)', async () => {

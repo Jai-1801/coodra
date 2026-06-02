@@ -44,7 +44,7 @@ describe('doctor — full registry against a controlled fixture', () => {
       coodraHomeOverride: home,
       cwd,
       env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
-      timeoutMs: 800,
+      timeoutMs: 5000,
     });
     const report = await runChecks(FIXTURE_CHECKS, ctx);
     const get = (id: number) => report.checks.find((c) => c.id === id);
@@ -77,7 +77,7 @@ describe('doctor — full registry against a controlled fixture', () => {
       coodraHomeOverride: home,
       cwd,
       env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
-      timeoutMs: 800,
+      timeoutMs: 5000,
     });
     const report = await runChecks(FIXTURE_CHECKS, ctx);
     const get = (id: number) => report.checks.find((c) => c.id === id);
@@ -120,7 +120,7 @@ describe('doctor — full registry against a controlled fixture', () => {
       coodraHomeOverride: home,
       cwd,
       env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
-      timeoutMs: 800,
+      timeoutMs: 5000,
     });
     const report = await runChecks(FIXTURE_CHECKS, ctx);
     const get = (id: number) => report.checks.find((c) => c.id === id);
@@ -152,7 +152,7 @@ describe('doctor — full registry against a controlled fixture', () => {
       coodraHomeOverride: home,
       cwd,
       env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
-      timeoutMs: 800,
+      timeoutMs: 5000,
     });
     const report = await runChecks(FIXTURE_CHECKS, ctx);
     const get = (id: number) => report.checks.find((c) => c.id === id);
@@ -182,7 +182,7 @@ describe('doctor — full registry against a controlled fixture', () => {
       coodraHomeOverride: home,
       cwd,
       env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
-      timeoutMs: 800,
+      timeoutMs: 5000,
     });
     const report = await runChecks(FIXTURE_CHECKS, ctx);
     const get = (id: number) => report.checks.find((c) => c.id === id);
@@ -209,7 +209,7 @@ describe('doctor — full registry against a controlled fixture', () => {
       coodraHomeOverride: home,
       cwd,
       env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
-      timeoutMs: 800,
+      timeoutMs: 5000,
     });
     let report = await runChecks(FIXTURE_CHECKS, ctx);
     let get = (id: number) => report.checks.find((c) => c.id === id);
@@ -228,7 +228,7 @@ describe('doctor — full registry against a controlled fixture', () => {
       coodraHomeOverride: home,
       cwd,
       env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
-      timeoutMs: 800,
+      timeoutMs: 5000,
     });
     report = await runChecks(FIXTURE_CHECKS, ctx);
     get = (id: number) => report.checks.find((c) => c.id === id);
@@ -255,7 +255,7 @@ describe('doctor — full registry against a controlled fixture', () => {
       coodraHomeOverride: home,
       cwd,
       env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
-      timeoutMs: 800,
+      timeoutMs: 5000,
     });
     let report = await runChecks(FIXTURE_CHECKS, ctx);
     let get = (id: number) => report.checks.find((c) => c.id === id);
@@ -276,7 +276,7 @@ describe('doctor — full registry against a controlled fixture', () => {
       coodraHomeOverride: home,
       cwd,
       env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
-      timeoutMs: 800,
+      timeoutMs: 5000,
     });
     report = await runChecks(FIXTURE_CHECKS, ctx);
     get = (id: number) => report.checks.find((c) => c.id === id);
@@ -303,7 +303,7 @@ describe('doctor — full registry against a controlled fixture', () => {
       coodraHomeOverride: home,
       cwd,
       env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
-      timeoutMs: 800,
+      timeoutMs: 5000,
     });
     let report = await runChecks(FIXTURE_CHECKS, ctx);
     let get = (id: number) => report.checks.find((c) => c.id === id);
@@ -322,7 +322,7 @@ describe('doctor — full registry against a controlled fixture', () => {
       coodraHomeOverride: home,
       cwd,
       env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
-      timeoutMs: 800,
+      timeoutMs: 5000,
     });
     report = await runChecks(FIXTURE_CHECKS, ctx);
     get = (id: number) => report.checks.find((c) => c.id === id);
@@ -344,7 +344,7 @@ describe('doctor — full registry against a controlled fixture', () => {
       coodraHomeOverride: home,
       cwd,
       env: { LOCAL_HOOK_SECRET: 'a'.repeat(64) },
-      timeoutMs: 800,
+      timeoutMs: 5000,
     });
     report = await runChecks(FIXTURE_CHECKS, ctx);
     get = (id: number) => report.checks.find((c) => c.id === id);

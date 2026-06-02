@@ -87,7 +87,6 @@ function toWireShape(pack: FeaturePackReturn): FeaturePackShape {
       implementation: pack.content.implementation,
       techstack: pack.content.techstack,
       sourceFiles: [...pack.content.sourceFiles],
-      ...(pack.content.structure !== undefined ? { structure: pack.content.structure } : {}),
     },
   };
 }

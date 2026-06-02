@@ -67,3 +67,26 @@ export const clerkAppearance = {
     socialButtonsVariant: 'blockButton' as const,
   },
 } as const;
+
+/**
+ * Variant for the `/auth/sign-in` + `/auth/sign-up` pages, where Clerk's
+ * `<SignIn>` / `<SignUp>` sit INSIDE the `AuthShell` editorial panel
+ * rather than as a standalone card.
+ *
+ * NOTE: web-v2 ships no Tailwind, so the `elements:` class strings in
+ * {@link clerkAppearance} are inert — Clerk theming here is driven by
+ * `variables` (colours) plus real CSS in `AuthShell.module.css` that
+ * targets Clerk's stable `cl-*` classes (card-less chrome, hidden
+ * duplicate header/footer, pill primary). This object only adjusts the
+ * `layout` to put the social buttons on TOP (Google/GitHub → "or"
+ * divider → email/password), matching the reference. Auth behaviour is
+ * unchanged — purely visual.
+ */
+export const clerkAuthAppearance = {
+  ...clerkAppearance,
+  layout: {
+    ...clerkAppearance.layout,
+    socialButtonsPlacement: 'top' as const,
+    socialButtonsVariant: 'blockButton' as const,
+  },
+} as const;

@@ -1452,3 +1452,300 @@ Resolution: build the id as `re_` + sha256(sessionId + '|' + toolUseId + '|' + p
 **Module 09 Track 9B (Graphify) is COMPLETE — G0–G4 all shipped.** Next: the Jira track, J0 (spec + ADR-015) → J1–J4.
 
 **Reference:** `apps/web-v2/app/settings/integrations/page.tsx`, `apps/web-v2/lib/{actions,queries}/integrations.ts`, `apps/web-v2/app/onboarding/team/page.tsx`, `packages/cli/package.json` (exports map).
+
+---
+
+## 2026-05-23 — ADR-015: Graphify is query-only; retire seed_feature_packs_from_graph + build_codebase_graph
+
+**Decision.** Retire the two Coodra MCP tools that consumed Graphify's graph to mint Feature Packs (`seed_feature_packs_from_graph`, `build_codebase_graph`), the bundled `graphify-seed-packs` recipe, and the optional `structure` block on `get_feature_pack`. Keep `coodra graphify enable/disable/status` (wires Graphify's OWN MCP server) and the web integrations card. MCP tool count 17 → 15. Full record: `essentialsforclaude/11-adrs.md` ADR-015.
+
+**Rationale.** Evidence from two real repos. On a 9,659-node project Graphify produced 588 Leiden communities; the seed would mint 588 Feature Packs, **73.5% single-file** (config files like `.mcp.json`/`.coodra.json`, READMEs, `__init__.py`), only 2.4% module-sized. Two compounding defects: (1) wrong granularity — a Leiden community ("densely cross-referencing files") is not a module; 1-community-1-pack is a mechanical transform that yields noise, and the seed wrote only a file-list `spec.md` with stub impl/techstack; (2) un-injectable — seeded packs had `parentSlug=null` + their own slug, and `get_feature_pack`'s `filePath` param (the only file→pack bridge) was destructured-and-discarded (`filePath: _filePath`), so neither SessionStart (injects by project slug) nor on-demand pull ever reached them. The premise was wrong: the code graph is a navigation map, not a pack source.
+
+**Alternatives considered.** (a) Fix both gaps — roll communities into ~12 modules + agent-author real specs + implement filePath resolution. Rejected for now: large build on a wrong premise; recorded as ADR-015 preconditions if revisited. (b) Cap the seed to top-N largest communities + fix resolution. Rejected: boundaries still structural-not-architectural, content still a file-list. (c) Retire entirely, keep Graphify as query-only (CHOSEN by user 2026-05-23): honest about what Graphify is good for — its live structural-query MCP.
+
+**Files touched.** mcp-server: deleted `tools/{seed-feature-packs-from-graph,build-codebase-graph}/` + 3 test files; barrel; `lib/feature-pack.ts` (structure schema/type/field); `tools/get-feature-pack/{schema,handler}.ts`; boot + boot-team-mode + get-feature-pack integration tests (count 16→15). cli: deleted `lib/init/graphify-feature.ts` + test; rewrote `commands/graphify.ts` (query-only messaging); `commands/init.ts` (no recipe seed); `program.ts` (dropped `--no-feature`); `package.json` (dropped graphify-feature export); graphify+init tests; help snapshot. web-v2: `lib/actions/integrations.ts` (dropped seed call). docs: README (16→15 + Graphify note), system-architecture §16/§24, ADR-010 (partial-supersede note) + new ADR-015.
+
+**Verification.** mcp-server 249 unit + typecheck + lint green; cli 449 unit + typecheck + lint green; web-v2 typecheck green. Standing position: Feature Packs stay human/agent-authored at module granularity (the working core Coodra flow); Graphify delivers structural queries via its own MCP.
+
+---
+
+## 2026-05-31 — Jira integration LOCKED: Direct (wire Rovo MCP) + Link & on-request write-back
+
+**Decision.** Module 09 Track 9A (Jira). Two forks locked with the user: (1) **Direct** — wire Atlassian's official Remote MCP server (Rovo) into the agent config, same pattern as Graphify (ADR-010/015); Coodra builds NO Jira client, OAuth, ADF converter, webhooks, or `jira_*` tools. (2) **Fusion = Link + on-request write-back** — the Run records `issueRef` (Coodra history becomes Jira-aware), and at session end the agent can post the Context Pack summary to the linked issue on request, via Rovo's own comment tool.
+
+**Rationale.** Jira defines the work; Coodra coordinates; the integration closes the loop (context in → traceability captured → record back). Direct avoids the over-build we just retired with Graphify: Atlassian maintains Rovo (OAuth'd, current, free). Explicitly OUT (Graphify lessons): no Epic→Feature Pack auto-transform (an Epic is not a module blueprint), no Jira client rebuild.
+
+**Alternatives considered.** Build (Coodra's own 8 `jira_*` tools + OAuth 3LO + ADF + webhooks per §22) — rejected for the same reason as the Graphify seed: rebuilding a mature tool, high maintenance. Kept as the escape hatch ONLY if headless/server-side Jira access or Jira→Coodra webhook push becomes a real need (Rovo is per-user interactive OAuth, no headless).
+
+**Main unknown for J0.** Rovo is a REMOTE (SSE/HTTP + OAuth) MCP, not stdio like Graphify — the per-IDE wiring shape differs (native remote config vs `mcp-remote` shim). J0 verifies endpoint + OAuth + tool names + per-IDE config online before any code, writes **ADR-016** (supersedes §22 Build design), rewrites §22.
+
+**Plan.** Full phased plan J0–J4 in `Coodra/jira-integration-plan.md` (durable). ADR number: **ADR-016** (ADR-015 is now the Graphify retirement; the old "ADR-015 = Jira" reservation is reassigned). Development starts at J0 after the user compacts this conversation.
+
+---
+
+## 2026-05-31 — Jira J0 COMPLETE: ADR-016 written, §22 rewritten to Direct, Rovo verified online
+
+**Scope.** J0 is spec + docs only — NO product code (per the locked plan).
+
+**Online verification** (per `04-when-in-doubt.md`). Atlassian Rovo Remote MCP, confirmed 2026-05-31:
+- Endpoint `https://mcp.atlassian.com/v1/mcp`; IDE-auth variant `https://mcp.atlassian.com/v1/mcp/authv2`. Legacy `/v1/sse` deprecated, **OFF after 2026-06-30** — wire Streamable HTTP only.
+- Auth: OAuth 2.1 + RFC 7591 Dynamic Client Registration, per-user browser flow (`/mcp`). A headless API-token path exists but needs an Atlassian **org-admin to enable API-token auth** first (not the v1 default).
+- Jira tool names captured verbatim (read_jira: `getJiraIssue`, `getTransitionsForJiraIssue`, `getVisibleJiraProjects`, …; write_jira: `addCommentToJiraIssue`, `editJiraIssue`, `createJiraIssue`, `transitionJiraIssue`; search_jira: `searchJiraIssuesUsingJql`; shared: `atlassianUserInfo`, `getAccessibleAtlassianResources`). **No dedicated create-issue-link tool** on the verified surface.
+- Per-IDE wiring shapes captured: Claude Code `{type:"http",url}`; Cursor `{url}`; VS Code `servers`/`{url,type:http}`; Windsurf `{serverUrl}`; Codex `url`+`experimental_use_rmcp_client=true`; universal `npx mcp-remote` shim. Sources: Atlassian Rovo support docs (getting-started / setting-up-IDEs / supported-tools), `atlassian/atlassian-mcp-server`, Claude Code MCP docs, Codex MCP docs, Windsurf MCP docs.
+
+**Docs written.**
+- **ADR-016** appended to `essentialsforclaude/11-adrs.md` — Jira = Direct; supersedes the §22 Build design (8 `jira_*` tools, OAuth 3LO, ADF, webhooks, `integration_tokens`/`integration_events`, `IntegrationClient`).
+- **`system-architecture.md` §22 fully rewritten** to Direct (22.1–22.9). Cross-refs updated in the SAME change: §3 (Atlassian webhook route removed/noted), §16 Pattern 16 (Jira no longer uses `IntegrationClient`; GitHub still does), §17 (no Jira inbound webhook), §18 (no server-side Jira enrichment — agent pulls via Rovo), §21 (4 Jira open-decisions superseded; scope-expansion row → Direct-first), §24.4 (header 16→15), §24.5 (JIRA(8) manifest → "Jira via Rovo, 0 Coodra tools"), §24.6 (trigger taxonomy → Rovo tool names).
+- **`External api and library reference.md`** — new "Atlassian Remote MCP (Rovo)" subsection (the shipping path: endpoint/transport/OAuth/per-IDE table/verbatim tool names/gotchas); Build-era jira.js/OAuth/ADF/JQL subsections marked superseded.
+- **`05-agent-trigger-contract.md` §5.7** rewritten to Rovo tool names + "these are NOT Coodra's tools" + Coodra-side issueRef/write-back triggers; the SessionStart line + the §5.11 N/A-tools note updated.
+- **`docs/feature-packs/09-integrations/`** {spec,implementation,techstack,meta.json} aligned to ADR-015 + ADR-016: dropped the Epic→Feature-Pack transform, `import_jira_epic`, the `external_links`/`integrations` tables, and the 4-tool surface; net Jira MCP-tool delta **0–1**; zero schema migration; enablement presence read from the config file (like Graphify).
+- **`library-map.md`** Atlassian row points at the Rovo subsection (shipping) vs Build-era (historical).
+
+**Net effect.** Coodra MCP manifest stays at **15** tools (Direct adds 0–1). **Zero** new DB tables for Jira. Agent-facing Jira tools come from the wired Rovo MCP, not Coodra.
+
+**Next: J1** — `coodra jira enable/disable/status` via `packages/cli/src/lib/init/jira-wire.ts` (remote `url` entry shape) + the `coodra init` Jira step + unit/integration tests.
+
+**J1 wiring decision (2026-05-31, user-chosen): native remote entries only — NO `mcp-remote` shim.** All four target agents support native remote MCP, so `coodra jira enable` writes each client's native shape: Claude Code `{type:"http",url}`, Cursor `{url}`, Windsurf `{serverUrl}`, Codex top-level `experimental_use_rmcp_client = true` + `[mcp_servers.atlassian] url`. No Node proxy process; OAuth is each client's native `/mcp` flow. A purely stdio-only client (none of the four) is left unsupported for Jira rather than shimmed. This means the JSON/TOML writers must gain a **native-remote entry shape** that differs per client (`type+url` vs bare `url` vs `serverUrl`) — more than Graphify's single uniform stdio `{command,args}` entry. Docs updated to match (§22.3, External-api Rovo subsection, 09-integrations/implementation.md).
+
+---
+
+## 2026-05-31 — Jira J1 COMPLETE: `coodra jira enable/disable/status` + init step (native remote, no shim)
+
+**What shipped (real product code).**
+- **Widened the 9·Core writers** for native-remote entries: `external-mcp-merge.ts` gained `RemoteMcpEntry` + `McpEntry` union (the merge logic was already shape-agnostic — only the entry TYPE was stdio-only). `external-codex-merge.ts` generalized `entryToTomlObject` for `url`-based entries and added an idempotent `topLevel` option (sets `experimental_use_rmcp_client = true`; never stripped on disable since it's global; the "entry matches but flag missing → set it" branch is handled).
+- **Fixed doctor check 14** (`14-mcp-config-validity.ts`): `command` is now optional + passthrough so a remote `atlassian` sibling entry doesn't make `coodra doctor` read `.mcp.json` as invalid. (`detect.ts::detectExistingMCPConfig` left strict — it's unused outside detect.ts and a remote entry never flows through it.)
+- **`lib/init/jira-wire.ts`** (new) — sibling of `graphify-wire.ts`: `JIRA_SERVER_NAME='atlassian'`, `ROVO_MCP_URL`, `CODEX_REMOTE_TOPLEVEL`, per-IDE `buildJiraEntry` (Claude `{type:http,url}` / Cursor `{url}` / Windsurf `{serverUrl}` / Codex `{url}`+flag), `wireJira`/`unwireJira`/`readJiraPresence`. Re-exports `IDE`/`IDE_ORDER` for the web (J4).
+- **`commands/jira.ts`** (new) — `enable`/`disable`/`status` mirroring `commands/graphify.ts`; OAuth-completion notice (run `/mcp`; interactive-only; getJiraIssue/etc are Atlassian's tools).
+- **`program.ts`** — registered the `jira` command group + `init --jira`/`--no-jira`.
+- **`commands/init.ts`** — opt-in Jira step (mirrors the Graphify step; default skip; writes nothing unless `--jira`/prompt-yes).
+- **package.json** — added `./lib/init/jira-wire` export (for J4 web); version `0.2.0-beta.14` → `0.2.0-beta.15`; `src/version.ts` synced.
+
+**Decision (user-chosen 2026-05-31): native remote entries only — NO `mcp-remote` shim.** All four agents support native remote, so none are dropped.
+
+**Verification.** CLI **496/496 unit** + **53 integration** (0 failed) + typecheck + Biome all green. Real-binary smoke (`tsx src/index.ts jira enable --ide claude,codex`) writes the correct shapes: `.mcp.json` `atlassian:{type:http,url}`, `.codex/config.toml` top-level `experimental_use_rmcp_client = true` + `[mcp_servers.atlassian] url` (TOML scalar-before-table order correct); `jira status` reports claude+codex wired. New tests: `jira-wire.test.ts` + `commands/jira.test.ts` (+111 in those two files); `program.test.ts` subcommand list + help snapshot updated for the `jira` group.
+
+**Next: J2** — Run↔issue linkage. The one open fork: a `link_run_to_issue` MCP tool (manifest 15→16) vs an optional `issueRef` param on `get_run_id` (stays 15, preferred). Then make `query_run_history`/`query_decisions` issueRef-aware.
+
+---
+
+## 2026-05-31 — Jira J2 COMPLETE: link_run_to_issue tool + issue-aware history (manifest 15 → 16)
+
+**Decision (user-chosen).** Linkage mechanism = a dedicated **`link_run_to_issue`** MCP tool (NOT an `issueRef` param on `get_run_id`). The user accepted the manifest going 15 → 16 for the clearer, explicit trigger.
+
+**What shipped (real product code, apps/mcp-server).**
+- **`link_run_to_issue`** tool (`src/tools/link-run-to-issue/{schema,handler,manifest}.ts`) — Coodra's ONE Jira MCP tool. Input `{ runId, issueRef }`; Jira-key regex + uppercase normalisation; discriminated-union output (success `{runId, issueRef, previousIssueRef, updated}` / `run_not_found` soft-failure). Handler mirrors `get_run_id` (no auth gate — issueRef is run infra scoped by an unguessable runId) + `record_decision` (team-mode `sync_to_cloud` enqueue of the runs row by id). Idempotent no-op when already bound; reports `previousIssueRef` on rebind. Registered in the barrel.
+- **`query_run_history`** + **`query_decisions`** gained an optional `issueRef` filter (case-insensitive, uppercased to match the canonical stored key) — the "what touched / was decided for PROJ-412?" read path. query_run_history already surfaced issueRef; query_decisions already inner-joins runs, so both were small additions.
+- **Manifest 15 → 16.** Updated boot.test.ts + boot-team-mode count assertions; the e2e `manifest-e2e.test.ts` `EXPECTED_TOOLS` + `PROBE_INPUTS` (also FIXED a pre-existing ADR-015 staleness there — the retired `seed_feature_packs_from_graph` was still listed; the e2e is main-only so it wasn't caught). Docs: §22.4/22.5/22.9, §24.4 (header + note), §24.5, ADR-016, README (15→16), 09-integrations spec/impl/techstack, §5.7 (the link_run_to_issue trigger).
+
+**Schema.** Zero migration — reuses the existing `runs.issue_ref` column (both dialects).
+
+**Verification.** mcp-server **260 unit** + integration green (new: link-run-to-issue unit 11, integration 5, issue-aware-queries 2; query-tool regressions pass); typecheck + Biome clean. e2e manifest test updated to the 16-tool set.
+
+**Next: J3** — on-request write-back (agent posts the Context Pack summary to the linked issue via Rovo's `addCommentToJiraIssue`; mostly trigger-contract guidance + an optional summary helper). Then J4 (web card + onboarding + e2e).
+
+---
+
+## 2026-05-31 — Jira J3 COMPLETE: prepare_jira_comment write-back helper (manifest 16 → 17)
+
+**Decision (user-chosen).** Build the optional summary **helper tool** (`prepare_jira_comment`), not pure trigger-contract guidance. The split is **Coodra assembles, Rovo posts**: Coodra's tool builds the comment body from its own records; the agent posts it via Rovo's `addCommentToJiraIssue`, on user request only. Manifest 16 → 17.
+
+**What shipped (apps/mcp-server).**
+- **`prepare_jira_comment`** (`src/tools/prepare-jira-comment/{schema,handler,manifest}.ts`) — **read-only** (kind `readonly`). Input `{ runId, maxDecisions=3 }`. Reads the run's `issueRef` (soft-fail `not_linked` if null), its latest `context_pack` (title + content/excerpt), and its top-N decisions; assembles a markdown `body` and returns `{ ok:true, issueRef, body }`. Soft-failures: `run_not_found`, `not_linked`. **No Jira API call, no writes** — the agent posts the body via Rovo. A run with no pack still yields a valid (sparse) body from decisions. Registered in the barrel.
+- **Output schema gotcha:** two `ok:false` branches (`run_not_found` + `not_linked`) → can't use `z.discriminatedUnion('ok', …)` (duplicate discriminator "false"); used `z.union([...])` (same as `query_run_history`), distinguished by the `error` literal.
+- **Manifest 16 → 17.** boot.test.ts + boot-team-mode + e2e `EXPECTED_TOOLS`/`PROBE_INPUTS` → 17. Docs: ADR-016 (now TWO Coodra Jira tools), §22.4/22.6/22.9, §24.4/24.5, README (16→17, two places), 09-integrations spec/impl/techstack, §5.7 (write-back trigger via prepare_jira_comment → Rovo addCommentToJiraIssue).
+
+**Schema.** Zero migration — reads existing `runs` / `context_packs` / `decisions`.
+
+**Verification.** mcp-server unit + integration green (new: prepare-jira-comment unit 7 + integration 5); typecheck + Biome clean; rebuilt dist; e2e manifest test → 17-tool set.
+
+**Jira track J0–J3 DONE. Next (optional): J4** — web `/settings/integrations` Jira card + onboarding step + e2e walkthrough. CLI `0.2.0-beta.15` bundles J1+J2+J3 (mcp-server changes ship inside the tarball).
+
+---
+
+## 2026-05-31 — Jira J4 COMPLETE: web card + onboarding step (Jira track DONE)
+
+**What shipped (apps/web-v2).** Mirrors the Graphify G4 web pattern, reusing the J1 `jira-wire` exported from `@coodra/cli`.
+- `lib/queries/integrations.ts` — `readJiraIntegrationStatus()` (per-project `atlassian` MCP presence; `cloudHosted` skip).
+- `lib/actions/integrations.ts` — `enableJiraAction`/`disableJiraAction` (`refuseInTeamHosted`, autodetect IDEs, `wireJira`/`unwireJira`, never `--force`). Renamed `GRAPHIFY_SCHEMA` → `PROJECT_FORM_SCHEMA` (shared).
+- `app/settings/integrations/page.tsx` — a **Jira card** next to the Graphify card (local web = per-project Enable/Disable; team-hosted = read-only `coodra jira enable`), distinct `jiraEnabled`/`jiraDisabled` success banners.
+- `app/onboarding/team/page.tsx` — Step 6 gained a Jira section (`coodra jira enable` + `/mcp` sign-in note).
+- **Bonus fix:** the Graphify card + onboarding step still referenced the retired `graphify-seed-packs` recipe (ADR-015 staleness, uncaught since G4) — de-staled to "query-only".
+
+**Gotcha fixed:** the CLI `dist/lib/init/jira-wire.{js,d.ts}` was never emitted (J1 tested via `tsx` source, never ran the CLI `tsc` build) → web-v2 typecheck couldn't resolve `@coodra/cli/lib/init/jira-wire`. Fixed by `pnpm --filter @coodra/cli build:tsc-only`.
+
+**Verification.** web-v2 typecheck + Biome clean; 43 unit; `next build` compiles `/settings/integrations` + `/onboarding/team`. The Jira card is a structural mirror of the runtime-proven Graphify card.
+
+**Closeout pack:** `docs/context-packs/2026-05-31-jira-direct-integration.md` (full J0–J4 record).
+
+**JIRA TRACK (Module 09 Track 9A) COMPLETE — J0–J4.** Manifest 17 tools. Pending user action: rebuild the CLI bundle (`pnpm --filter @coodra/cli build`) + publish beta.15, then `coodra jira enable` + `/mcp` to exercise live.
+
+---
+
+## 2026-06-01 — Graphify interpreter auto-detection (CLI beta.16)
+
+**Decision.** `coodra graphify enable` (and `coodra init --graphify`, and the
+web `/settings/integrations` enable action) now **auto-detect and verify** a
+Python interpreter that can `import graphify.serve, mcp` BEFORE writing the
+`graphify` MCP entry — instead of hardcoding bare `python3`.
+
+**Why.** Recurring failure (4 projects: Triple8, hackhustle, jira_test,
+causeway): the default `python3` (system Homebrew Python) can't import the
+`graphify` package, so the wired MCP server crashed on spawn with
+`ModuleNotFoundError` — surfaced by the agent as a "failed" server. Every fresh
+wire hit it; the user had to manually `--python <uv path> --force` each time.
+
+**How.** New `packages/cli/src/lib/init/graphify-python.ts`:
+`resolveGraphifyPython()` probes ordered candidates (active `VIRTUAL_ENV` →
+project `.venv` → the interpreter behind the `graphify` binary's shebang on PATH
+→ uv-tool install via `uv tool dir` + well-known fallback → `python3`/`python`),
+runs `<py> -c "import graphify.serve, mcp"` against each, and wires the first
+that verifies. None verify → fall back to `python3` flagged `verified:false` so
+the caller prints the install instructions (never a silent broken entry). An
+explicit `--python` is honoured verbatim (verified only for messaging — pre-
+install wiring stays legitimate). Everything injectable (`verify`/`candidates`/
+`runUvToolDir`) for hermetic tests.
+
+**Alternatives considered.** (a) Refuse to wire when nothing verifies — rejected;
+pre-install wiring is a real workflow. (b) Keep `python3` default + louder notice
+— rejected; doesn't fix the common case (graphify IS installed, just not at
+`python3`). (c) Only fix `enable`, not `init`/web — rejected; same bug on all
+three surfaces, fixed consistently via the shared resolver.
+
+**Verification.** 506 CLI unit + 53 integration green; web-v2 typecheck + Biome
+clean; new `graphify-python.test.ts` (injected verify/candidates) + verified-path
+tests in `graphify.test.ts`. Live smoke on this machine: `coodra graphify enable`
+(no `--python`) auto-detected `…/graphifyy/bin/python3` via `graphify-shebang`,
+verified it, wrote it (not `python3`); explicit `/usr/bin/python3` honoured +
+flagged `verified:false`. Bumped CLI 0.2.0-beta.15 → **beta.16**; installed
+globally. The bundled-binary fix means the demo-doc "required fix" re-wire step
+is now optional (auto-detect handles it).
+
+---
+
+## 2026-06-01 — Login redesign + team-init→login web handoff fix (CLI beta.17/.18)
+
+**Login UI (beta.17).** Replaced `apps/web-v2` `/auth/sign-in` + `/auth/sign-up`
+with a two-panel editorial design (`components/AuthShell.tsx` + `.module.css`)
+wrapping Clerk's `<SignIn>`/`<SignUp>` (auth logic untouched). web-v2 ships **no
+Tailwind**, so the Clerk widget is themed via real CSS on its stable `cl-*`
+classes (card-less chrome, hidden duplicate header/footer, bordered social +
+inputs, mono labels, accent focus ring, pill primary) — NOT via the inert
+`appearance.elements` class strings. Bundled into the CLI web runtime.
+
+**Team-init→login web handoff (beta.18).** Diagnosed the reported "team init →
+browser opens an error" crash:
+- Real error (from web stderr): *"Clerk: auth() was called but Clerk can't detect
+  usage of clerkMiddleware()."*
+- Root cause: `coodra team init` writes `COODRA_MODE=team` + Clerk keys to
+  `~/.coodra/.env`, then **chains `coodra login` which opens the LOCAL web** — but
+  nothing (re)started that web in team mode. The browser hit either nothing
+  (web never started) or a **STALE** web started before the flip. A stale web is
+  the trap: its **Edge-runtime middleware** booted without `COODRA_MODE` → ran as
+  the solo pass-through (no `clerkMiddleware()`), while the **Node-runtime
+  layout** read `config.json`→team and called `auth()` → 500. `/api/healthz`
+  still returns 200 in that state, so a health probe can't detect it.
+- Confirmed the bundle/middleware are fine: a fresh standalone with the full
+  team env + `HOSTNAME=::` serves `/auth/sign-in`→200, `/`→307.
+
+**Fix.** New `packages/cli/src/lib/web-service.ts::restartWebFresh` (stop →
+reinstall → start → health, non-throwing). `coodra team init` calls it inside the
+`!noLogin` block **before** the chained login, so the browser always opens a
+working team-mode sign-in page. `team join` is unaffected (teammates use the
+admin's REMOTE web, not a local one). Gated on `!noLogin` so unit tests skip the
+daemon work; one team-init test that reached the login chain got `noLogin: true`.
+
+**Alternatives considered.** (a) Fix in `coodra login` for both paths — rejected
+for now: login also targets remote/deployed webs (would need local-URL gating)
+and is harder to keep test-hermetic; team-init is the only path that auto-chains
+login against a local web. (b) Make the Edge middleware read `config.json` —
+impossible (edge can't read fs). (c) Operational-only ("just restart") — rejected
+as the durable answer; the onboarding command should Just Work.
+
+**Verification.** 511 CLI unit (incl. new `web-service.test.ts` ×5) green;
+typecheck + Biome clean; web-v2 typecheck + `next build` clean. **Real
+end-to-end against the live machine:** invoked the built `restartWebFresh` →
+`{ok:true,healthy:true,port:3001}`, then `/auth/sign-in`→200, `/`→307, no
+`clerkMiddleware` error in the fresh web log. Bumped 0.2.0-beta.17 → **beta.18**;
+rebuilt bundle; refreshed global install. (beta.16 was already published; .17/.18
+are the republish path since npm refuses to overwrite a published version.)
+
+---
+
+## 2026-06-01 — `coodra start --tunnel` web-reload race + false success (CLI beta.19)
+
+**Symptom (reported).** `coodra start --tunnel` printed `✓ Coodra Web listening
+on :3001` then `✓ Web reloaded`, but `coodra status` showed **Web stopped** —
+nothing on :3001, no `com.coodra.web` unit in launchctl. The success was a lie.
+
+**Two bugs.**
+1. **launchd restart race.** `LaunchdDaemonManager.start()` did `bootout` →
+   `bootstrap` with **no wait between them**. `launchctl bootout` is async — it
+   returns before the daemon fully tears down (and, for the web, before its old
+   PID releases :3001). The post-tunnel reload (`reinstallWebForTunnel`) restarts
+   a web that was started seconds earlier, so the `bootstrap` raced the still-
+   unloading label → silently no-op'd (swallowed by `reject:false`) → **no unit
+   loaded**, while `start()` returned "success".
+2. **Ignored health result.** `reinstallWebForTunnel` `await`ed `waitForHealth`
+   but discarded the boolean (it returns false on timeout, doesn't throw), then
+   printed `✓ Web reloaded` unconditionally.
+
+**Fix.**
+- `LaunchdDaemonManager.start()` now polls `status()` (`launchctl print`) between
+  bootout and bootstrap until the label is gone (`waitUntilStopped`, 5s bound).
+  First-start is unaffected (first poll returns "stopped" immediately). This
+  makes EVERY restart path reliable — the tunnel reload, `restartWebFresh`
+  (beta.18), and repeated `coodra start`.
+- `reinstallWebForTunnel` now captures the health boolean and prints a real ⚠
+  ("web did not become healthy … re-run coodra stop && coodra start --tunnel")
+  instead of a false ✓.
+
+**Verification.** 511 CLI unit green (updated the launchd start test for the new
+bootout→print→bootstrap sequence). **Real end-to-end on the live machine:** after
+the fix, `coodra start --tunnel` → `coodra status` shows Web **running** :3001;
+local `/auth/sign-in`→200; the public `*.trycloudflare.com/api/healthz`→200.
+Bumped 0.2.0-beta.18 → **beta.19**; rebuilt bundle; refreshed global.
+
+---
+
+## 2026-06-01 — Teammate auth: JWKS verify on pk-only machines + installer version pin (CLI beta.20)
+
+**Two bugs broke teammate onboarding (reported from a Linux teammate box).**
+
+**1. `coodra team join` → "Failed to resolve JWK during verification."**
+`packages/shared/src/auth/verify-clerk-jwt.ts` no-secret path called
+`@clerk/backend::verifyToken(token, {})`. The comment claimed that derives the
+JWKS from the token's `iss`, but `@clerk/backend` can't resolve the signing key
+with neither `secretKey` (secret-gated BAPI JWKS) nor `jwtKey` (local PEM) → it
+throws "Failed to resolve JWK". So EVERY teammate (publishable-key-only) machine
+failed token verification → `team join`'s `writeToken` failed, and the MCP child
+refused mutating ops (record_decision / save_context_pack → "auth_required").
+**Fix:** for the no-secret path, verify the RS256 signature against Clerk's
+PUBLIC **Frontend API JWKS** (derived from the publishable key:
+`pk_(test|live)_<base64(host$)>` → `https://<host>/.well-known/jwks.json`) using
+`jose` (`createRemoteJWKSet` + `jwtVerify`, per-host cached). Added `jose@^6.2.3`
+to `@coodra/shared`. The admin/secret path is unchanged. **Verified against the
+live Clerk instance:** with ONLY the publishable key, `verifyClerkJwtAndExtractClaims`
+now returns full claims (org/role/email) for a real token.
+
+**2. Installer pulled `@coodra/cli@latest` = stale `beta.0`.**
+The `cli.sh` route (`/install/<token>/cli.sh`) defaulted the install tag to
+`latest`. Releases ship under the `beta` dist-tag, so `latest` is `0.2.0-beta.0`
+— teammates installed ancient code missing every fix (including #1). **Fix:**
+`coodra start` now injects `COODRA_CLI_VERSION=<VERSION>` into the web env
+(`buildServiceEnv`), and `cli.sh` pins the installer to that EXACT version when
+no explicit `COODRA_CLI_NPM_TAG` override is set — so a teammate installs the
+SAME build as the admin, regardless of dist-tags. Falls back to the override,
+then `latest`.
+
+**Verification.** 511 CLI + 251 shared unit green (updated the no-secret
+verify test to mock `jose` + use a valid-decoding pk); typecheck (shared/cli/
+web-v2) + Biome clean; `next build` clean. Bundled runtimes confirmed to carry
+both fixes (mcp-server runtime has the jose path; web cli.sh has the version
+pin). Bumped 0.2.0-beta.19 → **beta.20**; rebuilt bundle; refreshed global.
+
+**Still open / advised to the user (not yet code-fixed):** `coodra team install`
+(legacy) writes config but NOT the Clerk publishable key, so `coodra login`
+after it fails — teammates should use the curl/`team join` path only (the
+canonical Phase-G flow the cli.sh already invokes). The first-`coodra start`
+health timeout on the teammate's box looked like cold-boot slowness (succeeded on
+retry), not the launchd/systemd teardown race — left as-is pending a repro.

@@ -454,6 +454,9 @@ importers:
       '@clerk/backend':
         specifier: 3.3.0
         version: 3.3.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.3
       pino:
         specifier: ^10.3.1
         version: 10.3.1

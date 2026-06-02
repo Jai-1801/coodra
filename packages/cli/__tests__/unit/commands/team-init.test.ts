@@ -231,6 +231,9 @@ describe('runTeamInitCommand', () => {
           databaseUrl: 'postgres://x:y@h/d',
           clerkSecretKey: 'sk_test_xxx',
           readPrompt: async () => '2', // pick org_b
+          // Org-pick + finalize are asserted below (both happen before the
+          // login chain); skip the browser login + web (re)start in the test.
+          noLogin: true,
         },
         io,
       ),

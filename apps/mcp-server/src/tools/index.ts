@@ -6,9 +6,11 @@ import { createGetFeatureToolRegistration } from './get-feature/manifest.js';
 import { createGetFeatureFileToolRegistration } from './get-feature-file/manifest.js';
 import { getFeaturePackToolRegistration } from './get-feature-pack/manifest.js';
 import { createGetRunIdToolRegistration } from './get-run-id/manifest.js';
+import { createLinkRunToIssueToolRegistration } from './link-run-to-issue/manifest.js';
 import { createListContextPacksToolRegistration } from './list-context-packs/manifest.js';
 import { createListFeaturesToolRegistration } from './list-features/manifest.js';
 import { pingToolRegistration } from './ping/manifest.js';
+import { createPrepareJiraCommentToolRegistration } from './prepare-jira-comment/manifest.js';
 import { createQueryDecisionsToolRegistration } from './query-decisions/manifest.js';
 import { createQueryRunDiffToolRegistration } from './query-run-diff/manifest.js';
 import { createQueryRunHistoryToolRegistration } from './query-run-history/manifest.js';
@@ -16,7 +18,6 @@ import { createReadContextPackToolRegistration } from './read-context-pack/manif
 import { createRecordDecisionToolRegistration } from './record-decision/manifest.js';
 import { createSaveContextPackToolRegistration } from './save-context-pack/manifest.js';
 import { createSearchPacksNlToolRegistration } from './search-packs-nl/manifest.js';
-import { createSeedFeaturePacksFromGraphToolRegistration } from './seed-feature-packs-from-graph/manifest.js';
 
 /**
  * `apps/mcp-server/src/tools/index.ts` — registration barrel.
@@ -76,10 +77,22 @@ export function registerAllTools(registry: ToolRegistry, deps: RegisterAllToolsD
   // save_context_pack. ADR-013 records why M06 ships TypeScript-in-
   // process with no external LLM (supersedes ADR-002 for this module).
   registry.register(createQueryRunDiffToolRegistration({ db: deps.db }));
-  // Module 09 (External MCP Integrations, track 9B / G2): turns Leiden
-  // communities the agent fetched from the Graphify MCP server into draft
-  // Feature Packs. The cold-start fix — a fresh repo gets a reviewable
-  // Feature Pack skeleton without manual authoring. See ADR-010 (rewritten)
-  // and docs/feature-packs/09-integrations/.
-  registry.register(createSeedFeaturePacksFromGraphToolRegistration({ db: deps.db }));
+  // Module 09 (External MCP Integrations, track 9A — Jira = Direct, ADR-016):
+  // link_run_to_issue binds a run to its Jira key (runs.issue_ref) so Coodra
+  // history is Jira-aware ("what touched PROJ-412?"). This is Coodra's ONLY
+  // Jira MCP tool — the Jira tools themselves (getJiraIssue, etc.) come from
+  // Atlassian's Rovo MCP wired alongside Coodra via `coodra jira enable`, not
+  // from this server. J2 added link_run_to_issue; J3 added prepare_jira_comment
+  // (the on-request write-back helper — assembles the session summary from the
+  // Context Pack + decisions; the AGENT posts it via Rovo's addCommentToJiraIssue,
+  // only when the user asks). Coodra's only two Jira tools. Tool count 15 → 17.
+  registry.register(createLinkRunToIssueToolRegistration({ db: deps.db }));
+  registry.register(createPrepareJiraCommentToolRegistration({ db: deps.db }));
+  // Module 09 (External MCP Integrations, track 9B): Graphify is consumed
+  // as its OWN MCP server wired alongside Coodra (ADR-010 / ADR-015) — the
+  // agent calls Graphify's query_graph/get_node/etc. directly. Coodra mints
+  // NO packs from the graph: the seed_feature_packs_from_graph +
+  // build_codebase_graph tools were retired 2026-05-23 (ADR-015) because a
+  // 1-community-1-pack dump produced hundreds of un-injectable shells. See
+  // docs/feature-packs/09-integrations/ and `coodra graphify enable`.
 }

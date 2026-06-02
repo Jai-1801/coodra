@@ -3,6 +3,7 @@ import 'server-only';
 import { homedir } from 'node:os';
 import { detectIDE } from '@coodra/cli/lib/detect';
 import { type IDE, readGraphifyPresence } from '@coodra/cli/lib/init/graphify-wire';
+import { readJiraPresence } from '@coodra/cli/lib/init/jira-wire';
 
 import { isCloudHostedWeb } from '@/lib/deployment-mode';
 import { listProjects } from '@/lib/queries/projects';
@@ -70,6 +71,59 @@ export async function readGraphifyIntegrationStatus(): Promise<GraphifyIntegrati
     let wiredCount = 0;
     for (const ide of detectedAgents) {
       const presence = await readGraphifyPresence({ ide, cwd: project.cwd, userHome });
+      if (presence.wired) wiredCount += 1;
+    }
+    out.push({ slug: project.slug, name: project.name, cwd: project.cwd, wiredCount });
+  }
+
+  return { cloudHosted: false, detectedAgents, projects: out };
+}
+
+/* ---------------------------------------------------------------------------
+ * Jira (Atlassian Rovo) — Module 09, Track 9A (J4). Same read-side shape as
+ * Graphify: per registered project, how many detected agents carry the
+ * `atlassian` (Rovo) remote MCP entry. Probes the same configs `coodra jira
+ * status` does. Team-hosted web returns cloudHosted=true and the page renders
+ * the `coodra jira enable` CLI command instead.
+ * ------------------------------------------------------------------------- */
+
+export interface JiraProjectStatus {
+  readonly slug: string;
+  readonly name: string;
+  /** Absolute project root. Null on pre-0010 rows that never recorded a cwd. */
+  readonly cwd: string | null;
+  /** How many of the machine's detected agents carry the `atlassian` (Rovo) MCP entry. */
+  readonly wiredCount: number;
+}
+
+export interface JiraIntegrationStatus {
+  readonly cloudHosted: boolean;
+  readonly detectedAgents: ReadonlyArray<IDE>;
+  readonly projects: ReadonlyArray<JiraProjectStatus>;
+}
+
+/**
+ * Resolve the Jira (Atlassian Rovo) integration status for the integrations
+ * page. Read-only — never writes a config file.
+ */
+export async function readJiraIntegrationStatus(): Promise<JiraIntegrationStatus> {
+  if (isCloudHostedWeb()) {
+    return { cloudHosted: true, detectedAgents: [], projects: [] };
+  }
+
+  const userHome = homedir();
+  const detectedAgents = await detectIDE();
+  const projects = await listProjects();
+
+  const out: JiraProjectStatus[] = [];
+  for (const project of projects) {
+    if (project.cwd === null) {
+      out.push({ slug: project.slug, name: project.name, cwd: null, wiredCount: 0 });
+      continue;
+    }
+    let wiredCount = 0;
+    for (const ide of detectedAgents) {
+      const presence = await readJiraPresence({ ide, cwd: project.cwd, userHome });
       if (presence.wired) wiredCount += 1;
     }
     out.push({ slug: project.slug, name: project.name, cwd: project.cwd, wiredCount });

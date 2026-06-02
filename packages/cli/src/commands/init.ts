@@ -21,9 +21,10 @@ import { writeCoodraJson } from '../lib/init/coodra-json.js';
 import { mergeCursorMcpConfig } from '../lib/init/cursor-merge.js';
 import { type BaselineEnv, mergeEnvFile } from '../lib/init/env-merge.js';
 import { seedFeaturePack } from '../lib/init/feature-pack-seed.js';
-import { seedGraphifySeedPacksFeature } from '../lib/init/graphify-feature.js';
-import { DEFAULT_GRAPHIFY_GRAPH_PATH, DEFAULT_GRAPHIFY_PYTHON, wireGraphify } from '../lib/init/graphify-wire.js';
+import { type GraphifyPythonResolver, resolveGraphifyPython } from '../lib/init/graphify-python.js';
+import { DEFAULT_GRAPHIFY_GRAPH_PATH, wireGraphify } from '../lib/init/graphify-wire.js';
 import { mergeInstructionFile } from '../lib/init/instruction-files.js';
+import { wireJira } from '../lib/init/jira-wire.js';
 import { buildCoodraMcpEntry, mergeMcpJson } from '../lib/init/mcp-merge.js';
 import type { WriteOutcome } from '../lib/init/types.js';
 import { mergeWindsurfMcpConfig } from '../lib/init/windsurf-merge.js';
@@ -40,6 +41,7 @@ export interface InitOptions {
   readonly projectSlug?: string;
   readonly ide?: string;
   readonly graphify?: boolean;
+  readonly jira?: boolean;
   readonly dryRun?: boolean;
   readonly force?: boolean;
   readonly cwd?: string;
@@ -53,6 +55,8 @@ export interface InitOptions {
    */
   readonly userHome?: string;
   readonly env?: NodeJS.ProcessEnv;
+  /** Injectable Graphify interpreter resolver (tests). Defaults to the real probe-and-verify path. */
+  readonly resolvePython?: GraphifyPythonResolver;
   /**
    * Module 08b S13: feature-pack template selector. Bare name resolves
    * via `resolveTemplatePath` (user-installed → bundled). A path
@@ -704,11 +708,12 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
   }
 
   // Module 09 (Track 9B, ADR-010) — optional Graphify wiring. Graphify
-  // ships its own stdio MCP server; when the user opts in, `init` wires
-  // it next to the `coodra` entry in each agent config and seeds the
-  // `graphify-seed-packs` skill. Graphify is NOT wired by default — it
-  // needs a separate install (`graphifyy[mcp]`) plus a built graph, so
-  // a blind wire would point at a server that isn't there.
+  // ships its own stdio MCP server (a structural-query tool); when the
+  // user opts in, `init` wires it next to the `coodra` entry in each
+  // agent config. Graphify is NOT wired by default — it needs a separate
+  // install (`graphifyy[mcp]`) plus a built graph, so a blind wire would
+  // point at a server that isn't there. Coodra mints no packs from the
+  // graph (ADR-015) — the agent calls Graphify's query tools directly.
   //   --graphify     → wire it (no prompt)
   //   --no-graphify  → skip it (no prompt)
   //   neither + TTY  → prompt (default: skip)
@@ -726,8 +731,9 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
     const graphifyInteractive = options.readPrompt !== undefined || process.stdin.isTTY === true;
     if (graphifyInteractive) {
       io.writeStdout(
-        `\n${pc.bold('Wire Graphify?')} ${pc.gray('— Graphify builds a codebase knowledge graph and ships its own MCP server.')}\n` +
-          `  ${pc.gray('Needs `graphifyy[mcp]` installed + a built graph. Skip if unsure — `coodra graphify enable` adds it any time.')}\n`,
+        `\n${pc.bold('Wire Graphify?')} ${pc.gray('— Graphify is a codebase-graph MCP server for structural queries (what depends on X, where is Y defined).')}\n` +
+          `  ${pc.gray('Needs a venv install (`graphifyy[mcp]`) + a built graph (`/graphify .` in the assistant).')}\n` +
+          `  ${pc.gray('Skip if unsure — `coodra graphify enable` adds it any time.')}\n`,
       );
       const answer = (await graphifyReadPrompt(`  Wire Graphify's MCP server? [${pc.cyan('y')}/${pc.cyan('N')}]: `))
         .trim()
@@ -739,6 +745,13 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
   }
 
   if (wireGraphifyChoice && ides.length > 0) {
+    // Auto-detect + verify an interpreter that can `import graphify.serve,
+    // mcp` instead of hardcoding bare `python3` (which usually can't, and
+    // would write a graphify entry the agent reports as "failed").
+    const graphifyResolution = await (options.resolvePython ?? resolveGraphifyPython)({
+      cwd: root,
+      env: options.env ?? process.env,
+    });
     for (const ide of ides) {
       try {
         outcomes.push(
@@ -746,7 +759,7 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
             ide,
             cwd: root,
             userHome,
-            python: DEFAULT_GRAPHIFY_PYTHON,
+            python: graphifyResolution.python,
             graphPath: DEFAULT_GRAPHIFY_GRAPH_PATH,
             force,
             dryRun,
@@ -756,20 +769,81 @@ export async function runInitCommand(options: InitOptions = {}, io: InitIO = DEF
         io.writeStderr(`${pc.yellow('⚠')} Could not wire Graphify for ${ide}: ${(err as Error).message}\n`);
       }
     }
-    try {
-      outcomes.push(await seedGraphifySeedPacksFeature({ cwd: root, projectSlug, force, dryRun }));
-    } catch (err) {
-      io.writeStderr(`${pc.yellow('⚠')} Could not seed the graphify-seed-packs skill: ${(err as Error).message}\n`);
+    if (graphifyResolution.verified) {
+      io.writeStdout(
+        `${pc.green('✓')} Wired Graphify's MCP server with a verified interpreter ${pc.gray(`(${graphifyResolution.python})`)}.\n` +
+          `  ${pc.gray('Next: build the graph ─ `/graphify .` in the assistant (or `graphify update .`), then reconnect the agent.')}\n`,
+      );
+    } else {
+      io.writeStdout(
+        `${pc.green('✓')} Wired Graphify's MCP server (structural-query tool). ${pc.yellow('No working interpreter found yet —')}\n` +
+          `  ${pc.gray('install ─ `uv venv .venv && uv pip install --python .venv/bin/python "graphifyy[mcp]"`')}\n` +
+          `  ${pc.gray('then build the graph ─ `/graphify .` in the assistant (or `.venv/bin/graphify update .`)')}\n` +
+          `  ${pc.gray('then re-wire ─ `coodra graphify enable --force` (auto-detects), or pin `--python .venv/bin/python`')}\n`,
+      );
     }
-    io.writeStdout(
-      `${pc.green('✓')} Wired Graphify's MCP server + seeded the graphify-seed-packs skill. ` +
-        'Install it (`uv tool install graphifyy`) and run `/graphify .` to build the graph.\n',
-    );
   } else if (options.graphify === false) {
     io.writeStdout(`${pc.gray('·')} Skipped Graphify wiring (--no-graphify).\n`);
   } else {
     io.writeStdout(
       `${pc.gray('·')} Graphify not wired. Run \`coodra graphify enable\` any time to add its codebase-graph MCP server.\n`,
+    );
+  }
+
+  // Module 09 (Track 9A, ADR-016) — optional Jira wiring. Atlassian ships
+  // its own remote MCP server ("Rovo"); when the user opts in, `init`
+  // wires it next to the `coodra` entry in each agent config. Jira is NOT
+  // wired by default — it needs a per-user OAuth sign-in (via the
+  // assistant's `/mcp`), so a blind wire would point at a server the user
+  // hasn't authorized. Coodra builds no Jira client (ADR-016) — the agent
+  // calls Atlassian's tools directly. Native remote entry only — no shim.
+  //   --jira     → wire it (no prompt)
+  //   --no-jira  → skip it (no prompt)
+  //   neither + TTY  → prompt (default: skip)
+  //   neither, non-interactive → skip with a hint
+  let wireJiraChoice: boolean;
+  if (options.jira === true) {
+    wireJiraChoice = true;
+  } else if (options.jira === false) {
+    wireJiraChoice = false;
+  } else if (ides.length === 0) {
+    wireJiraChoice = false;
+  } else {
+    const jiraReadPrompt = options.readPrompt ?? defaultInitReadPrompt;
+    const jiraInteractive = options.readPrompt !== undefined || process.stdin.isTTY === true;
+    if (jiraInteractive) {
+      io.writeStdout(
+        `\n${pc.bold('Wire Jira?')} ${pc.gray("— Atlassian's Rovo remote MCP lets the agent read tickets + post on request (getJiraIssue, searchJiraIssuesUsingJql, addCommentToJiraIssue).")}\n` +
+          `  ${pc.gray('Needs a per-user OAuth sign-in in your assistant (`/mcp`). No Coodra app, no API key.')}\n` +
+          `  ${pc.gray('Skip if unsure — `coodra jira enable` adds it any time.')}\n`,
+      );
+      const answer = (await jiraReadPrompt(`  Wire Atlassian Jira's MCP server? [${pc.cyan('y')}/${pc.cyan('N')}]: `))
+        .trim()
+        .toLowerCase();
+      wireJiraChoice = answer === 'y' || answer === 'yes';
+    } else {
+      wireJiraChoice = false;
+    }
+  }
+
+  if (wireJiraChoice && ides.length > 0) {
+    for (const ide of ides) {
+      try {
+        outcomes.push(await wireJira({ ide, cwd: root, userHome, force, dryRun }));
+      } catch (err) {
+        io.writeStderr(`${pc.yellow('⚠')} Could not wire Jira for ${ide}: ${(err as Error).message}\n`);
+      }
+    }
+    io.writeStdout(
+      `${pc.green('✓')} Wired Atlassian Jira's remote MCP server (Rovo).\n` +
+        `  ${pc.gray('Next: complete the OAuth sign-in ─ run `/mcp` in your assistant and authorize the `atlassian` server.')}\n` +
+        `  ${pc.gray('Then ask about tickets ─ "open PROJ-123", "my open tickets", "post the summary to the ticket".')}\n`,
+    );
+  } else if (options.jira === false) {
+    io.writeStdout(`${pc.gray('·')} Skipped Jira wiring (--no-jira).\n`);
+  } else {
+    io.writeStdout(
+      `${pc.gray('·')} Jira not wired. Run \`coodra jira enable\` any time to add Atlassian's Jira (Rovo) MCP server.\n`,
     );
   }
 

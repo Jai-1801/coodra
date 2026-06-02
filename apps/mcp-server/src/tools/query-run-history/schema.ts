@@ -30,6 +30,16 @@ export const queryRunHistoryInputSchema = z
     // the runs that were abandoned" if needed; default behaviour
     // (status omitted) returns every status including 'abandoned'.
     status: z.enum(['in_progress', 'completed', 'failed', 'abandoned']).optional(),
+    // Module 09 J2 (2026-05-31, ADR-016 — Jira = Direct). Filter to runs
+    // bound to a specific Jira issue (runs.issue_ref, set by
+    // link_run_to_issue). Case-insensitive — matched upper-cased against
+    // the normalised stored key. This is the "what touched PROJ-412?" query.
+    issueRef: z
+      .string()
+      .min(1)
+      .max(64)
+      .optional()
+      .describe('Filter to runs bound to this Jira issue key (e.g. PROJ-412), case-insensitive.'),
     limit: z
       .number()
       .int()

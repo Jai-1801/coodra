@@ -40,6 +40,13 @@ Cursor hooks are command-based (stdin/stdout JSON) while Claude Code supports HT
 
 ## ADR-010 — Graphify consumed via its own MCP server (Option C, rewritten 2026-05-21)
 
+> **PARTIALLY SUPERSEDED by ADR-015 (2026-05-23).** The "wire Graphify's own
+> MCP server" decision stands — that's how Graphify is consumed, and
+> `coodra graphify enable` still does exactly this. But the "What is added"
+> section below (the `seed_feature_packs_from_graph` + `build_codebase_graph`
+> tools and the `structure` block) is **retired**: minting one Feature Pack per
+> Leiden community produced hundreds of un-injectable shells. See ADR-015.
+
 > **Supersedes the original ADR-010** ("Graphify import for cold-start" — a
 > Coodra-owned `graph.json` reader plus a never-built community-to-Feature-Pack
 > importer). That design was never completed and its assumptions are stale: the
@@ -149,3 +156,163 @@ The original M06 "Semantic Diff" plan called for a Python FastAPI service on :32
 - `runs.base_sha` is still captured at SessionStart (the diff baseline).
 - The §7 three-tier degradation still applies — a `git diff` failure lands a soft-failure row with `error = 'git_diff_failed'`; tier-1 (events) and tier-3 (auto-pack) still succeed.
 - Append-only semantics stay (ADR-007) for `context_packs`. The new `run_diffs` table uses DELETE-then-INSERT idempotency for the same reason context_packs allow the M05 single-relaxation: a re-fired SessionEnd legitimately supersedes a prior incomplete attempt.
+
+## ADR-015 — Graphify is query-only; Coodra mints no Feature Packs from the graph (2026-05-23)
+
+Partially supersedes ADR-010. The "wire Graphify's own MCP server" half of
+ADR-010 stands; the "turn Leiden communities into draft Feature Packs" half is
+retired.
+
+**What is retired.**
+- The `coodra__seed_feature_packs_from_graph` MCP tool (one draft Feature Pack
+  per Leiden community).
+- The `coodra__build_codebase_graph` MCP tool (a `graphify update` subprocess
+  wrapper that existed only to feed the seed). MCP tool count 17 → **15**.
+- The `graphify-seed-packs` bundled Feature recipe (`graphify-feature.ts`) and
+  its seeding from `coodra graphify enable`, `coodra init`, and the web
+  `/settings/integrations` enable action.
+- The optional `structure` block on `get_feature_pack` (`featurePackStructureSchema`)
+  — it had no producer once seeding was gone.
+
+**What stays.**
+- `coodra graphify enable / disable / status` — wiring Graphify's **own** stdio
+  MCP server into the agent config. This is the ADR-010 Option-C decision and is
+  unchanged. The agent calls Graphify's `query_graph` / `get_node` /
+  `get_neighbors` / `shortest_path` directly.
+- The web `/settings/integrations` Graphify card (wiring only).
+- The 9·Core wiring substrate (`graphify-wire.ts`, `external-mcp-merge.ts`,
+  `external-codex-merge.ts`).
+
+**Why.** Evidence from two real codebases. On a 9,659-node repo Graphify
+produced 588 Leiden communities; the seed would mint 588 Feature Packs, of which
+**73.5% were single-file communities** — config files (`.mcp.json`,
+`.coodra.json`), READMEs, `__init__.py`. Only 2.4% were module-sized. Two
+independent defects compounded:
+
+1. **Wrong granularity (authoring).** A Leiden community ("files that reference
+   each other densely") is not a module. 1-community-1-pack is a mechanical
+   transform that produces noise, not the ~10–15 module blueprints a human
+   architect would write. The seed also wrote only a file-list `spec.md`;
+   `implementation.md` / `techstack.md` were stubs.
+2. **Un-injectable (resolution).** Seeded packs carried `parentSlug=null` and
+   their own slug, so neither injection path reached them: SessionStart injects
+   by **project** slug only, and `get_feature_pack`'s `filePath` param — the one
+   bridge from "editing file X" to "its pack" — was **destructured and discarded**
+   (`filePath: _filePath`). Even a perfectly authored seeded pack fell into a
+   hole.
+
+Fixing both would have meant: roll communities up into ~12 real modules, have
+the agent author genuine specs, AND implement `filePath`→`sourceFiles`
+resolution. That's a large build for a feature whose premise (the graph is the
+pack source) was wrong. The graph is a **navigation map**, not a pack source.
+
+**The standing position.** Graphify's value to Coodra is its **live structural
+query layer**, consumed through its own MCP. Feature Packs remain
+human/agent-authored at module granularity (the core Coodra flow, which works:
+a pack at the project slug is injected at SessionStart). If agent-assisted
+cold-start authoring is revisited later, it must (a) target module granularity,
+not communities, and (b) ship `filePath` resolution so the packs are reachable —
+both are explicit preconditions recorded here so a future session doesn't
+re-attempt the 1-community-1-pack dump.
+
+## ADR-016 — Jira is consumed via Atlassian's Remote MCP (Rovo); Coodra builds no Jira client (2026-05-31)
+
+Supersedes the `system-architecture.md` §22 "Build" design — the 8 `jira_*` MCP
+tools, the OAuth 2.0 3LO flow, hand-rolled ADF↔markdown conversion, inbound Jira
+webhooks, the `integration_tokens` / `integration_events` tables, and the
+`IntegrationClient` wrapper. Same decision shape as ADR-010 / ADR-015 for
+Graphify: **wire the external MCP, don't rebuild it.** This is the Jira (track
+9A) sibling of the Graphify (track 9B) decision under Module 09.
+
+**Context.** Atlassian ships an official, maintained **Remote MCP server**
+("Rovo") at `https://mcp.atlassian.com/v1/mcp` (IDE-auth variant
+`/v1/mcp/authv2`) — Streamable HTTP transport, OAuth 2.1 with RFC 7591 Dynamic
+Client Registration, exposing first-class Jira tools (`getJiraIssue`,
+`searchJiraIssuesUsingJql`, `createJiraIssue`, `editJiraIssue`,
+`addCommentToJiraIssue`, `transitionJiraIssue`, `getTransitionsForJiraIssue`,
+`getVisibleJiraProjects`, …) plus Confluence, Jira Service Management,
+Bitbucket, and Compass. The original §22 plan predated this — it specified
+Coodra building a `jira.js` REST client, owning a Coodra-side OAuth 2.0 3LO app,
+converting ADF by hand, registering webhooks, and shipping 8 `jira_*` tools
+mirroring the `jira_test/` prototype.
+
+**Decision.** Coodra consumes Jira by **wiring Atlassian's Rovo MCP into the
+agent's config** (next to the `coodra` server), exactly like `coodra graphify
+enable`. `coodra jira enable` writes the remote-MCP entry per IDE; the agent
+calls Atlassian's own Jira tools directly. Coodra builds **no** Jira REST
+client, **no** OAuth flow, **no** ADF converter, **no** webhook ingress, **no**
+`jira_*` tools.
+
+**What Rovo provides — Coodra builds NONE of it.** The Jira / Confluence tools,
+OAuth 2.1 + token refresh, the REST client, ADF↔markdown. Endpoint, transport,
+exact tool names, and per-IDE wiring shapes are recorded in `External api and
+library reference.md → Atlassian Remote MCP (Rovo)`.
+
+**What Coodra builds (its leverage).**
+- `coodra jira enable / disable / status` — wires Rovo's **remote** MCP server
+  into Claude Code / Cursor / Windsurf / Codex configs over the `9·Core` wiring
+  substrate (`graphify-wire.ts` → a sibling `jira-wire.ts`), extended for the
+  remote `url` entry shape. Graphify was stdio `{command,args}`; Rovo is remote
+  Streamable HTTP, so the writers gain a `url`-style entry (or, for stdio-only
+  clients, the `npx mcp-remote` shim — see the reference doc).
+- **Run ↔ issue linkage** — the existing `runs.issueRef` /
+  `context_packs.issueRef` columns bind a session to a ticket, so Coodra history
+  becomes Jira-aware ("what work touched PROJ-412?") with **zero schema
+  migration**.
+- **On-request write-back** — at session end, if the user asks, the agent posts
+  the Context Pack summary to the linked issue via Rovo's `addCommentToJiraIssue`.
+  Opt-in only; Jira is shared state and unprompted writes have a cost.
+- Onboarding placement (`coodra init` step + web `/settings/integrations` card)
+  + trigger-contract guidance (`05-agent-trigger-contract.md` §5.7).
+
+**What is retired from the §22 Build design.**
+- The 8 `jira_*` MCP tools (`jira_search_issues`, `jira_get_issue`,
+  `jira_create_issue`, `jira_update_issue`, `jira_list_transitions`,
+  `jira_transition_issue`, `jira_add_comment`, `jira_list_projects`, plus the
+  manifest-listed `jira_list_my_issues` / `jira_link_issues`). Direct adds
+  exactly **two** Coodra tools — `link_run_to_issue` (the Run↔issue link, J2)
+  and `prepare_jira_comment` (the on-request write-back helper, J3) — so the
+  manifest is **17**, not the Build design's +8. The agent-facing Jira
+  tools are Rovo's and are not counted.
+- The OAuth 2.0 3LO flow + the `integration_tokens` table. Rovo owns auth; **no
+  Jira token ever touches Coodra's DB or a developer's laptop.**
+- ADF↔markdown conversion (Rovo handles it).
+- Inbound Jira webhooks (`POST /v1/webhooks/atlassian`) + the
+  `integration_events` table + the `atlassian-webhook-event` worker + the
+  webhook-renewal cron. Rovo is **pull-only**; Coodra receives no Jira push.
+- The `IntegrationClient` circuit-breaker/rate-limiter wrapper *for Jira* (Jira
+  was its only consumer; GitHub §23 is a separate, still-Build track and keeps
+  its own pattern).
+- The server-side `get_feature_pack` Jira enrichment
+  (`jira.currentIssue` / `jira.openIssues`) and the NL-Assembly Jira injection —
+  the agent pulls live issue context via Rovo instead.
+
+**Why — the same lesson as ADR-015.** Reimplementing a mature, vendor-maintained
+tool is the error we just undid for Graphify. Atlassian maintains Rovo (OAuth'd,
+current, free, spec-aligned); a hand-rolled `jira.js` client + 3LO app + ADF
+converter + webhook fleet is a large, perpetually-drifting surface for a
+capability Atlassian already ships better. The ADR-015 anti-pattern is avoided
+structurally: **no Epic → Feature Pack auto-transform.** An Epic is not a module
+blueprint any more than a Leiden community is; if an epic's scope warrants a
+Feature Pack, a human/agent authors it. The fusion stays small and
+**reachable** — linkage you can query, write-back you can see on the ticket.
+
+**Caveats (known at decision time, 2026-05-31).**
+- Rovo is **per-user interactive OAuth** (browser flow via the IDE's `/mcp`
+  auth). Each developer authorizes their own Atlassian account. A **headless**
+  path exists (API-token auth for long-running / CI setups) but requires an
+  **Atlassian org-admin to enable API-token authentication** first — so it is
+  neither the default nor assumed. This is fine for interactive dev sessions
+  (the use case).
+- The HTTP+SSE endpoint (`/v1/sse`) is **deprecated and unsupported after
+  2026-06-30**. Coodra wires the Streamable HTTP endpoint (`/v1/mcp` /
+  `/v1/mcp/authv2`) only.
+- The single reason to revisit a "Build" approach later: a genuine need for
+  **server-side / headless** Jira access, or Jira→Coodra **webhook (push)**
+  events. Neither is in scope; record the need before re-opening.
+
+**The standing position.** Jira's value to Coodra is Atlassian's **live issue
+surface**, consumed through Rovo's MCP. Coodra's contribution is the **wiring**,
+the **Run↔issue link** (so history is Jira-aware), and **on-request write-back**
+(so the ticket reflects what the agent did). Feature Packs remain human/agent-
+authored at module granularity — never minted from epics.

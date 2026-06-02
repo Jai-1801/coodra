@@ -33,7 +33,7 @@ If you find yourself asking "should I use a feature pack or a feature for this?"
 
 If the previous session left an `in_progress` run, read its `context_memory/current-session.md` and "Next action" (see `03-context-memory.md`) before deciding whether to start something new.
 
-If `runs.issueRef` is set on the in-progress run AND the JIRA integration is active, also call `jira_get_issue { key: <issueRef> }`.
+If `runs.issueRef` is set on the in-progress run AND Atlassian's Rovo MCP is wired (`coodra jira enable`), also call Rovo's `getJiraIssue { issueIdOrKey: <issueRef> }` (§5.7 — this is Atlassian's tool, not a Coodra tool).
 
 If `runs.prRef` is set on the in-progress run AND the GitHub integration is active, also call `github_get_pr_context { prRef: <prRef> }`.
 
@@ -97,20 +97,26 @@ Triggers: *"refactor X"*, *"rename Y across the codebase"*, *"where is Z defined
 
 When the **Graphify integration is active** (Module 09 track 9B — the `graphify` MCP server is wired into your config), call its tools to find blast radius before touching shared code: `query_graph` (natural-language query → scoped subgraph), `get_node`, `get_neighbors`, `shortest_path`. Graphify is consumed via its **own** MCP server (ADR-010, Option C) — Coodra does not wrap it. If Graphify is not configured, fall back to reading files. The former `coodra__query_codebase_graph` tool is retired — see ADR-010 and `system-architecture.md §17`.
 
-## 5.7 JIRA triggers (when the JIRA integration is active)
+## 5.7 Jira triggers (when Atlassian's Rovo MCP is wired — `coodra jira enable`)
 
-| User intent | Tool |
+**These tools are NOT Coodra's.** Jira is consumed **Direct** (ADR-016): `coodra jira enable` wires **Atlassian's Rovo MCP** alongside the `coodra` server, and the agent calls Rovo's own Jira tools. Coodra advertises no `jira_*` tools. The table maps user intent → the **Rovo** tool name. If the Rovo server is not wired (no `atlassian` entry in the agent config), these tools are simply absent from `tools/list` — do nothing Jira-related and continue.
+
+| User intent | Rovo tool (Atlassian-owned) |
 |---|---|
-| References a key like `PROJ-123` | `jira_get_issue { key: 'PROJ-123' }` |
-| "My open tickets" / implicit pronoun for a ticket | `jira_list_my_issues` |
-| Query by text rather than key | `jira_search_issues { jql }` |
-| Move a ticket's state | `jira_transition_issue` |
-| Add a comment (explicit user request only) | `jira_add_comment` |
-| Edit ticket fields (explicit user request only) | `jira_update_issue` |
-| Create a new ticket (explicit user request only) | `jira_create_issue` |
-| "X blocks Y" / "this duplicates Z" | `jira_link_issues` |
+| References a key like `PROJ-123` | `getJiraIssue { issueIdOrKey: 'PROJ-123' }` |
+| "My open tickets" / implicit pronoun for a ticket | `searchJiraIssuesUsingJql { jql: 'assignee = currentUser() AND statusCategory != Done' }` |
+| Query by text rather than key | `searchJiraIssuesUsingJql { jql }` |
+| Discover accessible project keys | `getVisibleJiraProjects` |
+| Move a ticket's state | `getTransitionsForJiraIssue` (find the id) → `transitionJiraIssue` |
+| Add a comment (explicit user request only) | `addCommentToJiraIssue` |
+| Edit ticket fields (explicit user request only) | `editJiraIssue` |
+| Create a new ticket (explicit user request only) | `createJiraIssue` |
 
-**Never post comments, create tickets, or transition issues unprompted.** JIRA is shared state and noise has a cost.
+**Coodra-side Jira triggers (these ARE Coodra tools):**
+- When the user names or references a Jira issue this session is for ("work on PROJ-123", a `feature/PROJ-123` branch), call Coodra's **`link_run_to_issue { runId, issueRef }`** to bind `runs.issueRef`. This makes Coodra history Jira-aware: `query_run_history` and `query_decisions` each take an optional `issueRef` filter — "what touched PROJ-412?" / "what was decided for PROJ-412?". Records a local link only (no Jira call); an unknown runId returns `run_not_found`.
+- At session end, **only if the user asks**, call Coodra's **`prepare_jira_comment { runId }`** to assemble the summary `{ issueRef, body }` from the run's Context Pack + decisions, then post the returned `body` to the linked issue via Rovo's `addCommentToJiraIssue { issueIdOrKey, body }` (the write-back path, §22.6). `prepare_jira_comment` soft-fails `not_linked` if the run has no issue (call `link_run_to_issue` first). Never post unprompted.
+
+**Never post comments, create tickets, or transition issues unprompted.** Jira is shared state and noise has a cost. (Note: the verified Rovo surface has no dedicated issue-link tool — the old `jira_link_issues` intent has no 1:1 Rovo equivalent; use `editJiraIssue` or defer.)
 
 ## 5.8 GitHub triggers (when the GitHub integration is active)
 
@@ -159,5 +165,5 @@ This is the on-demand handoff mechanism for narrative recaps. The structured aut
 - Don't treat `get_feature_pack` as a one-time call if you change areas of the codebase — re-call when you switch modules.
 - Don't batch `record_decision` calls for the end of the session. Log each as it happens.
 - Don't skip `save_context_pack` because "the user will remember." The user won't; the next session definitely won't.
-- Don't call tools that don't apply (`github_*` with no GitHub integration, `jira_*` with no JIRA integration) just because they exist — they'll return `integration_unavailable` and waste a turn. Check `runs.issueRef` / `runs.prRef` presence first.
+- Don't call tools that don't apply — `github_*` with no GitHub integration (returns `integration_unavailable`), or Rovo's Jira tools (`getJiraIssue`, `searchJiraIssuesUsingJql`, …) when Atlassian's Rovo MCP isn't wired (they're simply absent from `tools/list`, not a Coodra error). Check `runs.issueRef` / `runs.prRef` presence first.
 - Don't invent tool names. If the tool isn't in `tools/list`, it doesn't exist.

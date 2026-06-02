@@ -23,7 +23,7 @@ export const dynamic = 'force-dynamic';
  *   Step 3 · Clerk        — admin creates a Clerk app + an org, copies keys + their userId / orgId.
  *   Step 4 · CLI          — admin runs `coodra team setup` (we render the exact, copy-paste-ready command).
  *   Step 5 · Invite       — admin shares the four-credential block with teammates so they can run `coodra team join`.
- *   Step 6 · Integrations — OPTIONAL: wire Graphify's MCP server into the agent configs (Module 09), or skip.
+ *   Step 6 · Integrations — OPTIONAL: wire Graphify's and/or Jira's (Atlassian Rovo) MCP server into the agent configs (Module 09), or skip.
  *
  * State is fully URL-driven (search params). No client state. The
  * verify-step server action redirects with the result encoded back
@@ -737,25 +737,31 @@ function StepSixIntegrations() {
     <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 32, alignItems: 'start' }}>
       <div className="card" style={{ padding: 36 }}>
         <h2 className="card__title" style={{ marginBottom: 14 }}>
-          Optional · wire <em>Graphify</em>.
+          Optional · wire your <em>tools</em>.
         </h2>
-        <p style={{ fontSize: 14, color: 'var(--ink-dim)', lineHeight: 1.6, marginBottom: 24 }}>
-          Graphify maps a repository into a queryable knowledge graph and ships its own MCP server. Coodra wires that
-          server into your agent configs next to the <code style={inlineMono}>coodra</code> server — the agent can then
-          ask structural questions and seed Feature Packs from the graph. This step is optional: skip it now and wire
-          Graphify any time from the Integrations page.
+        <p style={{ fontSize: 14, color: 'var(--ink-dim)', lineHeight: 1.6, marginBottom: 20 }}>
+          Coodra consumes external MCP servers by configuration, not code — it wires them next to the{' '}
+          <code style={inlineMono}>coodra</code> server in each agent config. Both are optional; skip now and wire them
+          any time from the Integrations page.
         </p>
 
-        <FieldLabel>In each project you want graphed, run</FieldLabel>
+        <FieldLabel>Graphify · codebase knowledge graph</FieldLabel>
         <pre style={{ ...codeBlockStyle, padding: 22 }}>{`coodra graphify enable`}</pre>
-
-        <p style={{ marginTop: 24, fontSize: 13, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
-          That wires the <code style={inlineMono}>graphify</code> MCP server into every detected agent config and seeds
-          the <code style={inlineMono}>graphify-seed-packs</code> skill. It needs Graphify installed (
-          <code style={inlineMono}>uv tool install graphifyy</code>) and a built graph (
-          <code style={inlineMono}>/graphify .</code>). The web app’s Integrations page does the same per project with
-          one click.
+        <p style={{ marginTop: 14, fontSize: 13, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+          Wires Graphify’s MCP server so the agent can ask structural questions (blast radius, “where is X defined?”).
+          Needs Graphify installed (<code style={inlineMono}>uv tool install graphifyy</code>) + a built graph (
+          <code style={inlineMono}>/graphify .</code>). The agent calls its query tools directly.
         </p>
+
+        <div style={{ marginTop: 24 }}>
+          <FieldLabel>Jira · Atlassian Rovo</FieldLabel>
+          <pre style={{ ...codeBlockStyle, padding: 22 }}>{`coodra jira enable`}</pre>
+          <p style={{ marginTop: 14, fontSize: 13, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+            Wires Atlassian’s Rovo remote MCP so the agent reads tickets directly, and Coodra links each run to its
+            issue. After wiring, run <code style={inlineMono}>/mcp</code> in the assistant to complete the per-user
+            sign-in. Coodra builds no Jira client (Direct, ADR-016).
+          </p>
+        </div>
 
         <div style={{ display: 'flex', gap: 10, marginTop: 28 }}>
           <Link href="/" className="btn btn--accent">
@@ -782,8 +788,8 @@ function StepSixIntegrations() {
             v: 'The agent asks "where is X defined?" and blast-radius questions instead of grepping files.',
           },
           {
-            k: 'Cold-start packs',
-            v: 'The graphify-seed-packs skill turns the graph’s communities into draft Feature Packs.',
+            k: 'Jira-aware history',
+            v: 'Wire Jira too — the agent reads tickets, and link_run_to_issue makes “what touched PROJ-412?” answerable.',
           },
           {
             k: 'Optional',

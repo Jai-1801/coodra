@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { VERSION } from '../version.js';
 import { resolveCoodraLogsDir } from './coodra-home.js';
 import type { DaemonUnit } from './daemon/index.js';
 import { loadHomeEnv } from './load-home-env.js';
@@ -179,6 +180,12 @@ function buildServiceEnv(args: {
   const env: Record<string, string> = {
     COODRA_LOG_DESTINATION: 'stderr',
     COODRA_HOME: args.coodraHome,
+    // The exact CLI version this admin is running. The web's
+    // `/install/<token>/cli.sh` route pins the teammate installer to this
+    // so a teammate gets the SAME version as the admin — not `@latest`,
+    // which (when releases ship under the `beta` dist-tag) points at a
+    // stale build missing recent fixes.
+    COODRA_CLI_VERSION: VERSION,
   };
   // When the binary is the bundled artifact under @coodra/cli/dist/
   // runtime/, the embedded `@coodra/db::MIGRATIONS_FOLDER` cannot

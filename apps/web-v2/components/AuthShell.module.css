@@ -1,0 +1,568 @@
+/*
+ * AuthShell.module.css — two-panel editorial auth surface (sign-in /
+ * sign-up). Ported from the approved design. Full-bleed `fixed` overlay
+ * so the login covers the app sidebar (unauthenticated users only ever
+ * see this screen). All colour/typography tokens come from globals.css.
+ */
+
+.auth {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  min-height: 100vh;
+  background: var(--bg);
+  overflow: auto;
+}
+
+/* ---------- LEFT — brand panel ---------- */
+.brand {
+  position: relative;
+  border-right: 1px solid var(--rule);
+  padding: 40px 56px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    radial-gradient(1100px 700px at -10% 110%, rgba(125, 216, 125, 0.06), transparent 60%),
+    radial-gradient(700px 500px at 110% -10%, rgba(125, 216, 125, 0.04), transparent 60%),
+    var(--bg);
+}
+.brandTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+}
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.logoMark {
+  width: 36px;
+  height: 36px;
+}
+.logoMark svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.logoWord {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.brandMeta {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.brandBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 620px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 60px 0;
+}
+.brandEyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 32px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.brandEyebrow::before {
+  content: '';
+  width: 32px;
+  height: 1px;
+  background: var(--accent);
+}
+.brandTitle {
+  font-family: var(--serif);
+  font-size: 96px;
+  line-height: 0.92;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  margin-bottom: 32px;
+  color: var(--ink);
+}
+.brandTitle em {
+  font-style: italic;
+  color: var(--accent);
+}
+.brandLede {
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--ink-dim);
+  max-width: 480px;
+  margin-bottom: 56px;
+}
+
+.brandEvents {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 520px;
+}
+.ev {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--rule);
+  background: var(--bg-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+}
+.evDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+.evDotW {
+  background: var(--ink);
+}
+.evDotWarn {
+  background: var(--warn);
+}
+.evTime {
+  color: var(--ink-mute);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.evTool {
+  flex: 1;
+  color: var(--ink-dim);
+}
+.evTool b {
+  color: var(--ink);
+  font-weight: 500;
+}
+.evVerdict {
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+}
+.evVerdictWarn {
+  color: var(--warn);
+}
+
+.brandFoot {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  line-height: 1.8;
+  gap: 32px;
+}
+.brandFoot a {
+  color: var(--ink-dim);
+  transition: color 0.2s;
+}
+.brandFoot a:hover {
+  color: var(--accent);
+}
+.brandFoot strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* dotted axis motif */
+.axis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background-image: linear-gradient(90deg, var(--rule-strong) 50%, transparent 50%);
+  background-size: 6px 1px;
+  pointer-events: none;
+}
+.axisTop {
+  top: 88px;
+}
+.axisMid {
+  top: 50%;
+  opacity: 0.5;
+}
+.axisNode {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(125, 216, 125, 0.08);
+  transform: translate(-50%, -50%);
+}
+
+/* ---------- RIGHT — form panel ---------- */
+.panel {
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: 40px 56px;
+  position: relative;
+}
+.panelTop {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
+}
+.panelTopText {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.panelTopLink {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink);
+  border-bottom: 1px solid var(--ink);
+  padding-bottom: 2px;
+  transition:
+    color 0.2s,
+    border-color 0.2s;
+}
+.panelTopLink:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.panelBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 420px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 48px 0;
+}
+
+.panelNum {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 14px;
+}
+.panelNum strong {
+  color: var(--ink);
+  font-weight: 500;
+  margin-left: 8px;
+}
+
+.panelTitle {
+  font-family: var(--serif);
+  font-size: 56px;
+  line-height: 0.95;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  margin-bottom: 14px;
+  color: var(--ink);
+}
+.panelTitle em {
+  font-style: italic;
+  color: var(--accent);
+}
+.panelSub {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-dim);
+  margin-bottom: 40px;
+}
+
+/* tabs — real navigation links (sign-in / sign-up routes) */
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--rule);
+  margin-bottom: 32px;
+}
+.tab {
+  padding: 14px 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  text-align: center;
+  transition:
+    color 0.25s,
+    background 0.25s;
+}
+.tab:hover {
+  color: var(--ink);
+}
+.tabActive {
+  background: var(--accent);
+  color: var(--bg);
+}
+.tabActive:hover {
+  color: var(--bg);
+}
+
+/* slot that hosts Clerk's <SignIn> / <SignUp>.
+ * web-v2 has no Tailwind, so we style Clerk via its stable `cl-*` classes
+ * here (scoped to the slot) instead of via appearance.elements strings. */
+.clerkSlot {
+  width: 100%;
+}
+.clerkSlot :global(.cl-rootBox),
+.clerkSlot :global(.cl-cardBox),
+.clerkSlot :global(.cl-card),
+.clerkSlot :global(.cl-main),
+.clerkSlot :global(.cl-form) {
+  width: 100%;
+}
+/* strip the standalone-card chrome so the widget reads as part of the panel */
+.clerkSlot :global(.cl-card),
+.clerkSlot :global(.cl-cardBox) {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+/* the shell supplies the title/sub (header) and the sign-in/sign-up tabs
+ * (footer), so hide Clerk's duplicates — the back link on multi-step
+ * flows lives outside headerTitle/Subtitle and is preserved. */
+.clerkSlot :global(.cl-headerTitle),
+.clerkSlot :global(.cl-headerSubtitle),
+.clerkSlot :global(.cl-footer) {
+  display: none !important;
+}
+/* pill primary CTA to match the reference (inputs + social stay square) */
+.clerkSlot :global(.cl-formButtonPrimary) {
+  border-radius: 999px !important;
+  padding-top: 15px !important;
+  padding-bottom: 15px !important;
+  margin-top: 6px !important;
+}
+.clerkSlot :global(.cl-formButtonPrimary svg) {
+  color: var(--bg) !important;
+}
+
+/* ---- social buttons → bordered editorial boxes ---- */
+.clerkSlot :global(.cl-socialButtons) {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+}
+.clerkSlot :global(.cl-socialButtonsBlockButton) {
+  position: relative !important;
+  border: 1px solid var(--rule-strong) !important;
+  background: var(--bg-2) !important;
+  border-radius: 0 !important;
+  padding: 13px 16px !important;
+  min-height: 0 !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+  transition:
+    border-color 0.2s,
+    background 0.2s !important;
+}
+.clerkSlot :global(.cl-socialButtonsBlockButton:hover) {
+  border-color: var(--ink) !important;
+  background: var(--bg-3) !important;
+}
+.clerkSlot :global(.cl-socialButtonsBlockButtonText) {
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+  letter-spacing: 0.16em !important;
+  text-transform: uppercase !important;
+  color: var(--ink) !important;
+}
+/* drop Clerk's "Last used" badge — it overflowed and the reference has none */
+.clerkSlot :global(.cl-socialButtonsBlockButton .cl-badge),
+.clerkSlot :global(.cl-badge) {
+  display: none !important;
+}
+
+/* ---- "or" divider → dotted rule + mono ---- */
+.clerkSlot :global(.cl-dividerRow) {
+  margin: 22px 0 !important;
+  gap: 14px !important;
+}
+.clerkSlot :global(.cl-dividerLine) {
+  background: transparent !important;
+  height: 1px !important;
+  background-image: linear-gradient(90deg, var(--rule-strong) 50%, transparent 50%) !important;
+  background-size: 4px 1px !important;
+}
+.clerkSlot :global(.cl-dividerText) {
+  font-family: var(--mono) !important;
+  font-size: 10px !important;
+  letter-spacing: 0.25em !important;
+  text-transform: uppercase !important;
+  color: var(--ink-mute) !important;
+}
+
+/* ---- form fields → editorial labels + bordered inputs ---- */
+.clerkSlot :global(.cl-form) {
+  gap: 18px !important;
+}
+.clerkSlot :global(.cl-formFieldLabel) {
+  font-family: var(--mono) !important;
+  font-size: 10px !important;
+  letter-spacing: 0.22em !important;
+  text-transform: uppercase !important;
+  color: var(--ink-dim) !important;
+}
+.clerkSlot :global(.cl-formFieldInput) {
+  border: 1px solid var(--rule-strong) !important;
+  background: var(--bg-2) !important;
+  border-radius: 0 !important;
+  color: var(--ink) !important;
+  font-family: var(--mono) !important;
+  font-size: 14px !important;
+  padding: 13px 14px !important;
+  box-shadow: none !important;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s,
+    background 0.2s !important;
+}
+.clerkSlot :global(.cl-formFieldInput:focus),
+.clerkSlot :global(.cl-formFieldInput:focus-visible) {
+  border-color: var(--accent) !important;
+  background: var(--bg) !important;
+  box-shadow: 0 0 0 3px var(--accent-glow) !important;
+  outline: 0 !important;
+}
+.clerkSlot :global(.cl-formFieldInput::placeholder) {
+  color: var(--ink-mute) !important;
+}
+/* OTP / verification code inputs (factor-two, email-code steps) */
+.clerkSlot :global(.cl-otpCodeFieldInput) {
+  border: 1px solid var(--rule-strong) !important;
+  background: var(--bg-2) !important;
+  border-radius: 0 !important;
+  color: var(--ink) !important;
+  font-family: var(--mono) !important;
+}
+.clerkSlot :global(.cl-otpCodeFieldInput:focus) {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-glow) !important;
+  outline: 0 !important;
+}
+/* "Forgot?" + other field-action links */
+.clerkSlot :global(.cl-formFieldAction) {
+  font-family: var(--mono) !important;
+  font-size: 10px !important;
+  letter-spacing: 0.18em !important;
+  text-transform: uppercase !important;
+  color: var(--accent) !important;
+}
+/* show/hide-password toggle */
+.clerkSlot :global(.cl-formFieldInputShowPasswordButton) {
+  color: var(--ink-mute) !important;
+}
+.clerkSlot :global(.cl-formFieldInputShowPasswordButton:hover) {
+  color: var(--ink) !important;
+}
+/* the identifier-edit pencil on multi-step + the back link */
+.clerkSlot :global(.cl-identityPreviewText) {
+  font-family: var(--mono) !important;
+  color: var(--ink-dim) !important;
+}
+.clerkSlot :global(.cl-identityPreviewEditButtonIcon),
+.clerkSlot :global(.cl-backLink),
+.clerkSlot :global(.cl-headerBackLink) {
+  color: var(--accent) !important;
+}
+
+/* terms */
+.terms {
+  margin-top: 28px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.7;
+  letter-spacing: 0.05em;
+  color: var(--ink-mute);
+  text-align: center;
+}
+.terms a {
+  color: var(--ink-dim);
+  border-bottom: 1px solid var(--rule-strong);
+  transition:
+    color 0.2s,
+    border-color 0.2s;
+}
+.terms a:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.panelFoot {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.panelFoot a {
+  color: var(--ink-dim);
+  transition: color 0.2s;
+}
+.panelFoot a:hover {
+  color: var(--accent);
+}
+
+/* ---------- Mobile ---------- */
+@media (max-width: 960px) {
+  .auth {
+    grid-template-columns: 1fr;
+    min-height: 100dvh;
+  }
+  .brand {
+    padding: 32px 28px 48px;
+  }
+  .brandBody {
+    padding: 40px 0 24px;
+  }
+  .brandTitle {
+    font-size: 56px;
+  }
+  .brandLede {
+    font-size: 15px;
+    margin-bottom: 32px;
+  }
+  .panel {
+    padding: 32px 28px 40px;
+  }
+  .panelTitle {
+    font-size: 40px;
+  }
+  .axisMid {
+    display: none;
+  }
+}

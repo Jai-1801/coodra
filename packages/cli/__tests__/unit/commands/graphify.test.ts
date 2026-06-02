@@ -4,11 +4,13 @@ import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  type GraphifyEnableOptions,
   type GraphifyIO,
+  runGraphifyEnableCommand as runEnableImpl,
   runGraphifyDisableCommand,
-  runGraphifyEnableCommand,
   runGraphifyStatusCommand,
 } from '../../../src/commands/graphify.js';
+import type { GraphifyPythonResolver } from '../../../src/lib/init/graphify-python.js';
 
 /**
  * Locks the Module 09 Track 9B `coodra graphify {enable,disable,status}`
@@ -21,8 +23,8 @@ import {
  *     graph path (its config is global, no project anchor).
  *   - Codex (TOML) gets a real `[mcp_servers.graphify]` write — same as
  *     the three JSON agents.
- *   - enable seeds the `graphify-seed-packs` Feature recipe; --no-feature
- *     skips it.
+ *   - enable wires only the `graphify` MCP entry (no recipe seeding —
+ *     retired in ADR-015; Graphify is query-only).
  *   - disable strips only the `graphify` entry.
  *   - status is a read-only probe across all four agents.
  *   - bad / empty IDE selection exits user-recoverable (1).
@@ -64,6 +66,23 @@ const ANSI = /\x1b\[[0-9;]*m/g;
 
 const FEATURE_MD = join('docs', 'features', 'graphify-seed-packs', 'feature.md');
 
+/**
+ * Deterministic interpreter resolver for the enable tests — never spawns
+ * a real `python -c "import ..."`. Mirrors production semantics: an
+ * explicit `--python` is honoured verbatim; otherwise we report the bare
+ * `python3` fallback as unverified (so the install notice renders). Real
+ * auto-detection is covered in `graphify-python.test.ts`.
+ */
+const stubResolver: GraphifyPythonResolver = async ({ explicit }) =>
+  explicit !== undefined && explicit.trim().length > 0
+    ? { python: explicit, verified: true, source: 'flag' }
+    : { python: 'python3', verified: false, source: 'fallback' };
+
+/** Inject the stub resolver into every enable call unless the test overrides it. */
+function enable(opts: GraphifyEnableOptions, io: GraphifyIO): Promise<never> {
+  return runEnableImpl({ resolvePython: stubResolver, ...opts }, io);
+}
+
 describe('runGraphifyEnableCommand', () => {
   let cwd: string;
   let home: string;
@@ -75,7 +94,7 @@ describe('runGraphifyEnableCommand', () => {
 
   it('wires the `graphify` entry into <cwd>/.mcp.json for --ide claude', async () => {
     const c = makeIO();
-    await expect(runGraphifyEnableCommand({ ide: 'claude', cwd, userHome: home }, c.io)).rejects.toThrow();
+    await expect(enable({ ide: 'claude', cwd, userHome: home }, c.io)).rejects.toThrow();
     expect(c.exitCode()).toBe(0);
     const parsed = JSON.parse(await readFile(join(cwd, '.mcp.json'), 'utf8'));
     expect(parsed.mcpServers.graphify.command).toBe('python3');
@@ -84,25 +103,21 @@ describe('runGraphifyEnableCommand', () => {
 
   it('--python overrides the interpreter on the written entry', async () => {
     const c = makeIO();
-    await expect(
-      runGraphifyEnableCommand({ ide: 'claude', python: '.venv/bin/python3', cwd, userHome: home }, c.io),
-    ).rejects.toThrow();
+    await expect(enable({ ide: 'claude', python: '.venv/bin/python3', cwd, userHome: home }, c.io)).rejects.toThrow();
     const parsed = JSON.parse(await readFile(join(cwd, '.mcp.json'), 'utf8'));
     expect(parsed.mcpServers.graphify.command).toBe('.venv/bin/python3');
   });
 
   it('--graph overrides the graph path on the written entry', async () => {
     const c = makeIO();
-    await expect(
-      runGraphifyEnableCommand({ ide: 'claude', graph: 'out/g.json', cwd, userHome: home }, c.io),
-    ).rejects.toThrow();
+    await expect(enable({ ide: 'claude', graph: 'out/g.json', cwd, userHome: home }, c.io)).rejects.toThrow();
     const parsed = JSON.parse(await readFile(join(cwd, '.mcp.json'), 'utf8'));
     expect(parsed.mcpServers.graphify.args).toEqual(['-m', 'graphify.serve', 'out/g.json']);
   });
 
   it('Windsurf gets an absolute graph path (global config has no project anchor)', async () => {
     const c = makeIO();
-    await expect(runGraphifyEnableCommand({ ide: 'windsurf', cwd, userHome: home }, c.io)).rejects.toThrow();
+    await expect(enable({ ide: 'windsurf', cwd, userHome: home }, c.io)).rejects.toThrow();
     const wsPath = join(home, '.codeium', 'windsurf', 'mcp_config.json');
     const parsed = JSON.parse(await readFile(wsPath, 'utf8'));
     expect(parsed.mcpServers.graphify.args[2]).toBe(join(cwd, 'graphify-out', 'graph.json'));
@@ -110,7 +125,7 @@ describe('runGraphifyEnableCommand', () => {
 
   it('writes a real [mcp_servers.graphify] table into Codex config.toml for --ide codex', async () => {
     const c = makeIO();
-    await expect(runGraphifyEnableCommand({ ide: 'codex', cwd, userHome: home }, c.io)).rejects.toThrow();
+    await expect(enable({ ide: 'codex', cwd, userHome: home }, c.io)).rejects.toThrow();
     expect(c.exitCode()).toBe(0);
     const parsed = parseToml(await readFile(join(cwd, '.codex', 'config.toml'), 'utf8')) as {
       mcp_servers: { graphify: { command: string; args: string[] } };
@@ -126,7 +141,7 @@ describe('runGraphifyEnableCommand', () => {
       'utf8',
     );
     const c = makeIO();
-    await expect(runGraphifyEnableCommand({ ide: 'claude', cwd, userHome: home }, c.io)).rejects.toThrow();
+    await expect(enable({ ide: 'claude', cwd, userHome: home }, c.io)).rejects.toThrow();
     const parsed = JSON.parse(await readFile(join(cwd, '.mcp.json'), 'utf8'));
     expect(parsed.mcpServers.coodra.command).toBe('node');
     expect(parsed.mcpServers.memory.command).toBe('npx');
@@ -135,17 +150,12 @@ describe('runGraphifyEnableCommand', () => {
 
   it('is idempotent — a second enable is a no-op', async () => {
     const first = makeIO();
-    await expect(
-      runGraphifyEnableCommand({ ide: 'claude', json: true, cwd, userHome: home }, first.io),
-    ).rejects.toThrow();
+    await expect(enable({ ide: 'claude', json: true, cwd, userHome: home }, first.io)).rejects.toThrow();
     expect(JSON.parse(first.stdout()).results[0].action).toBe('wrote');
     const second = makeIO();
-    await expect(
-      runGraphifyEnableCommand({ ide: 'claude', json: true, cwd, userHome: home }, second.io),
-    ).rejects.toThrow();
+    await expect(enable({ ide: 'claude', json: true, cwd, userHome: home }, second.io)).rejects.toThrow();
     const report = JSON.parse(second.stdout());
     expect(report.results[0].action).toBe('unchanged');
-    expect(report.feature.action).toBe('unchanged');
   });
 
   it('leaves a drifted entry untouched without --force', async () => {
@@ -155,7 +165,7 @@ describe('runGraphifyEnableCommand', () => {
       'utf8',
     );
     const c = makeIO();
-    await expect(runGraphifyEnableCommand({ ide: 'claude', cwd, userHome: home }, c.io)).rejects.toThrow();
+    await expect(enable({ ide: 'claude', cwd, userHome: home }, c.io)).rejects.toThrow();
     expect(JSON.parse(await readFile(join(cwd, '.mcp.json'), 'utf8')).mcpServers.graphify.command).toBe('custom');
   });
 
@@ -166,22 +176,19 @@ describe('runGraphifyEnableCommand', () => {
       'utf8',
     );
     const c = makeIO();
-    await expect(runGraphifyEnableCommand({ ide: 'claude', force: true, cwd, userHome: home }, c.io)).rejects.toThrow();
+    await expect(enable({ ide: 'claude', force: true, cwd, userHome: home }, c.io)).rejects.toThrow();
     expect(JSON.parse(await readFile(join(cwd, '.mcp.json'), 'utf8')).mcpServers.graphify.command).toBe('python3');
   });
 
-  it('--dry-run writes nothing to disk (no config, no feature)', async () => {
+  it('--dry-run writes nothing to disk', async () => {
     const c = makeIO();
-    await expect(
-      runGraphifyEnableCommand({ ide: 'claude', dryRun: true, cwd, userHome: home }, c.io),
-    ).rejects.toThrow();
+    await expect(enable({ ide: 'claude', dryRun: true, cwd, userHome: home }, c.io)).rejects.toThrow();
     await expect(readFile(join(cwd, '.mcp.json'), 'utf8')).rejects.toThrow();
-    await expect(readFile(join(cwd, FEATURE_MD), 'utf8')).rejects.toThrow();
   });
 
   it('--ide all wires all four agents, Codex included', async () => {
     const c = makeIO();
-    await expect(runGraphifyEnableCommand({ ide: 'all', json: true, cwd, userHome: home }, c.io)).rejects.toThrow();
+    await expect(enable({ ide: 'all', json: true, cwd, userHome: home }, c.io)).rejects.toThrow();
     const report = JSON.parse(c.stdout());
     expect(report.ok).toBe(true);
     const byIde = Object.fromEntries(report.results.map((r: { ide: string; action: string }) => [r.ide, r.action]));
@@ -196,55 +203,91 @@ describe('runGraphifyEnableCommand', () => {
     expect(codexCfg.mcp_servers.graphify).toBeDefined();
   });
 
-  it('seeds the graphify-seed-packs Feature recipe + regenerates the index', async () => {
+  it('enable JSON report carries no feature field (recipe retired, ADR-015)', async () => {
     const c = makeIO();
-    await expect(runGraphifyEnableCommand({ ide: 'claude', json: true, cwd, userHome: home }, c.io)).rejects.toThrow();
+    await expect(enable({ ide: 'claude', json: true, cwd, userHome: home }, c.io)).rejects.toThrow();
     const report = JSON.parse(c.stdout());
-    expect(report.feature).toMatchObject({ slug: 'graphify-seed-packs', action: 'wrote' });
-    const featureMd = await readFile(join(cwd, FEATURE_MD), 'utf8');
-    expect(featureMd).toContain('name: graphify-seed-packs');
-    expect(featureMd).toContain('coodra__seed_feature_packs_from_graph');
-    // The features index is regenerated so the bridge / MCP can see it.
-    const indexJson = JSON.parse(await readFile(join(cwd, 'docs', 'features', 'INDEX.json'), 'utf8'));
-    expect(indexJson.features.map((f: { slug: string }) => f.slug)).toContain('graphify-seed-packs');
-  });
-
-  it('--no-feature skips the graphify-seed-packs Feature seed', async () => {
-    const c = makeIO();
-    await expect(
-      runGraphifyEnableCommand({ ide: 'claude', feature: false, json: true, cwd, userHome: home }, c.io),
-    ).rejects.toThrow();
-    expect(JSON.parse(c.stdout()).feature).toBeNull();
+    expect(report.feature).toBeUndefined();
+    // No docs/features/ directory is created by `graphify enable` any more.
     await expect(readFile(join(cwd, FEATURE_MD), 'utf8')).rejects.toThrow();
   });
 
   it('autodetects installed agents when --ide is omitted', async () => {
     await mkdir(join(home, '.claude'));
     const c = makeIO();
-    await expect(runGraphifyEnableCommand({ json: true, cwd, userHome: home }, c.io)).rejects.toThrow();
+    await expect(enable({ json: true, cwd, userHome: home }, c.io)).rejects.toThrow();
     const report = JSON.parse(c.stdout());
     expect(report.results.map((r: { ide: string }) => r.ide)).toEqual(['claude']);
   });
 
   it('exits user-recoverable (1) when no IDE is detected and none is named', async () => {
     const c = makeIO();
-    await expect(runGraphifyEnableCommand({ cwd, userHome: home }, c.io)).rejects.toThrow();
+    await expect(enable({ cwd, userHome: home }, c.io)).rejects.toThrow();
     expect(c.exitCode()).toBe(1);
     expect(c.stderr()).toContain('No supported IDE detected');
   });
 
   it('exits user-recoverable (1) on an unknown --ide value', async () => {
     const c = makeIO();
-    await expect(runGraphifyEnableCommand({ ide: 'intellij', cwd, userHome: home }, c.io)).rejects.toThrow();
+    await expect(enable({ ide: 'intellij', cwd, userHome: home }, c.io)).rejects.toThrow();
     expect(c.exitCode()).toBe(1);
   });
 
   it('emits the install + graph-build prerequisites in human output', async () => {
     const c = makeIO();
-    await expect(runGraphifyEnableCommand({ ide: 'claude', cwd, userHome: home }, c.io)).rejects.toThrow();
+    await expect(enable({ ide: 'claude', cwd, userHome: home }, c.io)).rejects.toThrow();
     const out = c.stdout().replace(ANSI, '');
+    // Install line names the [mcp] extra (no semantic backend needed — Graphify is query-only now, ADR-015).
     expect(out).toContain('graphifyy[mcp]');
+    // Venv path is the canonical install — system python frequently lacks the mcp package.
+    expect(out).toContain('uv venv');
+    // Graph-build guidance points at the no-key slash command + the no-LLM CLI.
     expect(out).toContain('/graphify .');
+    expect(out).toContain('graphify update .');
+    // The sanity-check command appears so users can verify the venv install before reconnecting.
+    expect(out).toContain('import graphify.serve, mcp');
+    // The payoff is framed as structural queries, not pack seeding.
+    expect(out).toContain('what depends on X');
+  });
+
+  it('writes the auto-detected interpreter and shows the verified notice', async () => {
+    // Resolver finds a verified interpreter (e.g. the uv-tool python).
+    const verifiedResolver: GraphifyPythonResolver = async () => ({
+      python: '/uv/tools/graphifyy/bin/python',
+      verified: true,
+      source: 'uv-tool',
+    });
+    const c = makeIO();
+    await expect(
+      enable({ ide: 'claude', cwd, userHome: home, resolvePython: verifiedResolver }, c.io),
+    ).rejects.toThrow();
+    expect(c.exitCode()).toBe(0);
+    const parsed = JSON.parse(await readFile(join(cwd, '.mcp.json'), 'utf8'));
+    // The wired command is the DETECTED interpreter, not bare python3.
+    expect(parsed.mcpServers.graphify.command).toBe('/uv/tools/graphifyy/bin/python');
+    const out = c.stdout().replace(ANSI, '');
+    expect(out).toContain('verified');
+    // No graph built in the tmp cwd → the verified notice flags the missing graph.
+    expect(out).toContain('No graph yet');
+    // The verified path does NOT dump the full install instructions.
+    expect(out).not.toContain('uv venv');
+  });
+
+  it('JSON report carries python + pythonVerified + pythonSource + graphExists', async () => {
+    const verifiedResolver: GraphifyPythonResolver = async () => ({
+      python: '/uv/py',
+      verified: true,
+      source: 'uv-tool',
+    });
+    const c = makeIO();
+    await expect(
+      enable({ ide: 'claude', json: true, cwd, userHome: home, resolvePython: verifiedResolver }, c.io),
+    ).rejects.toThrow();
+    const report = JSON.parse(c.stdout());
+    expect(report.python).toBe('/uv/py');
+    expect(report.pythonVerified).toBe(true);
+    expect(report.pythonSource).toBe('uv-tool');
+    expect(report.graphExists).toBe(false);
   });
 });
 
@@ -385,7 +428,7 @@ describe('runGraphifyEnableCommand — enable → status round-trip', () => {
     const cwd = await mkdtemp(join(tmpdir(), 'coodra-graphify-rt-cwd-'));
     const home = await mkdtemp(join(tmpdir(), 'coodra-graphify-rt-home-'));
     const enableIo = makeIO();
-    await expect(runGraphifyEnableCommand({ ide: 'all', cwd, userHome: home }, enableIo.io)).rejects.toThrow();
+    await expect(enable({ ide: 'all', cwd, userHome: home }, enableIo.io)).rejects.toThrow();
     const statusIo = makeIO();
     await expect(runGraphifyStatusCommand({ json: true, cwd, userHome: home }, statusIo.io)).rejects.toThrow();
     const report = JSON.parse(statusIo.stdout());

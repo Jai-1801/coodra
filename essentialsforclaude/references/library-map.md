@@ -17,7 +17,7 @@ Pointer guide into `../../External api and library reference.md`. Use this to ju
 | Configure Vitest, Biome, or Turborepo; set up testcontainers | **Tooling: Testing, Linting, Monorepo** → Vitest, testcontainers, Biome, Turborepo |
 | Import Graphify output into Coodra for cold-start | **Graphify CLI** → usage, graph.json schema, import pipeline |
 | Deploy to Railway or Fly.io | **Deployment Platforms** → Railway, Fly.io (Dockerfile + fly.toml patterns) |
-| Add a JIRA MCP tool, wire OAuth, verify a webhook, convert ADF ↔ Markdown, execute JQL | **Atlassian / Jira Integration** → jira.js, REST v3 endpoints, OAuth 2.0 3LO, webhook signatures, ADF, JQL, rate limits, gotchas |
+| Wire Jira (the shipping path, ADR-016) — endpoint, transport, OAuth/DCR, per-IDE config, Rovo tool names | **Atlassian / Jira Integration → Atlassian Remote MCP (Rovo)** — the shipping path. The Build-era subsections below it (jira.js, REST v3, OAuth 2.0 3LO, webhook signatures, ADF, JQL) are **historical / prototype reference only**, retired by ADR-016. |
 | Add a GitHub MCP tool, wire GitHub App auth, verify webhooks, parse CODEOWNERS, read branch protection or Rulesets, use Octokit plugins | **GitHub Governance & Context Layer** → REST v3, GraphQL v4, GitHub App auth (`@octokit/auth-app`), fine-grained PATs, webhook signature (`X-Hub-Signature-256`), CODEOWNERS syntax + parsers, legacy protection + Rulesets, Octokit suite (6 packages) with throttling + retry plugins, ETag conditional requests, rate-limit numbers, GFM comment format |
 | Verify something before shipping | **Things that require explicit manual verification** — library versions, credential placement, config gaps |
 

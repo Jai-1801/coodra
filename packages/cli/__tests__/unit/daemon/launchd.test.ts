@@ -67,29 +67,39 @@ describe('LaunchdDaemonManager — plist write + launchctl wiring', () => {
     expect(called).toBeNull();
   });
 
-  it('start invokes launchctl bootout-then-bootstrap so re-starts pick up new plists', async () => {
+  it('start invokes launchctl bootout, waits for teardown, then bootstrap', async () => {
     // Background: launchctl bootstrap is a no-op when the label is
     // already loaded. A second `coodra start` with a different
     // COODRA_HOME used to be silently ignored; the daemon kept its
-    // stale env. Fix: bootout-first, then bootstrap. Verify both calls.
+    // stale env. Fix: bootout-first, then bootstrap. Additionally, since
+    // `bootout` is asynchronous, start() polls `print` until the label is
+    // gone before bootstrapping (so a restart doesn't race the previous
+    // instance's teardown → bootstrap silently failing). The `print`
+    // probe here reports the label as already gone (exit 113), so the
+    // wait returns on the first poll.
     const calls: Array<{ file: string; args: readonly string[] }> = [];
     const mgr = new LaunchdDaemonManager({
       homeDir: home,
       execa: fakeExeca((file, args) => {
         calls.push({ file, args: [...args] });
+        // `print` is the status probe — report "not loaded" so
+        // waitUntilStopped returns immediately.
+        if (args[0] === 'print') return { exitCode: 113, stderr: 'unknown service' };
         return { exitCode: 0 };
       }),
     });
     await mgr.install({ name: 'svc', command: '/x', args: [], env: {} });
     await mgr.start('svc');
-    expect(calls).toHaveLength(2);
-    expect(calls[0]?.file).toBe('launchctl');
-    expect(calls[0]?.args[0]).toBe('bootout');
+    const verbs = calls.map((c) => c.args[0]);
+    // bootout first, a print probe in the middle, bootstrap last.
+    expect(verbs[0]).toBe('bootout');
     expect(calls[0]?.args[1]).toMatch(/^gui\/\d+\/com\.coodra\.svc$/);
-    expect(calls[1]?.file).toBe('launchctl');
-    expect(calls[1]?.args[0]).toBe('bootstrap');
-    expect(calls[1]?.args[1]).toMatch(/^gui\/\d+$/);
-    expect(String(calls[1]?.args[2])).toContain('com.coodra.svc.plist');
+    expect(verbs).toContain('print');
+    const bootstrapIdx = verbs.indexOf('bootstrap');
+    expect(bootstrapIdx).toBeGreaterThan(verbs.indexOf('bootout'));
+    expect(calls[bootstrapIdx]?.file).toBe('launchctl');
+    expect(calls[bootstrapIdx]?.args[1]).toMatch(/^gui\/\d+$/);
+    expect(String(calls[bootstrapIdx]?.args[2])).toContain('com.coodra.svc.plist');
   });
 
   it('status parses pid from `launchctl print` output', async () => {

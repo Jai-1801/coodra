@@ -1,4 +1,5 @@
 import { verifyToken as clerkVerifyToken } from '@clerk/backend';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 import { UnauthorizedError } from '../errors/index.js';
 import { createLogger } from '../logger.js';
@@ -68,6 +69,49 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 
 /**
+ * Per-frontend-API cache of jose remote JWKS fetchers. `createRemoteJWKSet`
+ * already caches the fetched keys internally (with a cooldown); caching the
+ * fetcher per host avoids re-instantiating it on every verify call.
+ */
+const jwksByFrontendApi = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+
+/**
+ * Derive a Clerk Frontend API host from a publishable key. Clerk encodes the
+ * host as base64 of `<host>$` after the `pk_test_` / `pk_live_` prefix — e.g.
+ * `pk_test_ZnVuLWdudS05Ni5jbGVyay5hY2NvdW50cy5kZXYk` → `fun-gnu-96.clerk.accounts.dev`.
+ * The host's `/.well-known/jwks.json` is PUBLIC (no secret key needed), which is
+ * exactly what a teammate machine has to work with.
+ */
+function frontendApiFromPublishableKey(pk: string): string | null {
+  const m = /^pk_(?:test|live)_(.+)$/.exec(pk);
+  if (m === null || m[1] === undefined) return null;
+  let decoded: string;
+  try {
+    decoded = Buffer.from(m[1], 'base64').toString('utf8');
+  } catch {
+    return null;
+  }
+  const host = decoded.replace(/\$+$/, '').trim();
+  return host.length > 0 ? host : null;
+}
+
+function jwksForPublishableKey(pk: string): ReturnType<typeof createRemoteJWKSet> {
+  const host = frontendApiFromPublishableKey(pk);
+  if (host === null) {
+    throw new UnauthorizedError(
+      'verifyClerkJwtAndExtractClaims: could not derive the Clerk Frontend API host from ' +
+        'CLERK_PUBLISHABLE_KEY (expected pk_test_… / pk_live_…).',
+    );
+  }
+  let set = jwksByFrontendApi.get(host);
+  if (set === undefined) {
+    set = createRemoteJWKSet(new URL(`https://${host}/.well-known/jwks.json`));
+    jwksByFrontendApi.set(host, set);
+  }
+  return set;
+}
+
+/**
  * Drop every cached verification. Called by `clerk-token-store` after
  * a `writeToken` / `deleteToken` so a stale claim shape never lingers
  * after the user re-authenticates (or logs out).
@@ -118,14 +162,27 @@ export async function verifyClerkJwtAndExtractClaims(token: string, env: AuthEnv
     return cached.claims;
   }
 
-  let payload: Awaited<ReturnType<typeof clerkVerifyToken>>;
+  let payload: Record<string, unknown>;
   try {
-    // When CLERK_SECRET_KEY is set we pass it (full admin verification path).
-    // Otherwise we let @clerk/backend derive the JWKS URL from the token's
-    // `iss` claim — pure public-key verification.
-    payload = hasSecret
-      ? await clerkVerifyToken(token, { secretKey: env.CLERK_SECRET_KEY as string })
-      : await clerkVerifyToken(token, {});
+    if (hasSecret) {
+      // Admin machine / web server: full verification via Clerk's BAPI.
+      payload = (await clerkVerifyToken(token, { secretKey: env.CLERK_SECRET_KEY as string })) as Record<
+        string,
+        unknown
+      >;
+    } else {
+      // Teammate / publishable-key-only machine: NO secret key, so
+      // @clerk/backend::verifyToken(token, {}) cannot resolve the signing
+      // key (it needs `secretKey` for the secret-gated BAPI JWKS, or a
+      // local `jwtKey` PEM) — it fails with "Failed to resolve JWK". Verify
+      // the signature ourselves against Clerk's PUBLIC Frontend API JWKS,
+      // derived from the publishable key, with jose. jose validates exp/nbf
+      // and the RS256 signature; the org_id / role / email invariants are
+      // enforced in extractClaims below.
+      const jwks = jwksForPublishableKey(env.CLERK_PUBLISHABLE_KEY);
+      const { payload: josePayload } = await jwtVerify(token, jwks, { clockTolerance: 5 });
+      payload = josePayload as Record<string, unknown>;
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.warn(

@@ -73,7 +73,6 @@ function writePack(
     readonly parentSlug?: string | null;
     readonly body?: string;
     readonly sourceFiles?: ReadonlyArray<string>;
-    readonly structure?: Record<string, unknown>;
   } = {},
 ): void {
   const dir = join(root, slug);
@@ -87,7 +86,6 @@ function writePack(
     parentSlug: opts.parentSlug ?? null,
     sourceFiles: opts.sourceFiles ?? [],
   };
-  if (opts.structure !== undefined) meta.structure = opts.structure;
   writeFileSync(join(dir, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`, 'utf8');
 }
 
@@ -361,55 +359,6 @@ describe('get_feature_pack — inherited[] ordering lock (root-first)', () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.inherited.map((p) => p.metadata.slug)).toEqual(['root', 'middle']);
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// G2.1 — the `structure` block (Graphify-seeded packs)
-// ---------------------------------------------------------------------------
-
-describe('get_feature_pack — structure block', () => {
-  let h: Harness;
-  beforeEach(async () => {
-    h = await openHarness();
-  });
-  afterEach(async () => {
-    await h.close();
-  });
-
-  it('surfaces pack.content.structure when meta.json carries a structure block', async () => {
-    writePack(h.root, 'graph-seeded', {
-      sourceFiles: ['src/auth/**'],
-      structure: {
-        source: 'graphify',
-        communityId: 'c-auth',
-        label: 'Auth Layer',
-        godNodes: ['AuthService', 'TokenStore'],
-        memberFiles: ['src/auth/service.ts'],
-      },
-    });
-    const registry = buildRegistry(h.store);
-    const out = unwrap(await registry.handleCall('get_feature_pack', { projectSlug: 'graph-seeded' }, 'sess_1'));
-    expect(out.ok).toBe(true);
-    if (out.ok) {
-      expect(out.pack.content.structure).toEqual({
-        source: 'graphify',
-        communityId: 'c-auth',
-        label: 'Auth Layer',
-        godNodes: ['AuthService', 'TokenStore'],
-        memberFiles: ['src/auth/service.ts'],
-      });
-    }
-  });
-
-  it('omits structure for a pack whose meta.json has no structure block', async () => {
-    writePack(h.root, 'plain-pack', { sourceFiles: ['src/**'] });
-    const registry = buildRegistry(h.store);
-    const out = unwrap(await registry.handleCall('get_feature_pack', { projectSlug: 'plain-pack' }, 'sess_1'));
-    expect(out.ok).toBe(true);
-    if (out.ok) {
-      expect(out.pack.content.structure).toBeUndefined();
     }
   });
 });

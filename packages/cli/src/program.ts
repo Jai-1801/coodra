@@ -29,6 +29,15 @@ import {
 } from './commands/graphify.js';
 import { type InitIO, type InitOptions, runInitCommand } from './commands/init.js';
 import { type InviteIO, type InviteOptions, runInviteCommand } from './commands/invite.js';
+import {
+  type JiraDisableOptions,
+  type JiraEnableOptions,
+  type JiraIO,
+  type JiraStatusOptions,
+  runJiraDisableCommand,
+  runJiraEnableCommand,
+  runJiraStatusCommand,
+} from './commands/jira.js';
 import { type LoginIO, type LoginOptions, runLoginCommand } from './commands/login.js';
 import { type LogoutIO, type LogoutOptions, runLogoutCommand } from './commands/logout.js';
 import { type LogsIO, type LogsOptions, runLogsCommand } from './commands/logs.js';
@@ -138,6 +147,10 @@ interface BuildProgramOptions {
   readonly runGraphifyEnable?: (options: GraphifyEnableOptions, io?: GraphifyIO) => Promise<unknown>;
   readonly runGraphifyDisable?: (options: GraphifyDisableOptions, io?: GraphifyIO) => Promise<unknown>;
   readonly runGraphifyStatus?: (options: GraphifyStatusOptions, io?: GraphifyIO) => Promise<unknown>;
+  readonly jiraIO?: JiraIO;
+  readonly runJiraEnable?: (options: JiraEnableOptions, io?: JiraIO) => Promise<unknown>;
+  readonly runJiraDisable?: (options: JiraDisableOptions, io?: JiraIO) => Promise<unknown>;
+  readonly runJiraStatus?: (options: JiraStatusOptions, io?: JiraIO) => Promise<unknown>;
   readonly teamIO?: TeamCommandIO;
   readonly runTeamLogin?: (options: TeamLoginOptions, io?: TeamCommandIO) => Promise<unknown>;
   readonly runTeamLogout?: (io?: TeamCommandIO) => Promise<unknown>;
@@ -265,9 +278,14 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     )
     .option(
       '--graphify',
-      "Module 09: wire Graphify's codebase-graph MCP server into the agent config(s) and seed the graphify-seed-packs skill. Skips the interactive prompt.",
+      "Module 09: wire Graphify's codebase-graph MCP server (structural-query tool) into the agent config(s). Skips the interactive prompt.",
     )
     .option('--no-graphify', "Module 09: don't wire Graphify; skip the interactive prompt.")
+    .option(
+      '--jira',
+      "Module 09: wire Atlassian's Jira (Rovo) remote MCP server into the agent config(s). Skips the interactive prompt.",
+    )
+    .option('--no-jira', "Module 09: don't wire Jira; skip the interactive prompt.")
     .option('--dry-run', 'Print what init would write without touching disk.')
     .option('--force', 'Overwrite existing files with the baseline (destructive — see spec §11 Decision 3).')
     .option(
@@ -347,22 +365,22 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
   const graphify = program
     .command('graphify')
     .description(
-      "Wire Graphify's codebase-graph MCP server into your agent config (Claude Code / Cursor / Windsurf / Codex). " +
-        'Option C per ADR-010 — Coodra consumes Graphify by configuration, not code.',
+      "Wire Graphify's codebase-graph MCP server (a structural-query tool) into your agent config " +
+        '(Claude Code / Cursor / Windsurf / Codex). Option C per ADR-010 / ADR-015 — Coodra consumes Graphify ' +
+        'by configuration, not code, and mints no Feature Packs from it.',
     );
   graphify
     .command('enable')
     .description(
-      'Add the `graphify` MCP server entry to each detected agent config and seed the `graphify-seed-packs` skill. Idempotent; preserves the `coodra` entry and your edits.',
+      'Add the `graphify` MCP server entry to each detected agent config so the agent can run structural queries. Idempotent; preserves the `coodra` entry and your edits.',
     )
     .option('--ide <ide>', 'IDE(s) to wire ("claude", "cursor", "windsurf", "codex", or "all"; comma-separated).')
     .option(
       '--python <path>',
-      'Python interpreter for `-m graphify.serve` (default: python3; pass a venv path when graphifyy[mcp] is venv-installed).',
+      'Python interpreter for `-m graphify.serve`. Omit to auto-detect a verified graphifyy[mcp] interpreter (active venv → ./.venv → the `graphify` install → uv tool → python3); pass a path to pin one explicitly.',
     )
     .option('--graph <path>', 'Path to the Graphify graph JSON (default: graphify-out/graph.json).')
-    .option('--force', 'Overwrite an existing drifted `graphify` entry / feature.md with the baseline.')
-    .option('--no-feature', 'Skip seeding the `graphify-seed-packs` Feature recipe into docs/features/.')
+    .option('--force', 'Overwrite an existing drifted `graphify` entry with the baseline.')
     .option('--dry-run', 'Report what would change without touching disk.')
     .option('--json', 'Emit a structured JSON report.')
     .action(async (opts: GraphifyEnableOptions) => {
@@ -387,6 +405,56 @@ export function buildProgram(options: BuildProgramOptions = {}): Command {
     .option('--json', 'Emit a structured JSON report.')
     .action(async (opts: GraphifyStatusOptions) => {
       await graphifyStatusRunner(opts, options.graphifyIO);
+    });
+
+  // Module 09 Track 9A (Jira = Direct, ADR-016) — `coodra jira
+  // {enable,disable,status}` wires Atlassian's own remote MCP server
+  // ("Rovo") into the agent config(s). Coodra consumes Jira by
+  // configuration, not by code: the entry points the agent at
+  // https://mcp.atlassian.com/v1/mcp/authv2 and the agent calls
+  // Atlassian's own Jira tools. Native remote entry only — no mcp-remote
+  // shim (decision 2026-05-31).
+  const jiraEnableRunner = options.runJiraEnable ?? runJiraEnableCommand;
+  const jiraDisableRunner = options.runJiraDisable ?? runJiraDisableCommand;
+  const jiraStatusRunner = options.runJiraStatus ?? runJiraStatusCommand;
+  const jira = program
+    .command('jira')
+    .description(
+      "Wire Atlassian's Jira (Rovo) remote MCP server into your agent config " +
+        '(Claude Code / Cursor / Windsurf / Codex). Direct per ADR-016 — Coodra consumes Jira ' +
+        'by configuration, not code, and builds no Jira client, OAuth, or jira_* tools.',
+    );
+  jira
+    .command('enable')
+    .description(
+      "Add the `atlassian` (Rovo) remote MCP server entry to each detected agent config so the agent can call Atlassian's Jira tools. Idempotent; preserves the `coodra` entry and your edits.",
+    )
+    .option('--ide <ide>', 'IDE(s) to wire ("claude", "cursor", "windsurf", "codex", or "all"; comma-separated).')
+    .option('--force', 'Overwrite an existing drifted `atlassian` entry with the baseline.')
+    .option('--dry-run', 'Report what would change without touching disk.')
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (opts: JiraEnableOptions) => {
+      await jiraEnableRunner(opts, options.jiraIO);
+    });
+  jira
+    .command('disable')
+    .description(
+      'Remove the `atlassian` MCP server entry from each agent config. Idempotent. Leaves every other entry untouched.',
+    )
+    .option('--ide <ide>', 'IDE(s) to unwire ("claude", "cursor", "windsurf", "codex", or "all"; comma-separated).')
+    .option('--dry-run', 'Report what would change without touching disk.')
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (opts: JiraDisableOptions) => {
+      await jiraDisableRunner(opts, options.jiraIO);
+    });
+  jira
+    .command('status')
+    .description(
+      'Show whether the `atlassian` MCP entry is present in each agent config (Claude Code / Cursor / Windsurf / Codex). Read-only.',
+    )
+    .option('--json', 'Emit a structured JSON report.')
+    .action(async (opts: JiraStatusOptions) => {
+      await jiraStatusRunner(opts, options.jiraIO);
     });
 
   // Phase G slice G.3 — top-level `coodra login` for browser-handoff auth.

@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 
-import { clerkAppearance } from '@/lib/clerk-appearance';
+import { AuthShell } from '@/components/AuthShell';
+import { clerkAuthAppearance } from '@/lib/clerk-appearance';
 import { resolveIdentityMode } from '@/lib/deployment-mode';
 
 export const dynamic = 'force-dynamic';
@@ -16,49 +17,18 @@ export const dynamic = 'force-dynamic';
  * should configure Clerk to require invitation (Clerk dashboard →
  * Authentication → Restrictions) to prevent randos from joining the
  * deployment's Clerk app.
+ *
+ * UI: Clerk's `<SignUp>` is wrapped in the editorial `AuthShell` and
+ * themed card-less via `clerkAuthAppearance`. The sign-up flow itself is
+ * unchanged — only the presentation differs.
  */
 
 export default async function SignUpPage() {
   if (resolveIdentityMode() !== 'team') notFound();
   const { SignUp } = await import('@clerk/nextjs');
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '80vh',
-        gap: 32,
-        padding: '40px 24px',
-      }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-        <h1
-          style={{
-            fontFamily: 'var(--serif)',
-            fontSize: 56,
-            fontWeight: 400,
-            letterSpacing: '-0.02em',
-            color: 'var(--ink)',
-            lineHeight: 1,
-          }}
-        >
-          Coodra
-        </h1>
-        <p
-          style={{
-            fontFamily: 'var(--mono)',
-            fontSize: 10,
-            letterSpacing: '0.22em',
-            color: 'var(--ink-mute)',
-            textTransform: 'uppercase',
-          }}
-        >
-          Join your team workspace
-        </p>
-      </div>
-      <SignUp appearance={clerkAppearance} routing="path" path="/auth/sign-up" signInUrl="/auth/sign-in" />
-    </div>
+    <AuthShell mode="signup">
+      <SignUp appearance={clerkAuthAppearance} routing="path" path="/auth/sign-up" signInUrl="/auth/sign-in" />
+    </AuthShell>
   );
 }

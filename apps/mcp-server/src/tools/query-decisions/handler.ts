@@ -68,6 +68,7 @@ async function selectDecisions(
   db: DbHandle,
   projectId: string,
   runId: string | undefined,
+  issueRef: string | undefined,
   query: string | undefined,
   limit: number,
 ): Promise<RawRow[]> {
@@ -76,6 +77,9 @@ async function selectDecisions(
     const runs = sqliteSchema.runs;
     const conditions = [eq(runs.projectId, projectId)];
     if (runId !== undefined) conditions.push(eq(decisions.runId, runId));
+    // Module 09 J2 (ADR-016) — "what was decided for PROJ-412?": filter to
+    // decisions whose run is bound to this Jira issue (runs.issue_ref).
+    if (issueRef !== undefined) conditions.push(eq(runs.issueRef, issueRef));
     if (query !== undefined) {
       const pattern = `%${query}%`;
       const text = or(like(decisions.description, pattern), like(decisions.rationale, pattern));
@@ -182,7 +186,8 @@ export function createQueryDecisionsHandler(deps: QueryDecisionsHandlerDeps) {
       };
     }
 
-    const rows = await selectDecisions(deps.db, projectId, input.runId, input.query, input.limit);
+    const issueRefFilter = input.issueRef !== undefined ? input.issueRef.toUpperCase() : undefined;
+    const rows = await selectDecisions(deps.db, projectId, input.runId, issueRefFilter, input.query, input.limit);
     return {
       ok: true,
       decisions: rows.map(toEntry),

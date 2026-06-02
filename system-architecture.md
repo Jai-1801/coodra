@@ -606,11 +606,9 @@ POST /api/sync                 ← Cloud sync, internal
 POST /api/graphify/analyze     ← Graphify graph upload
 POST /api/graphify/import      ← Graphify feature pack import
 
-# Issue tracker integration (see §22)
-GET  /api/integrations/atlassian/oauth/start      ← begin OAuth 2.0 (3LO) flow
-GET  /api/integrations/atlassian/oauth/callback   ← OAuth redirect handler
-DELETE /api/integrations/atlassian/:integrationId ← disconnect
-POST /v1/webhooks/atlassian                       ← inbound JIRA webhook (HMAC verified)
+# Issue tracker integration (see §22) — Direct (ADR-016): Jira is the wired Atlassian Rovo MCP.
+# Coodra exposes NO Jira HTTP routes: no OAuth start/callback, no disconnect, no webhook ingress.
+# `coodra jira enable` writes Rovo's remote-MCP entry into the agent config; OAuth is Rovo's own (IDE /mcp flow).
 
 # GitHub governance & context layer (see §23)
 GET  /api/integrations/github/install/start         ← redirect to GitHub App install page
@@ -868,11 +866,11 @@ The Coodra CLI can invoke external tools (Graphify, Ollama, git) as subprocesses
 **15. Rate limiting (team mode only):**
 Redis sliding window per org. Lua script: atomic `ZREMRANGEBYSCORE` + `ZADD` + `ZCARD`. Prevents one org's runaway agent from flooding the cloud API. Not needed in solo mode.
 
-**16. Outbound integration pattern (JIRA and future connectors):**
-All third-party calls (JIRA, GitHub, Linear) follow one shape: a per-integration `IntegrationClient` instance pulls credentials from `integration_tokens`, wraps every call in a per-org `cockatiel` circuit breaker + 10s timeout, records a row in `integration_events` (idempotency key = `{integrationId}:{operation}:{externalRef}`), and returns a typed `Result<T, IntegrationError>`. Tool handlers never throw when the third-party is unreachable — they return a structured "degraded" response so the agent keeps moving. Token refresh and retry are the client's job, not the caller's. See §22.7.
+**16. Outbound integration pattern (GitHub and future Build-style connectors):**
+This pattern applies to integrations Coodra calls *itself* — GitHub (§23) and any future connector where no vendor MCP exists. Each makes its third-party calls through a per-integration `IntegrationClient`: pull credentials from `integration_tokens`, wrap every call in a per-org `cockatiel` circuit breaker + 10s timeout, record a row in `integration_events` (idempotency key = `{integrationId}:{operation}:{externalRef}`), return a typed `Result<T, IntegrationError>`. Tool handlers never throw when the third-party is unreachable — they return a structured "degraded" response so the agent keeps moving. Token refresh and retry are the client's job, not the caller's. **Jira does NOT use this pattern** — it is consumed Direct (ADR-016): Coodra wires Atlassian's Rovo MCP and the agent calls it, so there is no Coodra-side Jira `IntegrationClient`, no `integration_tokens` / `integration_events` for Jira. Prefer the Direct pattern whenever the vendor ships a maintained MCP.
 
 **17. Inbound webhook pattern:**
-Third-party webhooks land on `POST /v1/webhooks/<provider>` in team mode. Each handler: (a) verifies HMAC/signature using the per-integration secret, (b) returns 200 OK within 5s (fail-open on signature-match edge cases is NOT permitted — signature mismatch must return 401), (c) enqueues a `<provider>-webhook-event` job carrying the raw body + extracted entity IDs, and (d) lets the worker update local state idempotently. See §22.6 (JIRA) and §23.8 (GitHub).
+Third-party webhooks land on `POST /v1/webhooks/<provider>` in team mode. Each handler: (a) verifies HMAC/signature using the per-integration secret, (b) returns 200 OK within 5s (fail-open on signature-match edge cases is NOT permitted — signature mismatch must return 401), (c) enqueues a `<provider>-webhook-event` job carrying the raw body + extracted entity IDs, and (d) lets the worker update local state idempotently. See §23.8 (GitHub). **Jira has no inbound webhook** — it is consumed Direct and Rovo is pull-only (ADR-016).
 
 **18. Repository Graph Index (policy-input materialization):**
 When a third-party config document is read on the agent's hot path (e.g., CODEOWNERS on every `pre_tool_use`), it must be materialized into a first-class local table and refreshed via webhooks, not fetched live. The pattern is: parse on ingest → store as structured rows → hydrate the policy engine / NL assembly from the local table → refresh via targeted webhook events → nightly drift-reconciliation cron. Applies to CODEOWNERS and branch protection today (§23.4); will apply to Linear workflow states and equivalents in the future. Rule of thumb: *if it's read by the 150 ms hot path, materialize it locally.*
@@ -929,24 +927,27 @@ This is the same "wire the external MCP server, don't rebuild it" pattern Coodra
 uses for the Jira integration (§22), and the Pattern-20 thesis applied to
 structural context: ship the integration as wiring + recipes, not as a service.
 
-### Coodra's Leverage — Fusing Structure Into the Knowledge Layer
+### Coodra's Leverage — Graphify as the Query Layer (ADR-015, 2026-05-23)
 
-Coodra's value-add is making the **knowledge layer graph-aware**:
+> **Superseded approach.** This section originally described a
+> `coodra__seed_feature_packs_from_graph` tool that minted one draft Feature
+> Pack per Leiden community, plus a `structure` block on `get_feature_pack`.
+> Both were **retired in ADR-015**. On a real 9,659-node repo Graphify produced
+> 588 communities, 73.5% of them single-file (config files, READMEs); seeding
+> them created hundreds of un-injectable shells, and `get_feature_pack`'s
+> `filePath` resolution (the only path that could surface them) was never
+> implemented. A code-graph community is a navigation aid, not a Feature Pack
+> boundary.
 
-- **`coodra__seed_feature_packs_from_graph`** — a new MCP tool. The agent (which
-  holds both the `coodra` and `graphify` MCP servers) fetches the Leiden
-  community breakdown from Graphify and hands it to Coodra, which creates one
-  **draft** Feature Pack per community — name from the community label, a
-  `structure` block populated (god nodes, member files, community id),
-  `status='draft'` for tech-lead review. This is the cold-start fix: a fresh
-  repo gets a Feature Pack skeleton without manual authoring. Idempotent on a
-  community hash — re-seeding updates packs; a vanished community flags its pack
-  stale.
-- **`get_feature_pack`** gains an optional `structure` block, so every session
-  start can deliver code topology alongside human intent.
-
-No schema migration is required — the `structure` block lives inside
-`feature_packs.content_json`.
+Coodra's leverage of Graphify is its **live structural-query layer**, consumed
+through Graphify's own MCP server (`query_graph` / `get_node` / `get_neighbors`
+/ `shortest_path`), wired alongside the `coodra` server via `coodra graphify
+enable`. The agent calls those tools directly for blast-radius and "where is X
+defined?" questions. Coodra mints **no** Feature Packs from the graph; Feature
+Packs stay human/agent-authored at module granularity. If agent-assisted
+cold-start authoring is revisited, ADR-015 records its two preconditions:
+module granularity (not communities) and working `filePath`→`sourceFiles`
+resolution.
 
 ### What Is Retired
 
@@ -1034,12 +1035,13 @@ No LLM available → `enrichment_status = "skipped"`. Context pack is saved with
 
 ### Integration-Derived Enrichment Inputs
 
-When the JIRA or GitHub integrations are active, the NL Assembly prompt receives additional context *before* the LLM call. This is how third-party coordination state enters the enriched context pack. See:
+When the GitHub integration is active, the NL Assembly prompt receives additional context *before* the LLM call. This is how third-party coordination state enters the enriched context pack. See:
 
-- **§22.10** — JIRA `currentIssue` + `openIssues` injected into `get_feature_pack` responses (feature-pack-level enrichment).
 - **§23.9** — GitHub PR, review comments, CODEOWNERS hits, branch protection, and check-run statuses injected into the assembly prompt (per-run enrichment).
 
-Both integrations follow the same degradation contract: each integration's fetch is subject to a 1 s budget, the field is silently omitted on timeout or failure, and the pack is still produced. The LLM sees presence or absence and emits a pack either way.
+(**Jira enrichment is retired — ADR-016.** The Build design injected `currentIssue` + `openIssues` server-side into `get_feature_pack`; under Direct, the agent pulls live issue context itself via the wired Rovo MCP, so there is no server-side Jira enrichment of the assembly prompt.)
+
+The GitHub enrichment follows a degradation contract: the fetch is subject to a 1 s budget, the field is silently omitted on timeout or failure, and the pack is still produced. The LLM sees presence or absence and emits a pack either way.
 
 ---
 
@@ -1147,11 +1149,8 @@ These are deliberate gaps — not omissions. Each requires new information befor
 | MCP remote transport (future) | When remote MCP over HTTP becomes important for team setups, the MCP server needs HTTPS + Clerk auth on the `/mcp` endpoint. Design deferred until team mode reaches GA. |
 | Sync table subset | Explicitly define which tables are synced local → cloud: `runs`, `run_events`, `context_packs`, `policy_decisions` (append-only, safe to replicate). Not synced: `feature_packs`, `policy_rules` (cloud is the single writer for these in team mode; local is a pull-only cache). If the sync scope expands, consider a change-data-capture (CDC) or logical-replication-driven approach instead of polling `WHERE synced_at IS NULL`. |
 | Aggregated metrics / observability | The event log captures raw data but there is no plan for aggregated metrics (policy violation rates, enrichment failure rates, pack assembly latency distributions). Reserve a `usage_aggregates` table or a Prometheus `/metrics` endpoint now — even if unpopulated — so the slot exists when monitoring becomes important. |
-| JIRA OAuth token encryption at rest | `integration_tokens.access_token` and `refresh_token` must not be stored as plaintext. Options: (a) Supabase `pgcrypto` `pgp_sym_encrypt` with a key from a secrets manager, (b) application-level AES-256-GCM with a `COODRA_TOKEN_KEY` env var rotated quarterly, (c) store only a handle and keep tokens in a KMS/Vault. Decision deferred until team mode ships; until then, dev-only tokens use (b) with a random key per environment. |
-| JIRA state sync — webhook-derived vs. poll-derived | Webhook delivery is best-effort (Atlassian retries but can drop). A nightly reconciliation job that calls `jira_search_issues` for every active integration and reconciles against `integration_events` closes the gap. Not needed for v1 if webhooks stay reliable; instrument webhook delivery rate first and add reconciliation only if drift is observed. |
-| Multi-site Atlassian access | A single Atlassian user may have access to multiple Atlassian sites (`cloudid`s). The OAuth token is global; each API call must include the right `cloudid` in the URL. The `integrations` table stores one row per (org, cloudid) pair so teams can connect multiple sites; the UI picks the right site per project via `feature_packs.content.jiraSiteId`. |
-| Solo-mode JIRA credentials | Solo mode cannot complete a 3LO OAuth flow without a public callback URL. Solo mode uses email + API token (the same pattern as the `jira_test` prototype), stored in `~/.coodra/config.json` alongside `local_hook_secret`, `chmod 600`. Upgrading from solo to team migrates the API-token-based integration to a freshly-OAuthed one (the old token is discarded, not replayed into the cloud DB). |
-| Issue-tracker scope expansion | GitHub Issues, Linear, and Asana would reuse the `integrations` + `integration_tokens` + `integration_events` scaffolding. Tool names become `jira_*`, `github_*`, `linear_*` and share a common `IntegrationClient` interface. **Status:** JIRA shipped in §22; GitHub designed in §23 (richer — adds CODEOWNERS + branch protection as first-class policy inputs, not just ticket reads). Linear/Asana remain future work; design them on whichever provider's semantics they most resemble. |
+| ~~JIRA OAuth encryption / state sync / multi-site / solo creds~~ | **SUPERSEDED by ADR-016 (Jira = Direct).** These were open decisions for the Build design: Coodra-stored OAuth token encryption, webhook-vs-poll reconciliation, multi-`cloudid` routing, and solo API-token storage. Under Direct, Coodra stores no Jira token, runs no webhook, and routes nothing — Atlassian's Rovo MCP owns all of it. None of these decisions remain open. |
+| Issue-tracker scope expansion | Future trackers (Linear, Asana, GitHub Issues) follow the **Direct** pattern wherever the vendor ships a maintained MCP: wire it (`coodra <tracker> enable`) + a thin Run↔entity link, exactly like Jira (§22, ADR-016) and Graphify (§17, ADR-015). Build a Coodra-side client only where no vendor MCP exists — that path keeps the `IntegrationClient` + `integration_tokens` + `integration_events` scaffolding (GitHub §23 is the current Build example, richer — it adds CODEOWNERS + branch protection as first-class policy inputs, not just ticket reads). |
 | GitHub App webhook secret rotation | The GitHub App webhook secret is App-level (not per-installation). Rotation requires updating the App's setting on github.com + the `GITHUB_WEBHOOK_SECRET` env var atomically. Runbook: generate a new secret, update the env var on all webhook-receiving instances, then update github.com. Old secret continues to verify for ~60 s during rollover (acceptable drift). |
 | GitHub App private key storage | The App's RSA private key (PEM) is required to mint installation tokens. Store in a secrets manager (not an env var on disk). Key rotation: generate a second active key on github.com, deploy the new key, remove the first key. GitHub supports up to two active keys per App precisely for this flow. |
 | CODEOWNERS re-parse on every push | Naive implementation re-parses on every `push` webhook. Optimization: only re-parse if `commits[].modified` includes `.github/CODEOWNERS` in its list. Bench this at 10–100 repos scale; if webhook processing latency creeps up, add a repo-level content hash check before parsing. |
@@ -1159,410 +1158,108 @@ These are deliberate gaps — not omissions. Each requires new information befor
 
 ---
 
-## 22. Issue Tracker (JIRA / Atlassian) Integration
+## 22. Issue Tracker (Jira / Atlassian) Integration — Direct (wire Atlassian's Rovo MCP)
 
-> A production-grade, fail-open, bidirectional connector. Designed on the same principles as the rest of the system: normalize at the boundary, idempotency everywhere, the agent is never blocked by a third party.
+> **SUPERSEDED-AND-REPLACED by ADR-016 (2026-05-31).** This section previously specified a "Build" connector — a `jira.js` REST client, a Coodra-owned OAuth 2.0 3LO app, hand-rolled ADF conversion, inbound webhooks, the `integration_tokens` / `integration_events` tables, and 8 `jira_*` MCP tools. That design is **retired**. Coodra now consumes Jira the same way it consumes Graphify (§17, ADR-010 / ADR-015): **wire the vendor's own MCP server and let the agent call it.** The Build mechanics live only in git history and in `External api and library reference.md` (marked superseded) as prototype reference. §22.9 lists exactly what was retired.
 
 ### 22.1 Goals and Non-Goals
 
 **Goals.**
-1. The agent reaches a session already knowing which JIRA issue it is working on and what that issue says — without the developer pasting the ticket into the prompt.
-2. The agent can read, search, create, update, transition, and comment on issues via MCP tools that mirror the prototype in `jira_test/`.
-3. Every Context Pack that is linked to a JIRA issue posts a summary comment back to that issue, automatically, at session end.
-4. When a JIRA issue changes status (e.g., moved to Done), the linked runs and context packs in Coodra reflect that change within one minute.
-5. Tech leads can connect a JIRA cloud site once at the org level; projects opt in per-project via a Feature Pack field.
-6. The integration fails open on every axis: JIRA down → agent continues, webhook dropped → next webhook reconciles, token expired → user is prompted to re-auth without interrupting the active session.
-
-**Non-goals (explicitly deferred).**
-- Jira Data Center / Server (self-hosted) support. Cloud only for v1.
-- Reverse-engineering agile sprints or board state. The knowledge graph tracks issues as external entities; sprint data is not mirrored.
-- Two-way sync of issue content (we never rewrite an issue's description from a context pack). Comments only.
-- Atlassian Confluence, Bitbucket, Trello. Out of scope.
-
-### 22.2 Data Model
-
-Three new tables + two enum additions. All tables follow the existing conventions (`uuid` PK, `created_at` / `updated_at`, `projectId` or `clerkOrgId` scoping).
-
-```sql
--- Per-org connection to an Atlassian site. One row per (orgId, cloudId).
-CREATE TABLE integrations (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  clerk_org_id    text NOT NULL,
-  provider        text NOT NULL,                -- 'atlassian' (future: 'github', 'linear')
-  cloud_id        text NOT NULL,                -- Atlassian site ID (UUID)
-  site_url        text NOT NULL,                -- e.g. 'https://mcptest01.atlassian.net'
-  display_name    text NOT NULL,                -- human label shown in UI
-  scopes          jsonb NOT NULL,               -- granted OAuth scopes
-  webhook_id      text,                         -- Atlassian webhook registration ID
-  webhook_secret  text,                         -- per-integration HMAC secret (encrypted at rest)
-  status          text NOT NULL DEFAULT 'active', -- active | expired | revoked | error
-  connected_by    uuid REFERENCES users(id),
-  connected_at    timestamp DEFAULT now() NOT NULL,
-  last_error      text,
-  UNIQUE (clerk_org_id, provider, cloud_id)
-);
-
--- OAuth tokens, separated from integrations so token rotation doesn't require integration row churn.
-CREATE TABLE integration_tokens (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  integration_id  uuid NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
-  access_token    text NOT NULL,                -- encrypted (see §21 Open Decisions)
-  refresh_token   text NOT NULL,                -- encrypted
-  expires_at      timestamp NOT NULL,
-  token_type      text NOT NULL DEFAULT 'Bearer',
-  created_at      timestamp DEFAULT now() NOT NULL
-);
-CREATE INDEX integration_tokens_expiry_idx ON integration_tokens (integration_id, expires_at DESC);
-
--- Append-only log of every outbound call + inbound webhook. Doubles as idempotency store.
-CREATE TABLE integration_events (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  integration_id  uuid NOT NULL REFERENCES integrations(id),
-  direction       text NOT NULL,                -- 'outbound' | 'inbound'
-  operation       text NOT NULL,                -- 'jira.searchIssues' | 'jira.addComment' | 'jira.webhook.issue_updated' | ...
-  external_ref    text,                         -- issue key, comment ID, webhook delivery ID
-  run_id          uuid REFERENCES runs(id),     -- linking the event to an agent run, if applicable
-  request_body    jsonb,
-  response_body   jsonb,
-  status_code     integer,                      -- HTTP status for outbound; 200 for accepted webhooks
-  idempotency_key text NOT NULL UNIQUE,         -- format: '{integrationId}:{operation}:{externalRef}'
-  duration_ms     integer,
-  created_at      timestamp DEFAULT now() NOT NULL
-);
-CREATE INDEX integration_events_integration_idx ON integration_events (integration_id, created_at DESC);
-CREATE INDEX integration_events_run_idx         ON integration_events (run_id);
-```
-
-**Enum additions (Drizzle `pgEnum`):**
-- `knowledge_node_type` adds `external_issue`
-- `knowledge_edge_type` adds `tracks_issue` (run → external_issue), `resolves_issue` (context_pack → external_issue)
-
-External issues are not given their own table — we use the polymorphic `knowledge_edges` + `integration_events` instead. A "node" of type `external_issue` has `sourceId` = the JIRA issue key's SHA-1 hash (stable across orgs), and metadata in `knowledge_edges.metadata` carries the raw key + `integrationId`. This avoids a table that would duplicate JIRA state that already lives in JIRA.
-
-**Why three tables, not one.** `integrations` mutates rarely (OAuth reconnect). `integration_tokens` rotates frequently (refresh). `integration_events` grows linearly with traffic. Splitting them keeps each table's access pattern clean and lets the tokens table be encrypted and tightly RLS-scoped without dragging the other two along.
-
-### 22.3 IssueRef Resolution
-
-`runs.issueRef` and `context_packs.issueRef` already exist (see `packages/db/src/schema.ts:144,171`). What was missing is a resolution pipeline. On `SessionStart` the Hooks Bridge runs this pipeline in priority order, first hit wins:
-
-1. **Explicit adapter payload** — the Windsurf adapter script or Claude Code hook can pass `"issue_ref": "KAN-123"` in the JSON payload. Used by the VSCode extension's `Trigger Run` command (already present at `apps/vscode/src/commands/index.ts:125`).
-2. **`.coodra.json` in cwd** — new optional field `"issueRef": "KAN-123"` lets a developer pin a working ticket to a branch checkout.
-3. **Git branch regex** — default pattern `^(feature|bugfix|hotfix|chore)\/([A-Z][A-Z0-9_]+-\d+)` captures `KAN-123` from a branch like `feature/KAN-123-add-oauth`. Configurable via `feature_packs.content.issueRefBranchPattern`.
-4. **Last commit message trailer** — looks for `Jira-Issue: KAN-123` or `Refs: KAN-123` in the HEAD commit message.
-5. **Env var** — `COODRA_ISSUE_REF=KAN-123` for ad-hoc one-off tracking.
-
-If none match, `runs.issueRef = null` and the JIRA integration is inactive for that run. No error, no prompt — session proceeds normally. This is the fail-open principle applied upstream of any JIRA call.
-
-The resolved `issueRef` is:
-- stored on the `runs` row,
-- propagated to `context_packs` at assembly time,
-- added to the log context so every `pino` line in that session shows `issueRef=KAN-123`,
-- returned in the `SessionStart` response so downstream tools (MCP `get_feature_pack`, etc.) can see it immediately.
-
-### 22.4 MCP Tools (Agent-Facing, 8 tools)
-
-The JIRA tools mirror the `jira_test/` prototype 1:1 — the prototype is the de-facto behavioural spec. All 8 tools are registered in `apps/mcp-server/src/tools/index.ts` alongside the existing eight Coodra tools. Each JIRA tool is an `IntegrationClient`-wrapped Drizzle-aware handler that returns a uniform shape.
-
-| MCP tool | Wraps REST endpoint | Purpose |
-|---|---|---|
-| `jira_search_issues` | `POST /rest/api/3/search/jql` | JQL search. Returns `[{ key, summary, status, assignee, priority, labels, type }]`. |
-| `jira_get_issue` | `GET /rest/api/3/issue/{key}` | Full issue details including description (ADF → plain text converted for the agent). |
-| `jira_create_issue` | `POST /rest/api/3/issue` | Create Task/Bug/Story. Description wrapped in ADF. Returns `{ key, id, url }`. |
-| `jira_update_issue` | `PUT /rest/api/3/issue/{key}` | Partial field update. Same ADF wrapping for description. |
-| `jira_list_transitions` | `GET /rest/api/3/issue/{key}/transitions` | Used by the agent before `jira_transition_issue` to discover valid status names. |
-| `jira_transition_issue` | `POST /rest/api/3/issue/{key}/transitions` | Two-step: look up transition ID by case-insensitive name match, then execute. |
-| `jira_add_comment` | `POST /rest/api/3/issue/{key}/comment` | Body wrapped in ADF. Idempotent via `integration_events` lookup. |
-| `jira_list_projects` | `GET /rest/api/3/project/search` | Used by the web app and by the agent when the project key is unknown. |
-
-**Input schema convention.** All tools take `projectSlug` as their first arg, look up the active `integration` for that project's org, and fail fast with `{ error: "no_integration" }` if none is configured. No tool throws — callers get a typed result.
-
-**Auth context.** In solo mode the integration row points to an API-token credential stored in `~/.coodra/config.json`. In team mode it points to an OAuth access token fetched from `integration_tokens`, refreshed on 401. The tool handlers are identical in both modes — the `IntegrationClient` hides the auth shape.
-
-**Policy integration.** `check_policy` already supports per-tool rules. New tools get new names (e.g., `MCP:jira_create_issue`) so tech leads can selectively deny write operations per agent type: "Allow Windsurf to call `jira_search_issues` but deny `jira_transition_issue`."
-
-### 22.5 OAuth 2.0 (3LO) Flow — Team Mode
-
-Team mode uses Atlassian's three-legged OAuth (aka 3LO) authorization code grant. The Atlassian developer app is a single Coodra-owned app (one `client_id`, one `client_secret`) and tech leads complete the consent flow per Atlassian site.
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ Tech lead in /dashboard/[project]/settings → clicks "Connect Jira" │
-│                                                                 │
-│ Web app → GET /api/integrations/atlassian/oauth/start            │
-│   → builds https://auth.atlassian.com/authorize with:           │
-│       audience=api.atlassian.com                                 │
-│       client_id=<env.ATLASSIAN_CLIENT_ID>                        │
-│       scope=<scopes list>                                        │
-│       redirect_uri=https://app.coodra.dev/api/integrations/   │
-│                    atlassian/oauth/callback                      │
-│       state=<HMAC(orgId + nonce + projectSlug)>  ← CSRF + ties   │
-│       response_type=code                                         │
-│       prompt=consent                                             │
-│                                                                 │
-│ Atlassian consent screen → user approves → redirect with code   │
-│                                                                 │
-│ Web app → GET /api/integrations/atlassian/oauth/callback         │
-│   → verify state HMAC, extract orgId + projectSlug               │
-│   → POST https://auth.atlassian.com/oauth/token with:            │
-│       grant_type=authorization_code, code, client_id, secret    │
-│   → POST https://api.atlassian.com/oauth/token/accessible-        │
-│        resources (list of Atlassian sites this token can access)│
-│   → let tech lead pick which cloudId to connect (multi-site)    │
-│   → INSERT integrations (..., cloud_id, site_url, scopes)       │
-│   → INSERT integration_tokens (access_token, refresh_token,     │
-│           expires_at = now() + 3600s)                            │
-│   → create webhook via POST /rest/api/3/webhook (see §22.6)     │
-│   → redirect to /dashboard/[project]/settings?integration=ok    │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Scopes requested (minimum needed for the 8 MCP tools):**
-```
-read:jira-work         read:jira-user         read:me
-write:jira-work        manage:jira-webhook
-offline_access         ← required to receive a refresh_token
-```
-
-**Token refresh.** `integration_tokens.expires_at` is checked on every outbound call. If within 60s of expiry, the `IntegrationClient` calls `POST https://auth.atlassian.com/oauth/token` with `grant_type=refresh_token`, inserts a new row, keeps the old for 5 minutes (to avoid in-flight call failures), then marks it retired. Refresh is serialized per `integration_id` via a `pending_jobs` lease so two concurrent agents don't both refresh.
-
-**Failure modes.**
-- Refresh returns 400 → `integrations.status = 'expired'`, the web app shows a banner prompting reconnect, no MCP call fails — they all return a graceful `{ error: "integration_expired", retryable: false }`.
-- Access token 401 during a call → one immediate refresh attempt, then retry the original call once. If still 401, mark `expired`.
-- Network error → cockatiel circuit breaker opens after 5 consecutive failures, returns `{ error: "integration_unavailable", retryable: true }` for 30s.
-
-### 22.6 Inbound Webhooks
-
-When an integration is created, Coodra registers a webhook with Atlassian for events the agent cares about:
-
-```
-POST https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3/webhook
-{
-  "webhooks": [{
-    "events": [
-      "jira:issue_created",
-      "jira:issue_updated",
-      "jira:issue_deleted",
-      "comment_created",
-      "comment_updated"
-    ],
-    "jqlFilter": "project in (KAN, PROJ)",   ← scoped to integrations.projects
-    "url": "https://hooks.coodra.dev/v1/webhooks/atlassian?integration={integrationId}"
-  }]
-}
-```
-
-**Why the integration ID in the query string?** Because the Atlassian webhook payload does not include the `cloudId` or any integration-scoped identifier — only the issue event. Routing by URL query is the simplest way for the handler to know which integration's secret to use for HMAC verification.
-
-**Handler (`POST /v1/webhooks/atlassian`):**
-1. Extract `integrationId` from query.
-2. Load `integrations.webhook_secret`.
-3. Compute `HMAC-SHA256(body, webhook_secret)`; compare (constant-time) to `x-hub-signature: sha256=<hex>` header. Mismatch → 401 Unauthorized.
-4. Enqueue `atlassian-webhook-event` BullMQ job (jobId = payload's `webhookEvent` + issue key + `timestamp` for idempotency).
-5. Return 200 OK immediately. Total handler budget: 100ms p95.
-
-**Worker (`atlassian-webhook-event`):**
-- `jira:issue_updated` + status change → look up `runs` by `issueRef = <issue key>` and `projects.id = <mapped project>`; insert a `run_events` row of type `external_status_change`; insert a knowledge edge `external_issue → tracks_issue`; bust any caches keyed on that issue.
-- `comment_created` → if the comment's `author.accountId` is the Coodra bot account (recorded at integration setup), skip — this is our own `jira_add_comment` echo. Otherwise insert a `run_event` of type `external_comment` so the web app can show it on the run timeline.
-- `jira:issue_deleted` → mark linked context packs with `metadata.issueDeleted = true` but do not delete them. The record of work done survives the ticket disappearing.
-
-**Webhook renewal.** Atlassian webhooks registered via REST expire after 30 days. A cron job on the Hooks Bridge (`sweep-webhook-renewals`, daily) calls `PUT /rest/api/3/webhook/refresh` for any webhook whose `expirationDate` is within 7 days. The job is idempotent — calling it on a freshly refreshed webhook is a no-op.
-
-### 22.7 Outbound Call Hardening
-
-Every outbound JIRA call goes through the `IntegrationClient`:
-
-```typescript
-class IntegrationClient {
-  constructor(
-    private readonly integrationId: string,
-    private readonly breaker: cockatiel.CircuitBreakerPolicy,  // per-integration
-    private readonly db: Db,
-    private readonly logger: Logger,
-  ) {}
-
-  async call<T>(operation: string, externalRef: string, fn: () => Promise<Response>): Promise<Result<T>> {
-    const idempotencyKey = `${this.integrationId}:${operation}:${externalRef}`;
-
-    // 1. Check idempotency store — if the call already succeeded, short-circuit.
-    const existing = await this.db.select().from(integrationEvents)
-      .where(eq(integrationEvents.idempotencyKey, idempotencyKey)).limit(1);
-    if (existing[0]?.statusCode && existing[0].statusCode < 400) {
-      return { ok: true, value: existing[0].responseBody as T, cached: true };
-    }
-
-    // 2. Wrap in circuit breaker + 10s timeout.
-    const started = Date.now();
-    try {
-      const res = await this.breaker.execute(() =>
-        Promise.race([fn(), timeout(10_000, 'jira call timeout')])
-      );
-      const body = await res.json();
-      await this.recordEvent({ operation, externalRef, statusCode: res.status, body, idempotencyKey });
-      if (!res.ok) return { ok: false, error: { code: httpToCode(res.status), status: res.status } };
-      return { ok: true, value: body as T };
-    } catch (err) {
-      await this.recordEvent({ operation, externalRef, statusCode: 0, body: { err: String(err) }, idempotencyKey });
-      if (err instanceof cockatiel.BrokenCircuitError) {
-        return { ok: false, error: { code: 'integration_unavailable', retryable: true } };
-      }
-      return { ok: false, error: { code: 'integration_error', retryable: true, message: String(err) } };
-    } finally {
-      this.logger.info({ operation, externalRef, durationMs: Date.now() - started }, 'jira call');
-    }
-  }
-}
-```
-
-**Circuit breaker settings.** `ConsecutiveBreaker(5)`, `halfOpenAfter: 30_000`. One breaker per `integrationId`, not per operation — JIRA's failure modes are per-site. Persistent across process restarts is not required; each process's breaker warms up in at most 5 calls.
-
-**Rate limiting.** Atlassian enforces per-site rate limits (default ~50 req/sec sustained, 10 req/burst for OAuth apps). The `IntegrationClient` adds a `bottleneck`-style sliding window — `maxConcurrent: 10`, `minTime: 20ms` — so a runaway agent cannot burst past the site's cap.
-
-### 22.8 Context Pack → JIRA Comment
-
-At the end of the Context Pack assembly worker, a new worker is chained:
-
-```
-assemble-context-pack  → context pack saved
-       │
-       ▼
-if (run.issueRef && integration.status === 'active')
-  enqueue jira-post-context-summary { runId, contextPackId, issueRef, integrationId }
-       │
-       ▼
-jira-post-context-summary worker:
-  - render markdown summary from contextPack.content
-  - convert to ADF (three-level structure: paragraph → content → text/mention/link)
-  - include a link back to https://app.coodra.dev/dashboard/{project}/runs/{runId}
-  - call jira_add_comment via IntegrationClient (idempotent)
-  - on 200: INSERT knowledge_edge context_pack →resolves_issue→ external_issue
-  - on error: the integration_events row records it; the worker retries 3 times with backoff,
-    then moves to jira-post-context-summary-dead. Context pack is NOT marked failed.
-```
-
-**Comment shape (agent-authored, Coodra-signed):**
-```
-[Coodra] Session summary for {issueRef}
-
-{title}
-
-— {summary}
-
-Files changed: {n} (see link for full list)
-Key decisions: {top-3-decision-descriptions}
-
-View full details: https://app.coodra.dev/dashboard/{project}/runs/{runId}
-
----
-_Posted automatically by Coodra. To disable, unlink this project in settings._
-```
-
-**Opt-out.** `feature_packs.content.jiraAutoComment = false` disables this worker for that feature pack's runs. The feature pack is the canonical place to configure per-project JIRA behaviour.
-
-### 22.9 Session Lifecycle → JIRA Transitions (Optional)
-
-Configurable per feature pack. Default: off. When enabled via `feature_packs.content.jiraStatusMap`:
-
-```yaml
-jiraStatusMap:
-  on_session_start: "In Progress"   # transition issue when agent starts
-  on_session_end:   "In Review"     # transition when context pack lands
-  on_session_error: null            # no transition on agent failure
-```
-
-These transitions are enqueued as jobs (`jira-transition-issue`), not done synchronously in the hook. The hook itself is never blocked by a transition call — the hook returns in <150ms and the transition happens asynchronously.
-
-**Why not synchronous?** Because JIRA latency is unpredictable (200ms–5s) and the Hooks Bridge SLO is 150ms p95. Lifecycle-driven transitions are best-effort; if they fail, the `integration_events` row records the failure and the user can replay from the web app.
-
-### 22.10 Feature Pack Enrichment
-
-`get_feature_pack` is the agent's first call in every session. To make JIRA information present-by-default, the tool handler optionally fetches:
-
-- The current issue (if `run.issueRef` is set and integration is active): full description, status, assignee, priority, labels.
-- The top 5 open issues for `feature_packs.content.jiraProjectKey` ordered by priority (for cold-start context when no `issueRef` yet).
-
-Fetched data is merged into the feature pack's `content` under a new `jira` namespace:
-
-```json
-{
-  "content": {
-    "description": "...",
-    "allowedTools": ["..."],
-    "jira": {
-      "currentIssue": { "key": "KAN-123", "summary": "...", "status": "To Do", ... },
-      "openIssues": [ { "key": "KAN-124", "summary": "...", "priority": "High" }, ... ]
-    }
-  }
-}
-```
-
-**Failure degradation.** If the JIRA call fails or times out (>500ms), `jira` is omitted. The feature pack is still returned. The agent doesn't care whether JIRA data is present — it reads it if there, ignores if not. Zero agent-side code changes when JIRA is unavailable.
-
-**Caching.** JIRA fetches are cached for 60s in Redis (team) / in-process Map (solo). Feature pack fetches in the same session skip the JIRA call.
-
-### 22.11 Solo Mode
-
-Solo mode cannot complete OAuth (no public redirect URI). Solo mode uses the same pattern as `jira_test/`:
-
-```json
-// ~/.coodra/config.json
-{
-  "local_hook_secret": "...",
-  "integrations": {
-    "atlassian": {
-      "site_url": "https://mcptest01.atlassian.net",
-      "email": "dev@example.com",
-      "api_token": "...",            // from id.atlassian.com → Security → API tokens
-      "default_project_key": "KAN"
-    }
-  }
-}
-```
-
-The `IntegrationClient` constructs a `Version3Client` (jira.js) with `basic` auth and skips the OAuth / refresh logic entirely. Everything else (idempotency, circuit breaker, rate limiter) is identical. Solo mode has no webhooks — there is no public URL for JIRA to call. Outbound-only connectivity is acceptable at single-developer scale: on each MCP call the current issue is refetched, so state freshness is bounded by agent call frequency.
-
-**Solo → Team migration.** When a solo developer upgrades, the first team-mode login flow prompts: "You have a local Atlassian integration. Start an OAuth flow on behalf of your org?" On confirmation, the local API token is deleted from `config.json` and the new OAuth integration is created in the cloud. The migration is irreversible in one direction (downgrading team → solo would prompt the user for a fresh API token).
-
-### 22.12 Policy Interactions
-
-Two new rule patterns become useful with JIRA in scope:
-
-- **Block writes on resolved tickets.** A rule with `eventType: 'pre_tool_use'`, `toolPattern: 'Edit|Write'`, plus a new condition `issueStatus: ['Done', 'Resolved', 'Closed']` denies edits when the ticket is already closed. Implementation: the policy evaluator reads `run.issueRef` + the cached current issue status from §22.10 and matches against the condition's list.
-- **Scope writes by label.** Rule: "Only allow `Edit` if `labels` contains `ai-allowed`." Useful for teams who want to opt specific tickets into agent access without opening the whole project.
-
-Both rules are additive — they are new *condition* fields on the existing `policy_rules.metadata` JSONB column; no schema migration required beyond the new JIRA tables.
-
-### 22.13 CAP Analysis — JIRA Integration
-
-Consistent with §5's per-boundary approach:
-
-| Boundary | Choice | Justification |
-|---|---|---|
-| Agent → `jira_*` MCP tool | AP (cache-first) | Stale issue data (up to 60s) does not affect correctness. Availability wins over perfect freshness. |
-| Hooks Bridge → OAuth refresh | CP | A failed refresh must block the specific call path (so we don't send a bad token). Other calls are unaffected. |
-| Webhook ingress → worker | Eventual consistency | Accept the payload fast, process async. Atlassian's own retry mechanism + our idempotency keys make this safe. |
-| Context Pack → JIRA comment | Eventual consistency | The context pack is durably saved before any JIRA call is attempted. Comment posting is best-effort, retried async. |
-
-### 22.14 Sync in Team Mode
-
-| Table | Direction | Notes |
-|---|---|---|
-| `integrations` | cloud-only | OAuth state never leaves the cloud. Local services query via the MCP read path. |
-| `integration_tokens` | cloud-only | Tokens are never replicated to any developer's laptop. |
-| `integration_events` | local → cloud (if logged locally) | In solo mode the events table lives locally; in team mode cloud is authoritative. Append-only, idempotency key is globally unique, so replication is trivial. |
-
-### 22.15 Fail-Open Invariants (Normative)
-
-Every one of these MUST hold:
-
-1. JIRA down → agent continues, MCP tools return `{ ok: false, error: "integration_unavailable" }`.
-2. OAuth token expired → agent continues, MCP tools return `{ ok: false, error: "integration_expired" }`, UI banner surfaces in web app.
-3. Webhook dropped → state drifts by up to the next webhook's arrival. No retry mechanism is required because every state change generates a new webhook (JIRA's own retry + our idempotency).
-4. Rate limit hit → circuit breaker opens, all calls for 30s return `integration_unavailable`. Agent sees the same failure mode as any other unavailability.
-5. Context Pack comment post fails → Context Pack is still saved locally and remains searchable. The JIRA side of the knowledge graph is just missing that one edge.
-6. HMAC verification fails on webhook → 401 Unauthorized. No record inserted. (This is the one place we are _not_ fail-open — signature mismatch means the request is untrusted.)
-7. Solo-mode API token is invalid → MCP calls return `integration_expired`. Agent continues. No session is blocked.
-
-These invariants are verified by the existing hooks-bridge integration tests plus six new test cases that simulate each failure path.
+1. The agent reaches a session able to read the ticket it is working on — description, acceptance criteria, comments — without the developer pasting it into the prompt.
+2. Coodra's own history is **Jira-aware**: a Run can be bound to an issue (`runs.issueRef`), so "what work touched PROJ-412?" is answerable from Coodra's records and the Context Pack is tied to the ticket.
+3. At session end, **on the user's request**, the agent posts the Context Pack summary back to the linked issue as a comment, so the ticket reflects what was actually done.
+4. A developer connects Jira **once** (`coodra jira enable`) and authorizes their own Atlassian account; no Coodra-side secret, no Coodra-side OAuth app.
+5. Fail-open: Jira unreachable or unauthorized → the agent keeps working; the linkage and write-back are simply absent for that run.
+
+**Non-goals (explicitly out of scope).**
+- Coodra building any Jira REST client, OAuth flow, ADF converter, webhook ingress, or `jira_*` MCP tools. **Atlassian's Rovo MCP provides all of it** (§22.3, §22.4).
+- Epic → Feature Pack auto-transform. An Epic is not a module blueprint (the ADR-015 lesson). Feature Packs stay human/agent-authored at module granularity.
+- Jira → Coodra **push** (webhooks). Rovo is pull-only; Coodra receives no Jira events. State freshness is bounded by how often the agent reads via Rovo.
+- Server-side / headless Jira access in v1 (see the caveat in §22.8).
+- Jira Data Center / Server (self-hosted); Confluence / Bitbucket / JSM fusion; sprint / board mirroring.
+
+### 22.2 The two halves — who builds what
+
+| Atlassian's Rovo MCP provides (Coodra builds NONE of it) | Coodra builds |
+|---|---|
+| The Jira tools — `getJiraIssue`, `searchJiraIssuesUsingJql`, `createJiraIssue`, `editJiraIssue`, `addCommentToJiraIssue`, `transitionJiraIssue`, `getTransitionsForJiraIssue`, `getVisibleJiraProjects`, … (§22.4) | `coodra jira enable / disable / status` — wires Rovo into agent configs (§22.3) |
+| OAuth 2.1 + RFC 7591 dynamic client registration + token refresh | Run ↔ issue linkage via the existing `runs.issueRef` / `context_packs.issueRef` columns (§22.5) |
+| The REST client, pagination, ADF ↔ markdown | On-request Context-Pack-summary write-back via Rovo's `addCommentToJiraIssue` (§22.6) |
+| Confluence / JSM / Bitbucket / Compass tools (outside Coodra's Jira scope) | Onboarding placement + trigger-contract guidance (§5.7) |
+
+The endpoint, transport, exact tool names, OAuth shape, and per-IDE wiring are documented in `External api and library reference.md → Atlassian Remote MCP (Rovo)`. That reference is the source of truth for the wire details; this section is the source of truth for how Coodra leverages them.
+
+### 22.3 Wiring (`coodra jira enable`)
+
+Rovo is a **remote** Streamable HTTP MCP server at `https://mcp.atlassian.com/v1/mcp/authv2` (the `/v1/mcp/authv2` IDE-auth variant of `https://mcp.atlassian.com/v1/mcp`; the legacy `/v1/sse` endpoint is deprecated and unsupported after 2026-06-30 — Coodra wires Streamable HTTP only). `coodra jira enable` writes the server entry into each detected agent's config, the same per-IDE dispatch as `coodra graphify enable` (the `9·Core` substrate: JSON writer `external-mcp-merge.ts`, TOML writer `external-codex-merge.ts`) via a sibling `jira-wire.ts`. The one structural difference from Graphify: Graphify was **stdio** (`{ command, args }`); Rovo is **remote** (`url`). The writers therefore gain a remote/`url` entry shape per client:
+
+- **Claude Code** (`.mcp.json`, project scope): `{ "atlassian": { "type": "http", "url": "https://mcp.atlassian.com/v1/mcp/authv2" } }`. OAuth completed interactively via `/mcp`.
+- **Cursor**: `{ "Atlassian": { "url": "https://mcp.atlassian.com/v1/mcp/authv2" } }` (Cursor infers remote from `url`).
+- **Windsurf** (`~/.codeium/windsurf/mcp_config.json`): `{ "atlassian": { "serverUrl": "https://mcp.atlassian.com/v1/mcp/authv2" } }`.
+- **Codex** (`config.toml`): `experimental_use_rmcp_client = true` + `[mcp_servers.atlassian]` with `url = "https://mcp.atlassian.com/v1/mcp/authv2"`.
+All four target agents (Claude Code, Cursor, Windsurf, Codex) support native remote MCP, so Coodra writes the **native** entry for each — **no `mcp-remote` shim** (decision 2026-05-31). A purely stdio-only client (none of the four) is simply unsupported for Jira rather than wired through a Node proxy process.
+
+`disable` strips only the `atlassian` entry; `status` probes presence. Idempotent, never-clobber — identical guarantees to the Graphify writer.
+
+### 22.4 Rovo's Jira tools (agent-facing; NOT Coodra-owned)
+
+These tools appear in the agent's `tools/list` **because Rovo is wired in**, not because Coodra advertises them. They do NOT count toward Coodra's manifest — which is **17 tools** (§24.4): the 15 pre-Jira tools plus Coodra's two Jira tools, `link_run_to_issue` (§22.5) and `prepare_jira_comment` (§22.6). The agent calls Rovo's tools directly; Coodra's role is to tell the agent *when* (the §5.7 trigger contract). The load-bearing subset:
+
+| Rovo tool | Use |
+|---|---|
+| `getJiraIssue` | Read one issue by key / ID — description, status, comments, transitions. The agent's first call when a run has an `issueRef` or the user names a key. |
+| `searchJiraIssuesUsingJql` | JQL search — "my open tickets" → `assignee = currentUser() AND statusCategory != Done`. |
+| `getVisibleJiraProjects` | Discover accessible projects / keys. |
+| `getTransitionsForJiraIssue` | Discover valid transition IDs before transitioning. |
+| `transitionJiraIssue` | Move an issue between states (explicit request only). |
+| `editJiraIssue` | Update fields (explicit request only). |
+| `createJiraIssue` | File a new issue (explicit request only). |
+| `addCommentToJiraIssue` | Post a comment — the write-back path in §22.6 (explicit request only). |
+
+Note: the verified Rovo surface has **no dedicated issue-link tool** (the old Build design's `jira_link_issues` has no 1:1 equivalent; `getIssueLinkTypes` reads link types but no create-link write tool is exposed). If issue-linking is needed it goes through `editJiraIssue` or is deferred. Atlassian's full supported-tools list (Jira + Confluence + JSM + Bitbucket + Compass) is recorded in the reference doc.
+
+### 22.5 Run ↔ issue linkage (Coodra's leverage, half 1)
+
+The `runs.issueRef` and `context_packs.issueRef` columns already exist (`packages/db/src/schema.ts`) — **no migration needed.** Binding a Run to an issue makes Coodra's history Jira-aware: `query_run_history` / `query_decisions` can answer "what touched PROJ-412?" and every Context Pack carries its ticket.
+
+**How `issueRef` is set (J2, BUILT): the `link_run_to_issue` MCP tool.** This is Coodra's one Jira MCP tool. The agent calls `link_run_to_issue { runId, issueRef }` when the user names a ticket ("work on PROJ-123") or a branch reveals one; the handler normalises the key to uppercase, idempotently updates `runs.issue_ref` (no-op when already bound; reports `previousIssueRef` on rebind), and — in team mode — enqueues a `sync_to_cloud` push of the run so cross-member history sees the link. It records a local column only — **no Jira API call** (the agent confirms the issue via Rovo's `getJiraIssue` if it needs to). An unknown `runId` returns a `run_not_found` soft-failure. This is the explicit agent-set path; a bridge-inferred fallback (branch regex / `.coodra.json` / commit trailer) remains available as future work but is not in J2. If nothing sets it, `issueRef = null` and the run proceeds normally — fail-open.
+
+The read side is `issueRef`-aware: `query_run_history` and `query_decisions` each take an optional `issueRef` filter (case-insensitive) — that is the "what touched PROJ-412?" / "what was decided for PROJ-412?" query.
+
+### 22.6 On-request write-back (Coodra's leverage, half 2)
+
+At session end, **if the user asks**, the agent posts the Context Pack summary to the linked issue as a comment. The split is **Coodra assembles, Rovo posts.** Coodra's `prepare_jira_comment { runId }` (J3, BUILT) reads the run's latest Context Pack (title + excerpt) and its top decisions from Coodra's own records and returns `{ issueRef, body }` (markdown) — read-only, no Jira call. The agent then hands that `body` to **Rovo's `addCommentToJiraIssue { issueIdOrKey: issueRef, body }`**. There is no automatic worker, no `jira-post-context-summary` queue, no ADF conversion on Coodra's side (Rovo accepts markdown / handles ADF).
+
+`prepare_jira_comment` soft-fails `run_not_found` (unknown runId) or `not_linked` (the run has no `issueRef` — call `link_run_to_issue` first). A run with no Context Pack yet still yields a valid (sparse) body from its decisions. The agent may also format the comment directly without the helper. **Unprompted writes are forbidden** — Jira is shared state and noise has a cost; the agent posts only when the user asks (§5.7).
+
+### 22.7 Fail-open invariants (normative)
+
+1. Rovo unreachable / not wired → the Jira tools are simply absent from `tools/list`; the agent continues with no Jira context. No Coodra code path blocks.
+2. Rovo wired but unauthorized (OAuth not completed) → the tool calls fail per Rovo's own error; the agent reports it and continues. Coodra's run / linkage path is unaffected.
+3. `issueRef` unresolved → `runs.issueRef = null`; the run proceeds; no linkage, no write-back. No error, no prompt.
+4. Write-back declined or failed → the Context Pack is still saved locally and remains searchable. The ticket simply lacks that one comment.
+
+There is no HMAC / webhook surface to fail (retired) — Rovo is pull-only and Coodra exposes no Jira ingress.
+
+### 22.8 Solo vs team; the headless caveat
+
+Both modes wire the **same** remote Rovo MCP; there is no Coodra-side credential in either. Each developer authorizes their **own** Atlassian account through the IDE's interactive OAuth (`/mcp`). There is no solo-vs-team divergence in the Jira path — unlike the Build design (which needed an API-token shim for solo and 3LO for team), Direct is uniform.
+
+**Headless caveat.** Rovo's default is per-user interactive OAuth, which does not run in CI / cron. Atlassian *does* offer API-token auth for headless / long-running setups, but it requires an **Atlassian org-admin to enable API-token authentication** first. v1 targets interactive dev sessions and does not depend on the headless path. Server-side / headless Jira access (or a genuine need for Jira→Coodra push) is the only reason to revisit a "Build" approach later (ADR-016).
+
+### 22.9 What was retired from the Build design
+
+For the record (full rationale in ADR-016). Each item below was specified in the prior §22 and is **removed**:
+
+- **8 `jira_*` MCP tools** — replaced by Rovo's tools. Coodra adds exactly TWO Jira tools — `link_run_to_issue` (§22.5) + `prepare_jira_comment` (§22.6) — so the manifest is **17** (§24.4), not the Build design's +8.
+- **OAuth 2.0 3LO + the `integration_tokens` table** — Rovo owns auth; no Jira token touches Coodra's DB or a developer's laptop.
+- **ADF ↔ markdown conversion** — Rovo handles it.
+- **Inbound webhooks** (`POST /v1/webhooks/atlassian`), the **`integration_events`** table, the **`atlassian-webhook-event`** worker, and the webhook-renewal cron — Rovo is pull-only.
+- **`IntegrationClient`** circuit-breaker / rate-limiter (for Jira) — no Coodra-side Jira calls to harden.
+- **`get_feature_pack` Jira enrichment** (`jira.currentIssue` / `jira.openIssues`) and **NL-Assembly Jira injection** — the agent pulls live issue context via Rovo.
+- **Lifecycle → transition automation** and **policy conditions on `issueStatus`** — out of v1; if revived, they read `runs.issueRef` + an agent-supplied status, not a Coodra-cached one.
+
+The cross-references that mentioned these (the §3 webhook route, §16 Pattern 16, §18 NL enrichment, §21 open decisions, §24.5 manifest) are updated in the same change to point here / to ADR-016.
 
 ---
 
@@ -2265,9 +1962,9 @@ Anti-patterns banned:
 - *"Useful for..."* — hedging. If it's useful, say when.
 - Descriptions outside the word-count envelope — **40–80 words is the soft target, 120 is the hard maximum** (amended 2026-04-23 per Q-02-6; the old ~80-word cap was too tight for tools with structured outputs that need an extra sentence of shape documentation). Character length is additionally capped at < 800 as a belt-and-braces defence against the system-prompt budget.
 
-### 24.4 Core Tool Manifest — 16 Coodra Tools
+### 24.4 Core Tool Manifest — 17 Coodra Tools
 
-> The live `tools/list` handshake is the source of truth — 16 tools as of Module 09 G2 (`seed_feature_packs_from_graph` added; `query_codebase_graph` retired in G1). The §24.9 manifest test asserts the exact set on every push. The per-tool entries below document the load-bearing surfaces; `ping`, `list_context_packs`, `read_context_pack`, `list_features`, `get_feature`, `get_feature_file`, and `query_run_diff` are covered by that test rather than re-specced here.
+> The live `tools/list` handshake is the source of truth — **17 tools** as of Module 09 ADR-016 (Jira = Direct: the post-ADR-015 15 + `link_run_to_issue` (J2) + `prepare_jira_comment` (J3), both 2026-05-31). History: `query_codebase_graph` retired in G1; `seed_feature_packs_from_graph` + `build_codebase_graph` retired in ADR-015 (Graphify is query-only via its own MCP) → 15; `link_run_to_issue` (J2) → 16; `prepare_jira_comment` (J3) → 17. The §24.9 manifest test asserts the exact set on every push. The per-tool entries below document the load-bearing surfaces; `ping`, `list_context_packs`, `read_context_pack`, `list_features`, `get_feature`, `get_feature_file`, and `query_run_diff` are covered by that test rather than re-specced here.
 
 These are the tools every project using Coodra exposes. They bind the agent to the Feature Pack / Context Pack / Policy / Decision lifecycle described in §2 and §18.
 
@@ -2287,7 +1984,7 @@ These are the tools every project using Coodra exposes. They bind the agent to t
 
 **Input:** `{ runId: string, title: string, content: string, featurePackId?: string }`
 **Returns:** `{ ok: true, contextPackId: string, savedAt: string, contentExcerpt: string }` on success. `contentExcerpt` is the first 500 Unicode code points of `content` with trailing whitespace trimmed (Q-02-3), returned for caller confirmation without a second read.
-**Side-effect:** flips `runs.status` to `'completed'` and sets `runs.endedAt` (idempotent — no-op if the run is already completed). Optionally triggers a Context Pack → JIRA/PR comment worker (§22.8, §23.11).
+**Side-effect:** flips `runs.status` to `'completed'` and sets `runs.endedAt` (idempotent — no-op if the run is already completed). Optionally triggers a Context Pack → PR comment worker (§23.11); Jira write-back is on-request via Rovo's `addCommentToJiraIssue` (§22.6), not a Coodra worker.
 **Bridge-mediated autonomous default (Pattern 20, 2026-05-02):** the hooks-bridge fires `contextPack.save(...)` on every Stop / SessionEnd hook with an auto-generated structured summary derived from the run's `run_events` + decisions. The agent therefore produces a Context Pack at every session end **without calling this tool**. This MCP tool remains the on-demand surface for two cases: (a) the agent has a richer, narrative summary than the auto-summary (e.g. user-asked-for-rich-recap), (b) the agent wants to save mid-session before a topic switch. Append-only semantics (ADR-007) hold for both paths: if the bridge already wrote one for the run, an explicit MCP call returns the existing row unchanged. Smarter LLM-generated auto-summaries are deferred to Module 05 (NL Assembly).
 **Failure modes** (canonical soft-failure shape per `essentialsforclaude/09-common-patterns.md §9.1.2` — every branch carries both `error` and `howToFix`):
 - `{ ok: false, error: 'run_not_found', howToFix: string }` — the `runId` does not match a `runs` row. Caller should call `get_run_id` first, then retry.
@@ -2355,15 +2052,8 @@ These are the tools every project using Coodra exposes. They bind the agent to t
 
 > Removed in Module 09 (track 9B / phase G1). This tool and `apps/mcp-server/src/lib/graphify.ts` read `~/.coodra/graphify/<slug>/graph.json` — a path nothing ever populated, so the tool was permanently soft-failing. Structural queries ("blast radius", "where is X defined?", dependency paths) are now answered by **Graphify's own MCP server** (`query_graph` / `get_node` / `get_neighbors` / `shortest_path`), wired into the agent config via `coodra graphify enable`. Coodra does not wrap Graphify (ADR-010, Option C). See §17 and `docs/feature-packs/09-integrations/`.
 
-#### `seed_feature_packs_from_graph`
-> Call this to bootstrap Feature Packs for a project from its code graph. After fetching the Leiden community breakdown from the Graphify MCP server — each community's label, god-node symbols, and member files — pass the communities here. The tool creates one DRAFT Feature Pack per community; drafts stay hidden from agents until a tech lead reviews and activates them.
-
-**Input:** `{ projectSlug: string, communities: Array<{ communityId: string, label: string, godNodes?: string[], memberFiles?: string[], summary?: string }> }`
-**Returns:** `{ ok: true, seeded: Array<{ slug: string, communityId: string, created: boolean }>, count: number }` — `created` is `true` for a brand-new draft pack, `false` when an existing pack of that slug was updated in place (idempotent re-seed).
-**Side-effect:** writes one `feature_packs` row per community with `status='draft'` — ON CONFLICT (slug) updates content columns only, never `status`/`orgId`, so a re-seed cannot un-publish a lead-activated pack — then materialises `<featurePacksRoot>/<slug>/{spec,implementation,techstack}.md` + `meta.json`. The `meta.json` `structure` block (community id, god nodes, member files) is the machine-readable home of the Graphify data; `get_feature_pack` surfaces it on `pack.content.structure` once a tech lead activates the draft (G2.1).
-**Soft-failure** (canonical shape per `essentialsforclaude/09-common-patterns.md §9.1.2`):
-- `{ ok: false, error: 'project_not_found', howToFix: string }` — the `projectSlug` is not registered in the `projects` table. Remediation: `coodra init`.
-**Module 09 / track 9B / phase G2.** Coodra never reads `graph.json` itself — the agent fetches the community breakdown from Graphify's MCP server and hands it here (ADR-010, Option C).
+#### `seed_feature_packs_from_graph` + `build_codebase_graph` — RETIRED (ADR-015, 2026-05-23)
+> Both tools were removed. Minting one draft Feature Pack per Leiden community produced hundreds of un-injectable shells (on a real 9,659-node repo: 588 communities, 73.5% single-file — config files and READMEs), and even the module-sized ones were unreachable because `get_feature_pack`'s `filePath` resolution was never implemented and seeded packs carried `parentSlug=null`. The premise was wrong: a code-graph community is a navigation aid, not a Feature Pack boundary. Graphify remains wired as a **query-only** MCP server (`query_graph` / `get_node` / `get_neighbors` / `shortest_path`) via `coodra graphify enable`; Feature Packs stay human/agent-authored at module granularity. See ADR-015 and `docs/feature-packs/09-integrations/`.
 
 #### `get_run_id`
 > Call this at the START of any session that will write code, if the current `runId` is not already in context from a session-start hook. Returns the current in-progress session's runId (UUID) which binds all subsequent tool calls, decisions, and context packs to a single durable record. Most other tools accept this runId as an argument. Call once per session and reuse the value.
@@ -2382,22 +2072,13 @@ These are the tools every project using Coodra exposes. They bind the agent to t
 - `{ ok: false, error: 'project_not_found', howToFix: string }` — the `projectSlug` is not registered. Remediation: `coodra init`.
 **Empty result** (project exists, zero decisions in scope) → `{ ok: true, decisions: [] }` — NOT a soft-failure. Same rule as `query_run_history`.
 
-### 24.5 Integration Tool Manifests — JIRA (8) + GitHub (10)
+### 24.5 Integration Tool Manifests — GitHub (10 Coodra tools); Jira via Rovo (external, 0 Coodra tools)
 
-JIRA and GitHub tools share a description style: each begins with *"Call this when..."* and ends with *"Returns `{ ok: true, value: ... }` on success or `{ ok: false, error }` on unavailability — never throws."*. The `Result<T>` wrapper is part of the agent-facing contract, not a leaky server detail — the agent knows to check `.ok` before reading `.value`.
+GitHub tools share a description style: each begins with *"Call this when..."* and ends with *"Returns `{ ok: true, value: ... }` on success or `{ ok: false, error }` on unavailability — never throws."*. The `Result<T>` wrapper is part of the agent-facing contract, not a leaky server detail — the agent knows to check `.ok` before reading `.value`.
 
-#### JIRA (see §22.4 for wrapped endpoints; descriptions are the agent-facing strings)
+#### Jira — NOT a Coodra manifest (ADR-016)
 
-| `name` | `description` |
-|---|---|
-| `jira_search_issues` | Call this when the user refers to an issue by query rather than key ("the login bugs", "all my open tickets"), or when you need to confirm an issue exists before acting on it. Executes a JQL search and returns matching issues with key, summary, status, assignee, priority, labels, and type. Returns `{ ok: true, value: [...] }` or `{ ok: false, error }`. |
-| `jira_get_issue` | Call this at session start whenever the current run has an `issueRef`, and whenever the user references an issue key (PROJ-123). Returns the full issue including description (ADF converted to plain text), comments, transitions, and linked issues. Always prefer this over asking the user to paste the ticket. Returns `Result<Issue>`. |
-| `jira_create_issue` | Call this ONLY when the user explicitly asks to file a new ticket or when a policy rule requires one (e.g., breaking-change decisions). Never create issues speculatively — JIRA is shared state and noise has a cost. Returns `Result<{ key, url }>`. |
-| `jira_update_issue` | Call this when the user asks to change fields on an existing issue (summary, description, labels, assignee, priority). Do not use for transitions — use `jira_transition_issue` for those. Returns `Result<Issue>`. |
-| `jira_transition_issue` | Call this to move an issue between workflow states (To Do → In Progress → Done). Transitions are site-specific; resolve the correct transition id via `jira_get_issue` first if you are unsure of the available transitions. Returns `Result<{ fromStatus, toStatus }>`. |
-| `jira_add_comment` | Call this when the user asks you to post a comment, or when the Context Pack → JIRA comment worker invokes it directly. Body is Markdown; ADF wrapping is handled server-side. Do NOT post status updates to tickets unprompted. Returns `Result<{ commentId, url }>`. |
-| `jira_list_my_issues` | Call this when the user asks "what am I working on?" or when resolving ambiguity about which ticket an implicit pronoun ("it", "this") refers to. Returns the authenticated user's assigned open issues, most-recently-updated first. Returns `Result<Issue[]>`. |
-| `jira_link_issues` | Call this when the user says "X blocks Y" or "this duplicates Z" or equivalent. Creates a typed link between two issues. Link types are site-configured; default to `relates to` if unspecified. Returns `Result<{ linkId }>`. |
+Coodra advertises **zero** `jira_*` tools. Jira is consumed Direct: `coodra jira enable` wires **Atlassian's Rovo MCP** alongside the `coodra` server, and the agent calls Rovo's own Jira tools (`getJiraIssue`, `searchJiraIssuesUsingJql`, `addCommentToJiraIssue`, `transitionJiraIssue`, …). Those tools appear in the agent's `tools/list` because Rovo is wired in, not because Coodra emits them — so they don't grow Coodra's manifest. Coodra's **two** Jira tools are `link_run_to_issue` (§22.5, binds the run to its issue key) and `prepare_jira_comment` (§22.6, the on-request write-back helper); with them the Coodra manifest is **17**. The Rovo tool surface is in §22.4; *when* the agent should call each is in `CLAUDE.md §5.7`; wire details are in `External api and library reference.md → Atlassian Remote MCP (Rovo)`. The prior 8 `jira_*` Coodra tools (Build design) are retired (§22.9).
 
 #### GitHub (see §23.6 for wrapped endpoints)
 
@@ -2423,16 +2104,16 @@ This table is the **source-of-truth mapping** the `CLAUDE.md §5 Agent Trigger C
 | Agent event / user intent | Tool(s) to call | Precondition |
 |---|---|---|
 | Session start | `get_run_id`, `get_feature_pack`, `query_run_history { status: 'in_progress', limit: 1 }` | Always, in parallel |
-| Session start with `runs.issueRef` set | + `jira_get_issue` | JIRA integration active |
+| Session start with `runs.issueRef` set | + `getJiraIssue` (Rovo) | Atlassian Rovo MCP wired |
 | Session start with `runs.prRef` set | + `github_get_pr_context` | GitHub integration active |
 | About to edit, create, or delete a file | `check_policy { toolName: 'write_file' }`, then `get_feature_pack { filePath }` if not already loaded for that area | Always |
 | About to run a shell command | `check_policy { toolName: 'bash', toolInput: { command } }` | Always |
 | Chose a library / designed an API / made an implementation decision | `record_decision` | Immediately, not batched |
 | User asked "what was done before on X?" | `search_packs_nl { query: X }`, `query_run_history` | Before answering from memory |
 | User asked "what does this code do?" / "where is X defined?" | Graphify MCP's `query_graph` / `get_node` / `get_neighbors` / `shortest_path` — when the `graphify` server is wired (`coodra graphify enable`) | Before reading files one by one |
-| User wants to bootstrap Feature Packs from the code graph | `seed_feature_packs_from_graph` — fetch the Leiden communities from the Graphify MCP first | Cold-start, when the knowledge layer is empty |
-| User referenced a JIRA key (PROJ-123) | `jira_get_issue { key: 'PROJ-123' }` | JIRA integration active |
-| User asked "what am I assigned?" | `jira_list_my_issues` | JIRA integration active |
+| User asks a structural/blast-radius question ("what depends on X?", "where is Y defined?") | Graphify's own MCP — `query_graph` / `get_node` / `get_neighbors` / `shortest_path` | Graphify wired via `coodra graphify enable` |
+| User referenced a Jira key (PROJ-123) | `getJiraIssue` (Rovo) | Atlassian Rovo MCP wired (`coodra jira enable`) |
+| User asked "what am I assigned?" | `searchJiraIssuesUsingJql` (Rovo) — `assignee = currentUser() AND statusCategory != Done` | Atlassian Rovo MCP wired |
 | User referenced a PR number | `github_get_pr` or `github_get_pr_context` if reviews needed | GitHub integration active |
 | User asked "what needs my review?" | `github_list_my_reviews` | GitHub integration active |
 | User asked "who owns this file?" | `github_get_codeowners` | GitHub integration active |

@@ -13,9 +13,16 @@ import { UnauthorizedError } from '../../../src/errors/index.js';
  */
 
 const mockVerifyToken = vi.hoisted(() => vi.fn());
+const mockJwtVerify = vi.hoisted(() => vi.fn());
 
 vi.mock('@clerk/backend', () => ({
   verifyToken: mockVerifyToken,
+}));
+// The publishable-key-only (teammate) path verifies via jose against the
+// Frontend API JWKS rather than @clerk/backend. Mock both jose surfaces.
+vi.mock('jose', () => ({
+  createRemoteJWKSet: vi.fn(() => 'mock-remote-jwks'),
+  jwtVerify: mockJwtVerify,
 }));
 
 const { clearVerifyClerkJwtCache, verifyClerkJwtAndExtractClaims, __extractClaimsForTest } = await import(
@@ -26,7 +33,9 @@ function baseEnv(): AuthEnv {
   return {
     COODRA_MODE: 'team',
     CLERK_SECRET_KEY: 'sk_test_realkey_12345',
-    CLERK_PUBLISHABLE_KEY: 'pk_test_realkey_12345',
+    // base64('clerk.example.com$') — decodes to a valid Frontend API host so
+    // the publishable-key path can build a real JWKS URL.
+    CLERK_PUBLISHABLE_KEY: 'pk_test_Y2xlcmsuZXhhbXBsZS5jb20k',
   };
 }
 
@@ -47,6 +56,7 @@ function basePayload(overrides: Record<string, unknown> = {}): Record<string, un
 beforeEach(() => {
   clearVerifyClerkJwtCache();
   mockVerifyToken.mockReset();
+  mockJwtVerify.mockReset();
 });
 
 afterEach(() => {
@@ -111,16 +121,19 @@ describe('verifyClerkJwtAndExtractClaims — env validation', () => {
     expect(mockVerifyToken).not.toHaveBeenCalled();
   });
 
-  it('accepts missing CLERK_SECRET_KEY (JWKS-only verification mode)', async () => {
-    mockVerifyToken.mockResolvedValue(basePayload());
+  it('accepts missing CLERK_SECRET_KEY (publishable-key Frontend-API JWKS verification)', async () => {
+    mockJwtVerify.mockResolvedValue({ payload: basePayload() });
     await expect(
       verifyClerkJwtAndExtractClaims('jwt', {
         ...baseEnv(),
         CLERK_SECRET_KEY: undefined,
       }),
     ).resolves.toHaveProperty('userId');
-    // JWKS mode → no secretKey in the options passed to clerkVerifyToken
-    expect(mockVerifyToken).toHaveBeenCalledWith('jwt', {});
+    // No-secret path verifies the signature against Clerk's PUBLIC Frontend
+    // API JWKS via jose — NOT @clerk/backend (which cannot resolve the JWK
+    // without a secret key → "Failed to resolve JWK").
+    expect(mockJwtVerify).toHaveBeenCalled();
+    expect(mockVerifyToken).not.toHaveBeenCalled();
   });
 
   it('rejects the solo-bypass sentinel as CLERK_SECRET_KEY', async () => {

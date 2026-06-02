@@ -285,8 +285,9 @@ describe('runInitCommand — integration', () => {
     expect(captured.stderr.join('')).toMatch(/no project root marker found/);
   });
 
-  // Module 09 Track 9B — the optional Graphify step.
-  it('--graphify wires the graphify MCP server + seeds the graphify-seed-packs skill', async () => {
+  // Module 09 Track 9B — the optional Graphify step (wiring only; ADR-015
+  // retired the graphify-seed-packs recipe, so init seeds no skill).
+  it('--graphify wires the graphify MCP server and seeds no skill', async () => {
     const { io, captured } = makeIO();
     await expect(runInitCommand({ cwd, home, userHome, env: {}, ide: 'claude', graphify: true }, io)).rejects.toThrow(
       '__exit__:0',
@@ -297,11 +298,11 @@ describe('runInitCommand — integration', () => {
     expect(mcpJson.mcpServers.coodra).toBeDefined();
     expect(mcpJson.mcpServers.graphify).toBeDefined();
     expect(mcpJson.mcpServers.graphify.args).toEqual(['-m', 'graphify.serve', 'graphify-out/graph.json']);
-    const featureMd = await readFile(join(cwd, 'docs/features/graphify-seed-packs/feature.md'), 'utf8');
-    expect(featureMd).toContain('name: graphify-seed-packs');
+    // No graphify-seed-packs skill is written — Graphify is query-only.
+    await expect(stat(join(cwd, 'docs/features/graphify-seed-packs'))).rejects.toThrow();
   });
 
-  it('--no-graphify leaves the graphify MCP server unwired and seeds no skill', async () => {
+  it('--no-graphify leaves the graphify MCP server unwired', async () => {
     const { io } = makeIO();
     await expect(runInitCommand({ cwd, home, userHome, env: {}, ide: 'claude', graphify: false }, io)).rejects.toThrow(
       '__exit__:0',

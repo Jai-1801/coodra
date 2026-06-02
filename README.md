@@ -49,7 +49,7 @@ Plus an **on-demand skill layer** (Anthropic Skills pattern) the agent pulls onl
 ```mermaid
 flowchart LR
   A["Claude Code<br/>Cursor<br/>Windsurf"]
-  B["MCP Server<br/>:3100<br/>16 tools"]
+  B["MCP Server<br/>:3100<br/>17 tools"]
   H["Hooks Bridge<br/>:3101<br/>Pre / Post / Start / End"]
   S["Sync Daemon<br/>team mode only"]
   D[("SQLite<br/>~/.coodra/data.db")]
@@ -134,7 +134,7 @@ Switch any time: `coodra team setup` (admin, once per team) → `coodra invite <
 
 ---
 
-## The 16 MCP tools
+## The 15 MCP tools
 
 Grouped by intent. Every tool ships a five-part description so the agent's planner knows exactly when to call it (and when not to).
 
@@ -142,10 +142,11 @@ Grouped by intent. Every tool ships a five-part description so the agent's plann
 |---|---|
 | **Identity** | `get_run_id` · `ping` |
 | **Architectural context** | `get_feature_pack` · `list_features` · `get_feature` · `get_feature_file` |
-| **Knowledge bootstrap** | `seed_feature_packs_from_graph` (Module 09 · Graphify communities → draft Feature Packs) |
 | **Cross-session memory** | `save_context_pack` · `list_context_packs` · `read_context_pack` · `search_packs_nl` |
 | **Decisions** | `record_decision` · `query_decisions` |
 | **Policy + runs** | `check_policy` · `query_run_history` · `query_run_diff` |
+
+> **Graphify** is wired as its **own** MCP server alongside Coodra (`coodra graphify enable`) — the agent calls its `query_graph` / `get_node` / `get_neighbors` / `shortest_path` tools directly for structural questions. Coodra mints no Feature Packs from the graph (ADR-015 retired the `seed_feature_packs_from_graph` + `build_codebase_graph` tools); Feature Packs stay human/agent-authored at module granularity.
 
 `check_policy` is load-bearing for guardrails. `record_decision` + `save_context_pack` are load-bearing for memory. `get_feature_pack` is load-bearing for context.
 
@@ -155,7 +156,7 @@ Grouped by intent. Every tool ships a five-part description so the agent's plann
 
 ```
 @coodra/cli@beta            single npm install — everything bundled
-├── mcp-server              TS · 16 MCP tools · stdio + HTTP transport
+├── mcp-server              TS · 15 MCP tools · stdio + HTTP transport
 ├── hooks-bridge            TS · Hono on 127.0.0.1:3101 · 5 hook events
 ├── sync-daemon             TS · outbox push + cloud→local puller (team only)
 ├── web-v2                  Next.js 15 admin UI on :3001 (audit log, policies, packs)
@@ -170,7 +171,7 @@ Single tarball via esbuild — `npm i -g @coodra/cli` is the only install step. 
 
 ```
 apps/
-  mcp-server/    Coodra MCP server (16 tools)
+  mcp-server/    Coodra MCP server (17 tools)
   hooks-bridge/  Claude Code / Cursor / Windsurf hook receiver
   sync-daemon/   Team-mode cloud sync (push + pull)
   web-v2/        Admin + audit-trail UI (Next.js 15)

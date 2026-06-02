@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
-import type { ExternalMcpEntry } from './external-mcp-merge.js';
+import type { McpEntry } from './external-mcp-merge.js';
 import type { WriteOutcome } from './types.js';
 
 /**
@@ -39,17 +39,48 @@ function canonical(value: unknown): unknown {
 }
 
 /** True when `b` is byte-for-byte equal to `a` under JSON canonicalisation. */
-function entriesEqual(a: ExternalMcpEntry, b: unknown): boolean {
+function entriesEqual(a: McpEntry, b: unknown): boolean {
   if (typeof b !== 'object' || b === null) return false;
   return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 }
 
-/** Project `ExternalMcpEntry` to the plain object smol-toml serializes. */
-function entryToTomlObject(entry: ExternalMcpEntry): Record<string, unknown> {
-  const obj: Record<string, unknown> = { command: entry.command };
-  if (entry.args !== undefined) obj.args = entry.args;
-  if (entry.env !== undefined) obj.env = entry.env;
+/**
+ * Project an `McpEntry` to the plain object smol-toml serializes.
+ * Codex's `[mcp_servers.<name>]` table is either stdio (`command` /
+ * `args` / `env`) or remote (`url` + optional `headers`). A remote table
+ * additionally requires the top-level `experimental_use_rmcp_client =
+ * true` flag, which the caller passes via `MergeExternalCodexOptions.topLevel`.
+ */
+function entryToTomlObject(entry: McpEntry): Record<string, unknown> {
+  const e = entry as Record<string, unknown>;
+  if (typeof e.command === 'string') {
+    const obj: Record<string, unknown> = { command: e.command };
+    if (e.args !== undefined) obj.args = e.args;
+    if (e.env !== undefined) obj.env = e.env;
+    return obj;
+  }
+  // Remote shape — Codex uses `url` (+ optional headers). Windsurf's
+  // `serverUrl` alias is JSON-only; the Codex builder always emits `url`.
+  const obj: Record<string, unknown> = {};
+  if (typeof e.url === 'string') obj.url = e.url;
+  if (e.headers !== undefined) obj.headers = e.headers;
   return obj;
+}
+
+/** True when every key in `topLevel` is already present + canonically equal in `parsed`. */
+function topLevelSatisfied(parsed: Record<string, unknown>, topLevel: Record<string, unknown> | undefined): boolean {
+  if (topLevel === undefined) return true;
+  for (const [k, v] of Object.entries(topLevel)) {
+    if (!Object.hasOwn(parsed, k)) return false;
+    if (JSON.stringify(canonical(parsed[k])) !== JSON.stringify(canonical(v))) return false;
+  }
+  return true;
+}
+
+/** Set every `topLevel` key on `parsed` (mutates in place). No-op when undefined. */
+function applyTopLevel(parsed: Record<string, unknown>, topLevel: Record<string, unknown> | undefined): void {
+  if (topLevel === undefined) return;
+  for (const [k, v] of Object.entries(topLevel)) parsed[k] = v;
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -79,8 +110,16 @@ export interface MergeExternalCodexOptions {
   readonly filePath: string;
   /** The `mcp_servers` key to add/update, e.g. `'graphify'`. */
   readonly name: string;
-  /** The entry to write under `mcp_servers[name]`. */
-  readonly entry: ExternalMcpEntry;
+  /** The entry to write under `mcp_servers[name]` (stdio or remote). */
+  readonly entry: McpEntry;
+  /**
+   * Top-level TOML keys to ensure are set on every write, e.g.
+   * `{ experimental_use_rmcp_client: true }` for a remote (Streamable
+   * HTTP) MCP server. Applied idempotently; NEVER stripped by
+   * `removeExternalCodexServer` (the flag is global — another remote
+   * server may still need it).
+   */
+  readonly topLevel?: Record<string, unknown>;
   /** Overwrite an existing drifted entry. */
   readonly force: boolean;
   /** Report what would change without writing. */
@@ -93,11 +132,11 @@ export interface MergeExternalCodexOptions {
  * servers and every other TOML table.
  */
 export async function mergeExternalCodexServer(options: MergeExternalCodexOptions): Promise<WriteOutcome> {
-  const { filePath, name, entry } = options;
+  const { filePath, name, entry, topLevel } = options;
   const entryObj = entryToTomlObject(entry);
 
   if (!(await pathExists(filePath))) {
-    const baseline = { mcp_servers: { [name]: entryObj } };
+    const baseline: Record<string, unknown> = { ...(topLevel ?? {}), mcp_servers: { [name]: entryObj } };
     if (!options.dryRun) {
       await mkdir(dirname(filePath), { recursive: true });
       await writeFile(filePath, `${stringifyToml(baseline)}\n`, 'utf8');
@@ -111,18 +150,27 @@ export async function mergeExternalCodexServer(options: MergeExternalCodexOption
 
   if (options.force) {
     parsed.mcp_servers = { ...servers, [name]: entryObj };
+    applyTopLevel(parsed, topLevel);
     if (!options.dryRun) await writeFile(filePath, `${stringifyToml(parsed)}\n`, 'utf8');
     return { path: filePath, action: 'forced', notes: `overwrote the ${name} entry` };
   }
 
   if (existing === undefined) {
     parsed.mcp_servers = { ...servers, [name]: entryObj };
+    applyTopLevel(parsed, topLevel);
     if (!options.dryRun) await writeFile(filePath, `${stringifyToml(parsed)}\n`, 'utf8');
     return { path: filePath, action: 'merged', notes: `added the ${name} entry` };
   }
 
   if (entriesEqual(entry, existing)) {
-    return { path: filePath, action: 'unchanged', notes: `${name} entry already matches` };
+    if (topLevelSatisfied(parsed, topLevel)) {
+      return { path: filePath, action: 'unchanged', notes: `${name} entry already matches` };
+    }
+    // Entry matches but a required top-level flag is absent — set it so
+    // the remote MCP server actually works (idempotent on re-run).
+    applyTopLevel(parsed, topLevel);
+    if (!options.dryRun) await writeFile(filePath, `${stringifyToml(parsed)}\n`, 'utf8');
+    return { path: filePath, action: 'merged', notes: `${name} entry matches; set required top-level flag` };
   }
 
   // Drift — preserve the user's custom entry unless --force.

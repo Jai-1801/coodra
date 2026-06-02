@@ -7,10 +7,16 @@ const mcpConfigSchema = z.object({
   mcpServers: z
     .record(
       z.string(),
-      z.object({
-        command: z.string(),
-        args: z.array(z.string()).optional(),
-      }),
+      z
+        .object({
+          // `command` is OPTIONAL: stdio entries carry it; remote entries —
+          // e.g. a wired Atlassian Rovo MCP `{ type, url }` (ADR-016) — do
+          // not. This check validates the `coodra` entry specifically, so a
+          // remote sibling entry must not make the whole file read as invalid.
+          command: z.string().optional(),
+          args: z.array(z.string()).optional(),
+        })
+        .passthrough(),
     )
     .optional(),
 });
@@ -54,6 +60,13 @@ export const mcpConfigValidityCheck: Check = {
       };
     }
     const cmd = entry.command;
+    if (cmd === undefined) {
+      return {
+        status: 'yellow',
+        detail: '.mcp.json `coodra` entry has no `command` field',
+        remediation: 'Re-run `coodra init` to rewrite a valid Coodra MCP entry.',
+      };
+    }
     if (cmd === 'npx') {
       return {
         status: 'yellow',

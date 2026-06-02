@@ -285,12 +285,24 @@ async function reinstallWebForTunnel(args: {
     await manager.stop('web');
     await manager.install(web.unit);
     await manager.start('web');
+    // Honest health gate: waitForHealth returns false (it does NOT throw)
+    // on timeout. The previous code ignored the result and printed "✓"
+    // unconditionally, so a web that failed to come back after the reload
+    // was reported as reloaded. Check it and tell the truth.
+    let healthy = true;
     if (web.descriptor.kind === 'http' && web.port !== null) {
-      await waitForHealth({ url: web.descriptor.healthUrl(web.port), timeoutMs: 30_000 });
+      healthy = await waitForHealth({ url: web.descriptor.healthUrl(web.port), timeoutMs: 30_000 });
     }
-    io.writeStdout(
-      `${pc.green('✓')} Web reloaded; invite URLs + JWT iss + /install/<token>/cli.sh now use the tunnel host.\n`,
-    );
+    if (healthy) {
+      io.writeStdout(
+        `${pc.green('✓')} Web reloaded; invite URLs + JWT iss + /install/<token>/cli.sh now use the tunnel host.\n`,
+      );
+    } else {
+      io.writeStderr(
+        `${pc.yellow('⚠')} Web reload after tunnel: the web did not become healthy on :${web.port} within 30s.\n` +
+          `   The tunnel is up but the web is down — re-run ${pc.cyan('coodra stop && coodra start --tunnel')}.\n`,
+      );
+    }
   } catch (err) {
     io.writeStderr(
       `${pc.yellow('⚠')} Web reload after tunnel failed: ${(err as Error).message}\n` +

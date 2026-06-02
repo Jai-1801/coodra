@@ -27,6 +27,24 @@ export interface ExternalMcpEntry {
   readonly env?: Record<string, string>;
 }
 
+/**
+ * Remote (Streamable HTTP / SSE) MCP server entry. The native per-client
+ * shapes differ: Claude Code `{ type: 'http', url }`, Cursor `{ url }`,
+ * Windsurf `{ serverUrl }`. Every field is optional so a single type
+ * covers all clients; the per-client builder (e.g. `jira-wire.ts`) emits
+ * exactly the keys that client expects. Added for Module 09 Track 9A
+ * (Jira = Direct, ADR-016) — Rovo is a remote MCP, not stdio like Graphify.
+ */
+export interface RemoteMcpEntry {
+  readonly type?: string;
+  readonly url?: string;
+  readonly serverUrl?: string;
+  readonly headers?: Record<string, string>;
+}
+
+/** Any MCP server entry the 9·Core writers persist — stdio or remote. */
+export type McpEntry = ExternalMcpEntry | RemoteMcpEntry;
+
 /** Sorted-key deep canonicalisation so entry equality is order-insensitive. */
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
@@ -41,7 +59,7 @@ function canonical(value: unknown): unknown {
 }
 
 /** True when `b` is byte-for-byte equal to `a` under JSON canonicalisation. */
-function entriesEqual(a: ExternalMcpEntry, b: unknown): boolean {
+function entriesEqual(a: McpEntry, b: unknown): boolean {
   if (typeof b !== 'object' || b === null) return false;
   return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 }
@@ -78,8 +96,8 @@ export interface MergeExternalMcpOptions {
   readonly filePath: string;
   /** The `mcpServers` key to add/update, e.g. `'graphify'`. */
   readonly name: string;
-  /** The entry to write under `mcpServers[name]`. */
-  readonly entry: ExternalMcpEntry;
+  /** The entry to write under `mcpServers[name]` (stdio or remote). */
+  readonly entry: McpEntry;
   /** Overwrite an existing drifted entry. */
   readonly force: boolean;
   /** Report what would change without writing. */

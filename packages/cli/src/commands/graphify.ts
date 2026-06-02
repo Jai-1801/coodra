@@ -1,12 +1,15 @@
-import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { EXIT_OK, EXIT_USER_RECOVERABLE } from '../exit-codes.js';
 import { detectIDE, type IDE, IDE_ORDER, resolveIdeSelection } from '../lib/detect.js';
-import { GRAPHIFY_SEED_FEATURE_SLUG, seedGraphifySeedPacksFeature } from '../lib/init/graphify-feature.js';
+import {
+  type GraphifyPythonResolution,
+  type GraphifyPythonResolver,
+  resolveGraphifyPython,
+} from '../lib/init/graphify-python.js';
 import {
   DEFAULT_GRAPHIFY_GRAPH_PATH,
-  DEFAULT_GRAPHIFY_PYTHON,
   graphifyConfigPath,
   readGraphifyPresence,
   unwireGraphify,
@@ -20,21 +23,27 @@ import { commandTitle, hintLine, terminalWidth } from '../ui/index.js';
  * `coodra graphify {enable,disable,status}` — wires Graphify's own
  * stdio MCP server into the agent config files.
  *
- * Module 09, Track 9B (ADR-010, Option C). Graphify
+ * Module 09, Track 9B (ADR-010 / ADR-015). Graphify
  * (`safishamsi/graphify`, PyPI `graphifyy`) ships its own MCP server —
  * `python -m graphify.serve graphify-out/graph.json` — exposing
- * `query_graph` / `get_node` / `get_neighbors` / `shortest_path` and
- * friends. Coodra does NOT wrap it; this command simply adds a
- * `graphify` entry next to the `coodra` entry in each agent's config.
+ * `query_graph` / `get_node` / `get_neighbors` / `shortest_path`. Coodra
+ * consumes Graphify purely as a **live structural-query tool**: this
+ * command adds a `graphify` entry next to the `coodra` entry in each
+ * agent's config, and the agent calls Graphify's query tools directly.
+ *
+ * Coodra mints NO Feature Packs from the graph. The
+ * `seed_feature_packs_from_graph` + `build_codebase_graph` tools and the
+ * `graphify-seed-packs` recipe were retired 2026-05-23 (ADR-015): a
+ * 1-community-1-pack dump produced hundreds of un-injectable shells (73%
+ * single-file noise on a real repo) and the resolution layer never
+ * surfaced them. Feature Packs stay human/agent-authored at module
+ * granularity; Graphify's value is its query layer.
  *
  * The per-IDE wiring is delegated to `lib/init/graphify-wire.ts`, which
  * sits on the 9·Core substrate: `external-mcp-merge.ts` for the JSON
  * agents (Claude Code / Cursor / Windsurf) and `external-codex-merge.ts`
  * for Codex's TOML config. All four agents get a real, idempotent,
  * never-clobber write.
- *
- * `enable` also seeds the bundled `graphify-seed-packs` Feature — the
- * skill that drives the Graphify→Coodra fusion (`--no-feature` skips it).
  */
 
 const IDE_DISPLAY: Record<IDE, string> = {
@@ -47,14 +56,12 @@ const IDE_DISPLAY: Record<IDE, string> = {
 export interface GraphifyEnableOptions {
   /** `--ide` — claude | cursor | windsurf | codex | all (comma-separated). Autodetect when omitted. */
   readonly ide?: string;
-  /** `--python` — interpreter for `-m graphify.serve` (default: python3). */
+  /** `--python` — interpreter for `-m graphify.serve`. Omit to auto-detect a verified `graphifyy[mcp]` interpreter. */
   readonly python?: string;
   /** `--graph` — path to `graphify-out/graph.json` (default: graphify-out/graph.json). */
   readonly graph?: string;
   /** `--force` — overwrite an existing drifted `graphify` entry. */
   readonly force?: boolean;
-  /** `--no-feature` — skip seeding the `graphify-seed-packs` Feature recipe. */
-  readonly feature?: boolean;
   /** `--dry-run` — report what would change without touching disk. */
   readonly dryRun?: boolean;
   /** `--json` — emit a structured JSON report. */
@@ -63,6 +70,10 @@ export interface GraphifyEnableOptions {
   readonly cwd?: string;
   /** Override `$HOME` for tests. */
   readonly userHome?: string;
+  /** Override `process.env` for tests (used by interpreter auto-detection). */
+  readonly env?: NodeJS.ProcessEnv;
+  /** Injectable interpreter resolver (tests). Defaults to the real probe-and-verify path. */
+  readonly resolvePython?: GraphifyPythonResolver;
 }
 
 export interface GraphifyDisableOptions {
@@ -102,28 +113,11 @@ type IdeActionResult =
   | { readonly kind: 'outcome'; readonly ide: IDE; readonly displayName: string; readonly outcome: WriteOutcome }
   | { readonly kind: 'error'; readonly ide: IDE; readonly displayName: string; readonly message: string };
 
-/** Outcome of the `graphify-seed-packs` Feature seed step. */
-type FeatureResult =
-  | { readonly kind: 'outcome'; readonly outcome: WriteOutcome }
-  | { readonly kind: 'error'; readonly message: string }
-  | { readonly kind: 'skipped' };
-
 function serializeActionResult(r: IdeActionResult): Record<string, unknown> {
   if (r.kind === 'outcome') {
     return { ide: r.ide, path: r.outcome.path, action: r.outcome.action, notes: r.outcome.notes ?? null };
   }
   return { ide: r.ide, action: 'error', error: r.message };
-}
-
-function serializeFeatureResult(r: FeatureResult): Record<string, unknown> | null {
-  if (r.kind === 'skipped') return null;
-  if (r.kind === 'error') return { slug: GRAPHIFY_SEED_FEATURE_SLUG, action: 'error', error: r.message };
-  return {
-    slug: GRAPHIFY_SEED_FEATURE_SLUG,
-    path: r.outcome.path,
-    action: r.outcome.action,
-    notes: r.outcome.notes ?? null,
-  };
 }
 
 /** A drifted entry that `--force` would overwrite — never-clobber held. */
@@ -141,40 +135,79 @@ function renderActionRow(r: IdeActionResult): string {
   return `  ${glyph} ${name} ${pc.gray(`${r.outcome.path} — ${note}`)}`;
 }
 
-function renderFeatureRow(r: FeatureResult): string {
-  const name = 'Feature'.padEnd(13);
-  if (r.kind === 'skipped') {
-    return `  ${pc.gray('·')} ${name} ${pc.gray('graphify-seed-packs skill seed skipped (--no-feature)')}`;
-  }
-  if (r.kind === 'error') {
-    return `  ${pc.red('✗')} ${name} ${pc.red(r.message)}`;
-  }
-  const glyph = isDrift(r.outcome) ? pc.yellow('◌') : pc.green('✓');
-  const note = r.outcome.notes ?? r.outcome.action;
-  return `  ${glyph} ${name} ${pc.gray(`${r.outcome.path} — ${note}`)}`;
-}
+/** Provenance → human phrase, for the "auto-detected" success line. */
+const PYTHON_SOURCE_LABEL: Record<GraphifyPythonResolution['source'], string> = {
+  flag: 'from --python',
+  virtualenv: 'active virtualenv',
+  venv: 'project .venv',
+  'graphify-shebang': 'the `graphify` install on PATH',
+  'uv-tool': 'the uv-tool install',
+  python3: 'python3 on PATH',
+  python: 'python on PATH',
+  fallback: 'fallback',
+};
 
-/** The two prerequisites that must hold for the wiring to actually resolve at runtime. */
-function renderEnableNotice(python: string, graphPath: string): string {
+/**
+ * Verified-interpreter notice. The interpreter imports `graphify.serve`
+ * + `mcp`, so the only remaining prerequisite is a built graph. Concise
+ * — we don't bury a working setup under install instructions.
+ */
+function renderVerifiedNotice(resolution: GraphifyPythonResolution, graphPath: string, graphExists: boolean): string {
   const lines: string[] = [];
-  lines.push(pc.bold('  For the agent to actually reach Graphify, two things must be true:'));
-  lines.push('');
-  lines.push(`  ${pc.cyan('1.')} Install Graphify's MCP module so \`${python} -m graphify.serve\` resolves:`);
-  lines.push(`       ${pc.gray('pip install "graphifyy[mcp]"')}`);
-  lines.push(`     ${pc.gray('Graphify recommends an isolated venv (system Python often lacks the mcp package):')}`);
-  lines.push(`       ${pc.gray('python3 -m venv .venv && .venv/bin/pip install "graphifyy[mcp]"')}`);
   lines.push(
-    `       ${pc.gray('coodra graphify enable --python .venv/bin/python3   (re-run with the venv interpreter)')}`,
+    `  ${pc.green('✓')} Interpreter ${pc.cyan(resolution.python)} verified ` +
+      pc.gray(`— \`import graphify.serve, mcp\` succeeds (${PYTHON_SOURCE_LABEL[resolution.source]}).`),
   );
-  lines.push('');
-  lines.push(`  ${pc.cyan('2.')} Build the graph so \`${graphPath}\` exists:`);
-  lines.push(`       ${pc.gray('uv tool install graphifyy   (or: pipx install graphifyy / pip install graphifyy)')}`);
-  lines.push(`       ${pc.gray('then run  /graphify .  in your AI assistant — writes graphify-out/graph.json')}`);
+  if (graphExists) {
+    lines.push(`  ${pc.green('✓')} Graph found at ${pc.cyan(graphPath)} — reconnect the agent and Graphify is live.`);
+  } else {
+    lines.push(
+      `  ${pc.yellow('◌')} No graph yet at \`${graphPath}\`. Build it — ${pc.gray('`/graphify .` in the assistant, or `graphify update .`')} — then reconnect the agent.`,
+    );
+  }
   lines.push('');
   lines.push(
     hintLine(
-      `  The \`${GRAPHIFY_SEED_FEATURE_SLUG}\` skill was seeded — once the graph exists, ask the agent to ` +
-        '"seed feature packs from the graph".',
+      '  Ask the agent structural questions — "what depends on X?", "where is Y ' +
+        'defined?", "shortest path from A to B" — via Graphify\'s query_graph / get_node / get_neighbors.',
+    ),
+  );
+  lines.push(hintLine('  Run `coodra graphify status` to check the wiring, `coodra graphify disable` to remove it.'));
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Unverified-interpreter notice. `<python> -c "import graphify.serve,
+ * mcp"` did NOT succeed (or we're in a dry run with nothing installed),
+ * so the agent's MCP server would fail to spawn. Spell out the two
+ * prerequisites: (1) install the package, (2) build the graph.
+ */
+function renderUnverifiedNotice(resolution: GraphifyPythonResolution, graphPath: string): string {
+  const python = resolution.python;
+  const lines: string[] = [];
+  lines.push(pc.bold('  Graphify is wired, but no working interpreter was found yet. Two things must be true'));
+  lines.push(pc.bold('  before the agent can reach it:'));
+  if (resolution.detail !== undefined) {
+    lines.push(pc.gray(`  (probe: ${resolution.detail})`));
+  }
+  lines.push('');
+  lines.push(`  ${pc.cyan('1.')} Install Graphify so \`${python} -m graphify.serve\` resolves. Use an isolated venv:`);
+  lines.push(`       ${pc.gray('uv venv .venv')}`);
+  lines.push(`       ${pc.gray('uv pip install --python .venv/bin/python "graphifyy[mcp]"')}`);
+  lines.push(`     then re-run — auto-detection will pick it up, or pin it explicitly:`);
+  lines.push(`       ${pc.gray('coodra graphify enable --python .venv/bin/python --force')}`);
+  lines.push('');
+  lines.push(`  ${pc.cyan('2.')} Build the graph so \`${graphPath}\` exists. The simplest path is the`);
+  lines.push(`     \`/graphify .\` slash command inside your AI assistant (no API key — it uses the`);
+  lines.push(`     IDE's LLM session). Or run the no-LLM CLI: \`.venv/bin/graphify update .\`.`);
+  lines.push('');
+  lines.push(`  ${pc.bold('Sanity-check the install:')}`);
+  lines.push(`       ${pc.gray(`${python} -c "import graphify.serve, mcp; print('ok')"`)}`);
+  lines.push('');
+  lines.push(
+    hintLine(
+      '  Once connected, ask the agent structural questions — "what depends on X?", "where is Y ' +
+        'defined?", "shortest path from A to B" — via Graphify\'s query_graph / get_node / get_neighbors.',
     ),
   );
   lines.push(hintLine('  Run `coodra graphify status` to check the wiring, `coodra graphify disable` to remove it.'));
@@ -191,30 +224,11 @@ function failSelection(io: GraphifyIO, message: string, json: boolean): never {
   return io.exit(EXIT_USER_RECOVERABLE);
 }
 
-/** Resolve the project slug from `<cwd>/.coodra.json`, falling back to the dir basename. */
-async function resolveProjectSlug(cwd: string): Promise<string> {
-  try {
-    const raw = await readFile(join(cwd, '.coodra.json'), 'utf8');
-    const parsed = JSON.parse(raw) as { projectSlug?: unknown };
-    if (typeof parsed.projectSlug === 'string' && parsed.projectSlug.length > 0) {
-      return parsed.projectSlug;
-    }
-  } catch {
-    // No .coodra.json (or unreadable) — fall through to the basename.
-  }
-  const slug = basename(cwd)
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug.length > 0 ? slug : 'project';
-}
-
 /**
  * `coodra graphify enable` — add the `graphify` MCP server entry to each
- * targeted agent config and seed the `graphify-seed-packs` Feature
- * recipe. Idempotent; preserves the `coodra` entry and any user edits
- * (a drifted `graphify` entry / feature.md is left untouched unless
- * `--force`).
+ * targeted agent config so the agent can call Graphify's structural-query
+ * tools. Idempotent; preserves the `coodra` entry and any user edits (a
+ * drifted `graphify` entry is left untouched unless `--force`).
  */
 export async function runGraphifyEnableCommand(
   options: GraphifyEnableOptions = {},
@@ -222,11 +236,23 @@ export async function runGraphifyEnableCommand(
 ): Promise<never> {
   const cwd = options.cwd ?? process.cwd();
   const userHome = options.userHome ?? homedir();
-  const python = options.python ?? DEFAULT_GRAPHIFY_PYTHON;
+  const env = options.env ?? process.env;
   const graphPath = options.graph ?? DEFAULT_GRAPHIFY_GRAPH_PATH;
   const dryRun = options.dryRun === true;
   const json = options.json === true;
-  const seedFeature = options.feature !== false;
+
+  // Resolve the interpreter BEFORE wiring. When `--python` is omitted we
+  // probe + verify candidate interpreters so the written entry points at
+  // a Python that can actually `import graphify.serve, mcp` — instead of
+  // blindly defaulting to bare `python3`, which on most machines fails to
+  // spawn and shows up as a "failed" MCP server in the agent.
+  const resolver = options.resolvePython ?? resolveGraphifyPython;
+  const resolution = await resolver({
+    ...(options.python !== undefined ? { explicit: options.python } : {}),
+    cwd,
+    env,
+  });
+  const python = resolution.python;
 
   const selection = resolveIdeSelection({ flag: options.ide, detected: await detectIDE({ homeDir: userHome }) });
   if (!selection.ok) {
@@ -258,23 +284,12 @@ export async function runGraphifyEnableCommand(
     }
   }
 
-  let feature: FeatureResult = { kind: 'skipped' };
-  if (seedFeature) {
-    try {
-      const outcome = await seedGraphifySeedPacksFeature({
-        cwd,
-        projectSlug: await resolveProjectSlug(cwd),
-        force: options.force === true,
-        dryRun,
-      });
-      feature = { kind: 'outcome', outcome };
-    } catch (err) {
-      feature = { kind: 'error', message: (err as Error).message };
-    }
-  }
-
-  const hadError = results.some((r) => r.kind === 'error') || feature.kind === 'error';
+  const hadError = results.some((r) => r.kind === 'error');
   const exitCode = hadError ? EXIT_USER_RECOVERABLE : EXIT_OK;
+
+  // Does the resolved graph artifact already exist? (Relative paths
+  // resolve against the repo root the agent spawns the server from.)
+  const graphExists = existsSync(isAbsolute(graphPath) ? graphPath : join(cwd, graphPath));
 
   if (json) {
     io.writeStdout(
@@ -284,8 +299,11 @@ export async function runGraphifyEnableCommand(
           command: 'graphify enable',
           dryRun,
           server: 'graphify',
+          python,
+          pythonVerified: resolution.verified,
+          pythonSource: resolution.source,
+          graphExists,
           results: results.map(serializeActionResult),
-          feature: serializeFeatureResult(feature),
         },
         null,
         2,
@@ -300,9 +318,12 @@ export async function runGraphifyEnableCommand(
   for (const r of results) {
     io.writeStdout(`${renderActionRow(r)}\n`);
   }
-  io.writeStdout(`${renderFeatureRow(feature)}\n`);
   io.writeStdout('\n');
-  io.writeStdout(renderEnableNotice(python, graphPath));
+  io.writeStdout(
+    resolution.verified
+      ? renderVerifiedNotice(resolution, graphPath, graphExists)
+      : renderUnverifiedNotice(resolution, graphPath),
+  );
   return io.exit(exitCode);
 }
 
@@ -310,9 +331,7 @@ export async function runGraphifyEnableCommand(
  * `coodra graphify disable` — remove the `graphify` MCP server entry
  * from each targeted agent config. Idempotent — a missing file or
  * missing entry is a no-op. Every other server entry (incl. `coodra`)
- * is left untouched. The seeded `graphify-seed-packs` Feature is NOT
- * removed (it may carry user edits) — drop it with
- * `coodra feature remove graphify-seed-packs --force` if you want.
+ * is left untouched.
  */
 export async function runGraphifyDisableCommand(
   options: GraphifyDisableOptions = {},
@@ -372,12 +391,7 @@ export async function runGraphifyDisableCommand(
     io.writeStdout(`${renderActionRow(r)}\n`);
   }
   io.writeStdout('\n');
-  io.writeStdout(
-    hintLine(
-      `  The \`${GRAPHIFY_SEED_FEATURE_SLUG}\` skill (docs/features/) was left in place — ` +
-        'remove it with `coodra feature remove graphify-seed-packs --force` if you no longer want it.',
-    ),
-  );
+  io.writeStdout(hintLine('  Removed the `graphify` MCP entry. Run `coodra graphify enable` to wire it back.'));
   io.writeStdout('\n');
   return io.exit(exitCode);
 }

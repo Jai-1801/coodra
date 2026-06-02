@@ -87,12 +87,23 @@ export async function GET(_request: Request, { params }: RouteParams): Promise<R
   // contract: a user typing `npm i -g @coodra/cli` without
   // a tag gets the same thing the installer fetches.
   const npmTag = (() => {
+    // 1. Explicit override wins (admins can pin a dist-tag for a validation
+    //    window: COODRA_CLI_NPM_TAG=beta).
     const raw = process.env.COODRA_CLI_NPM_TAG;
-    if (typeof raw !== 'string' || raw.trim().length === 0) return 'latest';
-    // Defense: only allow [a-z0-9.-]+ to avoid shell-injection if the env
-    // is accidentally set to something funky.
-    if (!/^[a-z0-9.-]+$/i.test(raw.trim())) return 'latest';
-    return raw.trim();
+    if (typeof raw === 'string' && raw.trim().length > 0 && /^[a-z0-9.-]+$/i.test(raw.trim())) {
+      return raw.trim();
+    }
+    // 2. Otherwise pin to the EXACT version this admin's web is running
+    //    (injected as COODRA_CLI_VERSION by `coodra start`). This guarantees
+    //    a teammate installs the same build as the admin — critical because
+    //    releases ship under the `beta` dist-tag, so `@latest` is a stale
+    //    build (the original Phase-2 default that shipped teammates old code).
+    const ver = process.env.COODRA_CLI_VERSION;
+    if (typeof ver === 'string' && ver.trim().length > 0 && /^[a-z0-9.\-+]+$/i.test(ver.trim())) {
+      return ver.trim();
+    }
+    // 3. Last resort.
+    return 'latest';
   })();
   // Derive a friendly "name" from the email local-part so the welcome
   // line reads as "Welcome Jane!" instead of "Welcome jane.doe@acme.com!".

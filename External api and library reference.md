@@ -1735,9 +1735,53 @@ Key options on `fly deploy`: [fly](https://fly.io/docs/flyctl/deploy/)
 
 ## Atlassian / Jira Integration
 
-This section covers every third-party API, library, and wire format the JIRA integration (system-architecture §22) depends on. A working prototype already exists in `v1/jira_test/` (Python + FastAPI + Streamlit + Gemini) — its build plan at `v1/jira_test/MCP-Jira-Test-App-Build-Plan.md` is the behavioural spec for the Node/TypeScript production implementation.
+> **SUPERSEDED for the Coodra Jira track by ADR-016 (2026-05-31).** Coodra no longer builds a Jira client. Jira is consumed **Direct** — Coodra wires **Atlassian's Remote MCP (Rovo)** into the agent config (`coodra jira enable`) and the agent calls Atlassian's own Jira tools. The Build-era subsections further below (`jira.js`, OAuth 2.0 3LO, ADF, JQL, Bottleneck, webhooks) are kept as **historical / prototype reference only** — they are NOT the shipping path. The shipping wire details are in the **Atlassian Remote MCP (Rovo)** subsection immediately below.
 
-### Jira Cloud REST API v3
+This section's Build-era material covers the third-party APIs, libraries, and wire formats the *original* Build design (system-architecture §22, pre-ADR-016) depended on. A working prototype exists in `v1/jira_test/` (Python + FastAPI + Streamlit + Gemini); its build plan at `v1/jira_test/MCP-Jira-Test-App-Build-Plan.md` was the behavioural spec for that retired path.
+
+### Atlassian Remote MCP (Rovo) — the shipping path (ADR-016)
+
+Coodra consumes Jira by wiring **Atlassian's official Remote MCP server** ("Rovo") into the agent's config, next to the `coodra` server (the same "wire it, don't rebuild it" pattern as Graphify). Coodra builds **no** Jira REST client, OAuth flow, ADF converter, webhook ingress, or `jira_*` tools. Verified online 2026-05-31; re-verify per `04-when-in-doubt.md` before shipping J1.
+
+**Endpoint & transport.**
+- **Streamable HTTP (current — use this):** `https://mcp.atlassian.com/v1/mcp` — IDE-auth variant `https://mcp.atlassian.com/v1/mcp/authv2` (the one Atlassian's IDE-setup docs use).
+- **HTTP+SSE (deprecated):** `https://mcp.atlassian.com/v1/sse` — **unsupported after 2026-06-30.** Do NOT wire it.
+- Transport type is **Streamable HTTP** (`http` / `streamable-http`). The server emits MCP `list_changed` and gates tool discovery behind OAuth.
+
+**Auth.** OAuth 2.1, browser-based, with **RFC 7591 Dynamic Client Registration** — each MCP client mints its own ephemeral OAuth client at connect time (no Coodra-side `client_id` / `secret`). In Claude Code the flow is completed interactively with `/mcp`. A **headless** path exists (API-token auth for CI / long-running setups) but requires an **Atlassian org-admin to enable API-token authentication** first — not the default, not assumed by Coodra v1.
+
+**Per-IDE wiring shapes** (what `coodra jira enable` writes — confirmed against Atlassian's IDE docs + each client's MCP docs):
+
+| Client | Config file | Entry shape |
+|---|---|---|
+| Claude Code | `.mcp.json` (project) / `~/.claude.json` | `{ "mcpServers": { "atlassian": { "type": "http", "url": "https://mcp.atlassian.com/v1/mcp/authv2" } } }` — `type` accepts `http` or `streamable-http`; supports `headers`, `oauth.scopes`, `alwaysLoad`. CLI form: `claude mcp add --transport http atlassian https://mcp.atlassian.com/v1/mcp/authv2`. |
+| Cursor | `~/.cursor/mcp.json` (or project `.cursor/mcp.json`) | `{ "mcpServers": { "Atlassian": { "url": "https://mcp.atlassian.com/v1/mcp/authv2" } } }` — Cursor infers remote from `url`. |
+| VS Code | `.vscode/mcp.json` | `{ "servers": { "atlassian": { "url": "https://mcp.atlassian.com/v1/mcp/authv2", "type": "http" } }, "inputs": [] }` — VS Code uses `servers`, not `mcpServers`. |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | `{ "mcpServers": { "atlassian": { "serverUrl": "https://mcp.atlassian.com/v1/mcp/authv2" } } }` — Windsurf uses `serverUrl` (accepts `url`) for remote. |
+| Codex | `~/.codex/config.toml` (or project `.codex/config.toml`) | `experimental_use_rmcp_client = true`, then `[mcp_servers.atlassian]` with `url = "https://mcp.atlassian.com/v1/mcp/authv2"` (optional `bearer_token`). Remote streamable-HTTP needs the `rmcp` client flag; without it Codex is stdio-only → use the shim. |
+| **Universal fallback** (any stdio-only client) | — | `mcp-remote` shim: `{ "command": "npx", "args": ["-y", "mcp-remote@latest", "https://mcp.atlassian.com/v1/mcp/authv2"] }`. Works with Coodra's existing stdio writers unchanged, at the cost of a Node proxy process. |
+
+**Decision (2026-05-31): native remote entries only — no `mcp-remote` shim.** All four target clients (Claude Code / Cursor / Windsurf / Codex) support native remote MCP, so `coodra jira enable` writes each client's native shape and never emits the shim. The shim row above is kept only as reference for a hypothetical future stdio-only client; it is not part of the shipping wiring.
+
+**Supported Jira tools (Atlassian-owned — verbatim names from Atlassian's supported-tools page, 2026-05-31).** Grouped as Atlassian groups them:
+
+- **read_jira:** `getJiraIssue`, `getJiraIssueRemoteIssueLinks`, `getJiraIssueTypeMetaWithFields`, `getJiraProjectIssueTypesMetadata`, `getIssueLinkTypes`, `getTransitionsForJiraIssue`, `getVisibleJiraProjects`, `lookupJiraAccountId`
+- **write_jira:** `addCommentToJiraIssue`, `addWorklogToJiraIssue`, `createJiraIssue`, `editJiraIssue`, `transitionJiraIssue`
+- **search_jira:** `searchJiraIssuesUsingJql`
+- **shared platform:** `atlassianUserInfo`, `getAccessibleAtlassianResources`, `searchAtlassian`, `fetchAtlassian`
+
+Rovo also exposes Confluence (`getConfluencePage`, `searchConfluenceUsingCql`, `createConfluencePage`, …), Jira Service Management (`getJsmOpsAlerts`, …), Bitbucket (`bitbucketPullRequest`, …), and Compass tool groups — outside Coodra's Jira scope.
+
+**Gotchas.**
+- **No dedicated issue-link write tool.** `getIssueLinkTypes` reads link types, but the verified surface exposes no "create issue link" tool — the old Build `jira_link_issues` intent has no 1:1 equivalent. Use `editJiraIssue` or defer.
+- Atlassian's own supported-tools page has a copy-paste error: it describes `createJiraIssue` as "Create a link between two Jira issues" — that is wrong; `createJiraIssue` **creates an issue**. Re-confirm tool semantics live at J1.
+- `getJiraIssue` / `searchJiraIssuesUsingJql` can **hang on media-heavy ADF** comment reads (`atlassian/atlassian-mcp-server` issue #145) — set a per-tool `timeout` in the client config (e.g. `.mcp.json` for Claude Code).
+- DCR means there is no app to register and no secret to store — but a client that does NOT support DCR (rare) needs `--client-id` / `--client-secret` pre-config. Claude Code supports DCR natively.
+- The `/v1/sse` → `/v1/mcp` migration is a hard **2026-06-30** cutover; anything wired to `/sse` breaks. Coodra wires `/v1/mcp/authv2` only.
+
+Sources (verified 2026-05-31): Atlassian Rovo MCP support docs (getting-started, setting-up-IDEs, supported-tools); `github.com/atlassian/atlassian-mcp-server`; Claude Code MCP docs (`code.claude.com/docs/en/mcp`); Codex MCP docs; Windsurf MCP docs.
+
+### Jira Cloud REST API v3 (Build-era reference — superseded by ADR-016)
 
 **Base URL (OAuth 2.0):** `https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3` (the `cloudId` is returned by `GET https://api.atlassian.com/oauth/token/accessible-resources`).
 **Base URL (Basic / API token, solo mode):** `https://<your-domain>.atlassian.net/rest/api/3` (e.g. `https://mcptest01.atlassian.net/rest/api/3`, as used in `v1/jira_test/api/jira_client.py`).

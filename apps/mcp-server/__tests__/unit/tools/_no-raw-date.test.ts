@@ -155,7 +155,9 @@ describe('src/tools/** — no raw wall-clock reads (clock discipline)', () => {
     for (const banned of stillBanned) {
       const re = BANNED_CLOCKS.find((b) => b.label === 'new Date()')?.re;
       expect(re).toBeDefined();
-      expect(re!.test(banned), `regex for "new Date()" should still match: ${banned}`).toBe(true);
+      // `re` is guaranteed by the toBeDefined() above; optional chain keeps biome's
+      // noNonNullAssertion happy and still fails the test if the regex went missing.
+      expect(re?.test(banned), `regex for "new Date()" should still match: ${banned}`).toBe(true);
     }
   });
 });

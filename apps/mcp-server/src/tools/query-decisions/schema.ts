@@ -43,6 +43,18 @@ export const queryDecisionsInputSchema = z
     projectSlug: z.string().min(1, 'projectSlug is required').max(256),
     query: z.string().min(1).max(500).optional().describe('Optional LIKE substring against description + rationale.'),
     runId: z.string().min(1).max(512).optional().describe('Optional narrower filter to a single run.'),
+    // Module 09 J2 (2026-05-31, ADR-016 — Jira = Direct). Filter to
+    // decisions whose run is bound to this Jira issue (runs.issue_ref, set
+    // by link_run_to_issue). Case-insensitive — the "what was decided for
+    // PROJ-412?" query.
+    issueRef: z
+      .string()
+      .min(1)
+      .max(64)
+      .optional()
+      .describe(
+        'Optional filter to decisions whose run is bound to this Jira issue key (e.g. PROJ-412), case-insensitive.',
+      ),
     limit: z
       .number()
       .int()

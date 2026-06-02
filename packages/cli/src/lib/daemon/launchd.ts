@@ -1,6 +1,7 @@
 import { mkdir, readdir, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { type Options as ExecaOptions, execa, type ResultPromise } from 'execa';
 import type { DaemonManager, DaemonStatus, DaemonUnit } from './types.js';
 
@@ -73,10 +74,37 @@ export class LaunchdDaemonManager implements DaemonManager {
       reject: false,
       timeout: 5000,
     });
+    // CRITICAL: launchctl `bootout` is ASYNCHRONOUS — it returns before
+    // the daemon has fully torn down. Bootstrapping while the label is
+    // still unloading (and, for an HTTP daemon, while its old PID still
+    // holds the listen port) races: the `bootstrap` silently no-ops or
+    // errors, leaving NO loaded unit while `start()` returns "success".
+    // This bit `coodra start --tunnel` — the post-tunnel web reload
+    // restarts a web that was started moments earlier; the reload claimed
+    // success but the web never came back (no unit in launchctl, nothing
+    // on :3001). Wait for the previous instance to actually be gone before
+    // bootstrapping. On a first start (nothing loaded) the first poll
+    // returns immediately, so this adds no latency to the common path.
+    await this.waitUntilStopped(unitName, 5000);
     await this.run('launchctl', ['bootstrap', userTarget, this.plistPath(unitName)], {
       reject: false,
       timeout: 5000,
     });
+  }
+
+  /**
+   * Poll `status()` until the unit's label is fully torn down (launchctl
+   * print returns non-zero) or `timeoutMs` elapses. Used between bootout
+   * and bootstrap in {@link start} so a restart doesn't race the previous
+   * instance's teardown.
+   */
+  private async waitUntilStopped(unitName: string, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const st = await this.status(unitName);
+      if (st.state === 'stopped') return;
+      await delay(120);
+    }
   }
 
   async stop(unitName: string): Promise<void> {

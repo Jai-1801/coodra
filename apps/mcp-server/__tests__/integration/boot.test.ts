@@ -75,7 +75,15 @@ describe('boot auto-migrate (verification finding §8.1)', () => {
     //     get_feature + get_feature_file + query_run_diff → 16
     //   Module 09 G1 (2026-05-21): query_codebase_graph removed → 15
     //   Module 09 G2 (2026-05-21): seed_feature_packs_from_graph added → 16
-    expect(tools.length).toBe(16);
+    //   Module 09 ADR-015 (2026-05-23): seed_feature_packs_from_graph +
+    //     build_codebase_graph retired (1-community-1-pack was the wrong
+    //     abstraction; Graphify is query-only via its own MCP) → 15
+    //   Module 09 J2 (2026-05-31): link_run_to_issue added (Jira = Direct,
+    //     ADR-016 — binds runs.issue_ref; the Jira tools themselves are
+    //     Atlassian's Rovo MCP, not Coodra's) → 16
+    //   Module 09 J3 (2026-05-31): prepare_jira_comment added (the on-request
+    //     write-back helper — assembles the summary; the agent posts via Rovo) → 17
+    expect(tools.length).toBe(17);
   });
 
   it('get_run_id succeeds against the freshly-migrated DB (proves projects table exists)', async () => {

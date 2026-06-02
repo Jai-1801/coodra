@@ -256,6 +256,28 @@ export async function runTeamInitCommand(
   // verified Clerk JWT in the same wizard run. `noLogin` is a test
   // escape hatch only.
   if (options.noLogin !== true) {
+    // Bring the web up FRESH in team mode before the browser handoff.
+    // team init just wrote COODRA_MODE=team + Clerk keys to ~/.coodra/.env;
+    // the chained `coodra login` opens the LOCAL web, which must be running
+    // with that env. Without this, the browser hits either nothing (web
+    // never started) or a STALE solo web whose Edge middleware never runs
+    // clerkMiddleware() — so /auth/cli-login 500s with the Clerk
+    // "can't detect clerkMiddleware()" error. (Closes the team-init →
+    // login handoff gap.)
+    io.writeStdout(pc.gray('  Starting the web app in team mode for sign-in …\n'));
+    const { restartWebFresh } = await import('../lib/web-service.js');
+    const { resolveCoodraHome } = await import('../lib/coodra-home.js');
+    const webHome = resolveCoodraHome({ env: process.env });
+    const web = await restartWebFresh({ coodraHome: webHome });
+    if (web.ok && web.healthy) {
+      io.writeStdout(`${pc.green('✓')} Web ready on :${web.port ?? 3001}\n`);
+    } else {
+      io.writeStderr(
+        `${pc.yellow('⚠')} Web didn't come up cleanly (${web.error ?? 'health-check timed out'}).\n` +
+          `   If sign-in shows an error, run ${pc.cyan('coodra stop && coodra start')}, then ${pc.cyan('coodra login')}.\n`,
+      );
+    }
+
     io.writeStdout(pc.gray('  Opening your browser to capture a verified Clerk session …\n'));
     const { runLoginCommand } = await import('./login.js');
     const fakeIO = {
